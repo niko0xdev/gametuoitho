@@ -335,6 +335,11 @@ Two dev modes, both work:
 | 8 | Cloudflare 100s idle timeout on SSE | 30s heartbeat ping in SSE helper to keep stream alive. |
 | 9 | Frontend `import.meta.env.VITE_API_BASE` baked at build time | Document: rebuild required to change API URL. Acceptable. |
 | 10 | `crypto.createHash('sha256')` works on Workers runtime | Yes — Web Crypto API exposed as `crypto.subtle.digest` (async). Use an `async sha256Hex(input)` helper; all `hashPassword` callers in Worker routes become `await`-prefixed. Legacy `server/db.ts` keeps the sync Node version. |
+| 11 | **Per-isolate SSE state** — Workers route requests across many isolates; `Map<userId, controller>` lives in one isolate, but a peer's REST `join` may land on another. Match push never reaches the opponent. | **Critical.** For free-tier acceptable: keep, but add client-side reconnect with exponential backoff AND a polling fallback (`GET /api/matchmaking/poll?since=ts` returns `{matched}` if a match was created against this user recently). For production-grade: migrate matchmaking queue + match broadcast to **Durable Objects**. |
+| 12 | **No auth middleware** — write routes (`matchmaking/join`, `match/move`, `tournament/create`, etc.) read `userId` from request body, allowing impersonation. | **Critical.** Add `requireLoggedIn` middleware: reads `x-user-id` header, validates `users` row exists, attaches to `c.var.userId`. Replace every `userId` from body with `c.var.userId`. Admin-only routes add a `requireAdmin` check (`role === 'admin'`). |
+| 13 | **No body-size cap on `POST /api/ai/parse-roster`** — malicious client can drive up OpenAI bill with multi-MB `summary` text. | Cap `summary.length` at 32 KB at route entry. |
+| 14 | **No OTP rate limit** — `forgot-password` callable indefinitely. | Rely on Cloudflare WAF default rules for free tier; document. (Custom D1 counter is a follow-up.) |
+| 15 | **`tournament.code` join flow uses id instead** — `/api/tournaments/join` matches `t.id` not `t.code`. Breaks UX from legacy where users join by short code. | Use a `code` column on `tournaments` table (add to migration). Route looks up by code, returns full row. |
 
 ## 10. Out of Scope (explicit)
 
