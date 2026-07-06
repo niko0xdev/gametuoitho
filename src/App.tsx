@@ -505,7 +505,7 @@ export default function App() {
               <Leaderboards />
             )}
             {activeView === 'bilac' && (
-              <BiLacArena />
+              <BiLacArena userProfile={profile} onOpenAuthModal={() => setIsAuthModalOpen(true)} />
             )}
           </main>
         </>

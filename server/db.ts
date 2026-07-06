@@ -13,6 +13,7 @@ import {
   bilacPlayersTable,
   bilacMatchesTable,
   bilacTournamentsTable,
+  bilacTournamentMembersTable,
   myLeaguesTable,
   leaguePermissionsTable
 } from './schema.ts';
@@ -152,6 +153,21 @@ class Database {
         description TEXT,
         created_at INTEGER NOT NULL
       );
+
+      ALTER TABLE bilac_tournaments ADD COLUMN owner_user_id TEXT;
+
+      CREATE TABLE IF NOT EXISTS bilac_tournament_members (
+        id TEXT PRIMARY KEY,
+        tournament_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        joined_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_bilac_members_tournament ON bilac_tournament_members(tournament_id);
+      CREATE INDEX IF NOT EXISTS idx_bilac_members_user ON bilac_tournament_members(user_id);
 
       CREATE TABLE IF NOT EXISTS my_leagues (
         id TEXT PRIMARY KEY,
@@ -977,6 +993,50 @@ class Database {
 
   deleteBiLacTournament(id: string): void {
     drizzleDb.delete(bilacTournamentsTable).where(eq(bilacTournamentsTable.id, id)).run();
+  }
+
+  // BiLac Tournament Members
+  saveBiLacTournamentMember(member: { id: string; tournamentId: string; userId: string; username: string; displayName: string; role: 'owner' | 'member'; joinedAt: number; }): void {
+    drizzleDb.insert(bilacTournamentMembersTable)
+      .values({
+        id: member.id,
+        tournamentId: member.tournamentId,
+        userId: member.userId,
+        username: member.username,
+        displayName: member.displayName,
+        role: member.role,
+        joinedAt: member.joinedAt,
+      })
+      .onConflictDoUpdate({
+        target: bilacTournamentMembersTable.id,
+        set: {
+          tournamentId: member.tournamentId,
+          userId: member.userId,
+          username: member.username,
+          displayName: member.displayName,
+          role: member.role,
+          joinedAt: member.joinedAt,
+        },
+      })
+      .run();
+  }
+
+  getBiLacTournamentMembers(tournamentId: string): Array<{ id: string; tournamentId: string; userId: string; username: string; displayName: string; role: 'owner'|'member'; joinedAt: number }> {
+    const rows = drizzleDb.select().from(bilacTournamentMembersTable).where(eq(bilacTournamentMembersTable.tournamentId, tournamentId)).all();
+    return rows.map(r => ({
+      id: r.id,
+      tournamentId: r.tournamentId,
+      userId: r.userId,
+      username: r.username,
+      displayName: r.displayName,
+      role: r.role as 'owner' | 'member',
+      joinedAt: r.joinedAt,
+    }));
+  }
+
+  isBiLacTournamentMember(tournamentId: string, userId: string): boolean {
+    const members = this.getBiLacTournamentMembers(tournamentId);
+    return members.some(m => m.userId === userId);
   }
 
   // MyLeagues
