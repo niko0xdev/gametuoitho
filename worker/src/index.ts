@@ -12,6 +12,7 @@ import { replaysRoute } from './routes/replays';
 import { bilacRoute } from './routes/bilac';
 import { leaguesRoute } from './routes/leagues';
 import { aiRoute } from './routes/ai';
+import { matchmakingRoute } from './routes/matchmaking';
 
 const app = new Hono<{ Bindings: Bindings }>();
 app.use('*', cors());
@@ -26,6 +27,7 @@ app.route('/api/replay', replaysRoute);
 app.route('/api/bilac', bilacRoute);
 app.route('/api/ai', aiRoute);
 app.route('/api', leaguesRoute);
+app.route('/api', matchmakingRoute);
 app.get('/', (c) => c.text('gametuoitho API'));
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 app.onError((err, c) => {
