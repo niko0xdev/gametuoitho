@@ -1,0 +1,7 @@
+# bunfig.toml — repo-wide Bun defaults
+[install]
+saveExactLockfile = false
+auto = "auto"
+
+[test]
+preload = []
