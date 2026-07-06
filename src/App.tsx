@@ -21,6 +21,19 @@ export default function App() {
   const [activeView, setActiveView] = useState<'catalog' | 'tournaments' | 'daily' | 'replays' | 'leaderboards' | 'bilac' | 'myleague'>('catalog');
 
   const handleLoginSuccess = (userProfile: UserProfile) => {
+    const previousUserId = localStorage.getItem('auth_userId');
+    if (previousUserId && previousUserId !== userProfile.id) {
+      // Switching to a different user — clear cached tournament/code from the previous account.
+      localStorage.removeItem('bilac_my_tournaments');
+      localStorage.removeItem('bilac_tournament_code');
+      localStorage.removeItem('bilac_tournament');
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('bilac_tournament_code_')) {
+          localStorage.removeItem(k);
+        }
+      }
+    }
     localStorage.setItem('auth_userId', userProfile.id);
     setUserId(userProfile.id);
     setProfile(userProfile);
@@ -29,8 +42,21 @@ export default function App() {
 
   const handleSignOut = () => {
     localStorage.removeItem('auth_userId');
+    // Xoá các cache thuộc về user cũ để user mới (nếu login lại) hoặc tài khoản khác
+    // không thấy danh sách giải đấu / tournament code bị rò rỉ.
+    localStorage.removeItem('bilac_my_tournaments');
+    localStorage.removeItem('bilac_tournament_code');
+    localStorage.removeItem('bilac_tournament');
+    // Xoá per-tour code cache (key pattern `bilac_tournament_code_${id}`).
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('bilac_tournament_code_')) {
+        localStorage.removeItem(k);
+      }
+    }
     setUserId(null);
     setProfile(null);
+    setActiveView('catalog'); // quay về trang chủ
     playRetroBeep(440, 'triangle', 0.25);
   };
 
