@@ -1,6 +1,9 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 // ponytail: bun 1.3.x does not yet support the better-sqlite3 native module
 // (https://github.com/oven-sh/bun/issues/4290). The route handlers use
@@ -10,14 +13,30 @@ import crypto from 'node:crypto';
 // readable. upgrade path: switch imports to `bun:test` and the body runs
 // unchanged once Bun issue #4290 lands.
 
+// ponytail: the route handlers use the memoized openDb() singleton. Tests
+// must share the same singleton, so we point DB_FILE at a per-run temp
+// file BEFORE importing the db module.
+
+const tmpFile = path.join(os.tmpdir(), `gtt-auth-test-${process.pid}-${Date.now()}.db`);
+process.env.DB_FILE = tmpFile;
+teardownTmp();
+
+const { openDb, initDb } = await import('@/server/db');
+const db = openDb(); // returns the singleton
+initDb(db);
+
+function teardownTmp() {
+  process.on('exit', () => {
+    for (const ext of ['', '-wal', '-shm']) {
+      try { fs.unlinkSync(tmpFile + ext); } catch {}
+    }
+  });
+}
+
 const expect = (actual: unknown) => ({
   toBe(expected: unknown) { assert.equal(actual, expected); },
   toMatch(re: RegExp) { assert.match(String(actual), re); },
 });
-
-const { openDb, initDb } = await import('@/server/db');
-const db = openDb(':memory:');
-initDb(db);
 
 beforeEach(() => {
   db.exec('DELETE FROM users');
