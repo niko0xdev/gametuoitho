@@ -34,3 +34,18 @@ TC032,Logout,Idempotent,Logout twice,Logged in,1) Logout 2) Logout again (via dr
 TC033,Auth,Profile edit,Edit displayName via dropdown,Logged in,1) Open dropdown 2) Click "Sửa" 3) Change name 4) Save,New name appears in navbar and dropdown,P2
 TC034,Auth,Avatar cycle,Cycle avatar randomly,Logged in,1) Open dropdown 2) Click refresh icon on avatar,Avatar changes; persisted on reload,P2
 TC035,BiLac,UI,Default tournaments visible at first run,Fresh user,1) Register/login; open BiLắc,Seed tournaments visible because user is auto-member of legacy "Giải Đấu Văn Phòng" or empty list,P2
+TC036,BiLac,Invite,/access WITHOUT membership (code correct),Logged in user NOT in tournament,1) Direct API POST /access with correct code,403 "Bạn chưa được mời vào giải đấu này",P1
+TC037,BiLac,Invite,Owner invites member by username,Owner logged in + open tournament,1) POST /api/bilac/tournaments/members {username} with valid target,200 + member record added; role="member",P1
+TC038,BiLac,Invite,Owner invites with non-existent username,Owner logged in,1) POST /members {username:"nobody_xyz"} ,404 "Không tìm thấy user",P1
+TC039,BiLac,Invite,Owner invites existing member (duplicate),Member already in,1) POST /members {username:existing},400 "đã là thành viên",P1
+TC040,BiLac,Invite,Non-owner tries to invite,Logged in non-owner,1) POST /members with member token,403 "Chỉ chủ giải mới có quyền",P1
+TC041,BiLac,Invite,List members of tour,Any member,1) GET /members,200 with [{userId,username,displayName,role,joinedAt}],P1
+TC042,BiLac,Invite,Newly invited lists tournaments,User just invited,1) GET /api/bilac/tournaments,Tour visible in list,P1
+TC043,BiLac,Invite,Newly invited reads players,User just invited,1) GET /api/bilac/players with tour id+code,200 with players array,P1
+TC044,BiLac,Invite,Owner removes member,Owner logged in,1) DELETE /members/:userId,200; member disappears from list,P1
+TC045,BiLac,Invite,Removed user no longer sees tour,User just removed,1) GET /api/bilac/tournaments,Tour absent; /players returns 403,P1
+TC046,BiLac,Invite,Owner cannot remove self,Owner logged in,1) DELETE /members/{own userId} ,400 "Không thể tự xoá chủ giải",P1
+TC047,BiLac,Invite,Non-owner cannot remove,Logged in non-owner,1) DELETE /members/:userId with non-owner token,403,P1
+TC048,BiLac,UI,Members tab visible after entering tournament,Logged-in member of a tour,1) Click BiLắc tab 2) Enter a tournament 3) Look for "Thành viên" tab,Tab button visible with UserPlus icon,P1
+TC049,BiLac,UI,Owner sees invite form on Members tab,Owner viewing their tournament's Members tab,1) Click "Thành viên" tab as owner,Form: input + "Mời vào giải" button visible,P1
+TC050,BiLac,UI,Each member row shows role badge + remove button (owner only),Owner viewing Members tab,1) Look at member rows,"Chủ giải"/"Thành viên" badge; non-owner rows have "Xoá" button,P1
