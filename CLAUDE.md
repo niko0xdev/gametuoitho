@@ -87,3 +87,20 @@ Don't commit:
 - **Vite HMR vs server HMR**: Frontend code (src/**) auto-reloads. Backend changes (server.ts, server/**) require a full server restart because `tsx` doesn't watch.
 - **dotenv log noise**: `dotenv@17` prints banner lines on each call. This is informational, not an error.
 - **OpenAI tool_choice fallback**: Some local providers (older Ollama) ignore `tool_choice`. The handler already parses both `msg.tool_calls` and `msg.content` — keep both code paths.
+
+## Cloudflare deploy
+
+- Frontend: Cloudflare Pages, custom domain `gametuoitho.space`. Git auto-deploy.
+- Backend: Cloudflare Worker, custom domain `api.gametuoitho.space`. Code in `worker/`.
+- Database: Cloudflare D1 (SQLite-compatible), bound to Worker. `worker/migrations/` holds schema.
+- Realtime: SSE (Workers native streaming), not WebSocket. See `worker/src/routes/matchmaking.ts` + `match.ts`.
+- AI: OpenAI-compatible via `OPENAI_API_KEY` / `OPENAI_MODEL` Worker secrets.
+- Local D1 lives at `.wrangler/state/v3/d1/` (gitignored).
+- Local dev modes:
+  - `npm run dev` — legacy Express + better-sqlite3 (offline).
+  - `npm run dev:worker` — Vite frontend + wrangler dev with local D1 (production-like).
+- Migrate data manually if moving from SQLite to D1 — `migrateFromJson` is not ported.
+
+## Per-isolate caveat (CRITICAL)
+
+Workers routes requests across many isolates. The matchmaking queue + SSE controller map live in a single isolate's memory. Two peers landing on different isolates will not see each other's state — matchmaking join may match locally but the opponent's SSE stream (on a different isolate) will never receive the `matched` event. Free-tier acceptable with **client reconnect + polling fallback** (see `src/hooks/useMatchmaking.ts`). Production-grade fix: migrate matchmaking/match broadcast to **Durable Objects**.
