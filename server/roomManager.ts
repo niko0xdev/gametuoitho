@@ -31,7 +31,10 @@ class RoomManager {
 
   constructor() {
     // Start matchmaking loop
-    setInterval(() => this.tickMatchmaker(), 2000);
+    const timer = setInterval(() => this.tickMatchmaker(), 2000);
+    if (process.env.NODE_ENV === 'test') {
+      timer.unref?.();
+    }
   }
 
   // Socket management
