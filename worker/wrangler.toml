@@ -1,0 +1,13 @@
+name = "gametuoitho-api"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gametuoitho-db"
+database_id = "REPLACE_AFTER_wrangler_d1_create"
+migrations_dir = "migrations"
+
+[vars]
+CORS_ORIGIN = "http://localhost:5173"
+APP_URL = "http://localhost:5173"
