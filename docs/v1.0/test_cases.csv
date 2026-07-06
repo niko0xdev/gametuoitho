@@ -1,0 +1,36 @@
+id,category,feature,scenario,precondition,steps,expected,priority
+TC001,Auth,Registration,Register new user with valid fields,Home page loaded,1) Click "Đăng nhập / Đăng ký" 2) Switch to register tab 3) Fill username/email/password/displayName 4) Submit,Modal closes automatically,Navbar shows avatar + displayName (no login button),P1
+TC002,Auth,Registration,Register auto-login without manual login,TC001 succeeded,Observe navbar after register submit,Avatar visible immediately (no separate login step),P1
+TC003,Auth,Registration,Register with existing username,User "son_owner" exists,1) Open register 2) username="son_owner" 3) Submit,400 error "Tên tài khoản này đã tồn tại!" shown in modal,P1
+TC004,Auth,Registration,Register with missing required field,Modal open in register mode,1) Leave one field empty 2) Submit,Inline message "Vui lòng điền đầy đủ tất cả các trường!", no API call,P2
+TC005,Auth,Login,Login with valid credentials,User "navbar_test" exists with pass1234,1) Open login 2) Fill creds 3) Submit,Modal closes; navbar shows avatar + name,P1
+TC006,Auth,Login,Login with wrong password,User exists,1) Fill username + wrong password 2) Submit,VN error "Mật khẩu không chính xác!", modal stays open,P1
+TC007,Auth,Login,Login with non-existent user,No such user,1) Fill bogus username + any password 2) Submit,VN error "Tài khoản không tồn tại!",P1
+TC008,Auth,Logout,Logout from desktop dropdown,Logged in,1) Click avatar 2) Click "Đăng xuất tài khoản",Modal closes; navbar shows "Đăng nhập / Đăng ký" button; avatar gone,P1
+TC009,Auth,Logout,Logout from mobile sheet,Logged in on mobile viewport,1) Tap avatar 2) Scroll sheet to bottom 3) Tap "Đăng xuất",Sheet closes; navbar shows login button,P2
+TC010,Auth,Navbar,Navbar shows user info when logged in,Logged in user,1) Look at navbar (desktop),"Avatar+displayName" visible; "@username" under name; chevron for dropdown; Elo Max under @username,P1
+TC011,Auth,Navbar,Dropdown shows Elo grid + Honor + Badges,Logged in,1) Click avatar 2) Inspect dropdown,Section 1 profile card; Section 2 8-game Elo grid; Section 3 sound + reset Elo; Section 4 logout button,P1
+TC012,Auth,Navbar,Reset Elo confirmation flow,Logged in,1) Open dropdown 2) Click "Khôi phục Elo ban đầu" 3) Confirm,Confirm button reveals "Xác nhận xóa" + "Huỷ bỏ"; cancel returns,P2
+TC013,BiLac,ACL,List tournaments for unauthenticated user,No session,1) Open BiLắc tab via API GET,401 "Vui lòng đăng nhập!",P1
+TC014,BiLac,ACL,Owner creates tournament,Logged in as owner,1) Open BiLắc 2) Create "Giải Sơn Riêng" with code "son-secret" 3) Submit,Tournament appears in list; owner listed as member; verify via API GET,P1
+TC015,BiLac,ACL,Guest lists tournaments BEFORE joining,Log in as Thuỷ (separate user),1) Open BiLắc tab,Empty list - Sơn's tournament hidden,P1
+TC016,BiLac,ACL,Guest reads players without joining code,Thuỷ logged in,1) Direct API call GET /api/bilac/players with Sơn's tour-id+code,403 "Bạn chưa là thành viên",P1
+TC017,BiLac,ACL,Guest joins via access code,Thuỷ logged in,1) Enter tournament id+code "son-secret" via /access,Succeeds; Thuỷ auto-added as member; returns tournament metadata,P1
+TC018,BiLac,ACL,Guest lists tournaments AFTER joining,Thuỷ just joined,1) Open BiLắc tab,Giải Sơn Riêng now visible,P1
+TC019,BiLac,ACL,Guest reads players AFTER joining,Thuỷ joined,1) API GET /api/bilac/players with tour id+code,200 OK with [] (empty),P1
+TC020,BiLac,ACL,Anonymous reads players,No x-user-id header,1) Direct API GET /players with tour id+code,401 "Vui lòng đăng nhập!",P1
+TC021,BiLac,ACL,Wrong access code,Any user,1) Direct API with tour id + wrong code,403 "Mã code truy cập không chính xác!",P1
+TC022,BiLac,ACL,Owner adds a player,Owner logged in,1) In Sơn's tournament add player "Minh",Player appears in roster; HTTP 200,P1
+TC023,BiLac,ACL,Guest (member) edits player,Thuỷ joined as member,1) Edit a player name,Allowed (200); Member role can edit,P2
+TC024,BiLac,ACL,Non-member cannot edit,Third user "Lan" not joined,1) Try API POST/PUT/DELETE player,403; only members can write,P1
+TC025,BiLac,ACL,Create match,Both owner + member,1) Owner creates week 1 match,Tournament week labeled; status PLAYING,P2
+TC026,BiLac,ACL,Update match score,Member of tournament,1) Update score,API 200; visible to members,P2
+TC027,BiLac,UI,Tournament card visible after join,Thuỷ logged in + joined,1) Open BiLắc list,"Giải Sơn Riêng" card displays name + description,P1
+TC028,BiLac,UI,AccessCode modal prompts for code,Thuỷ wants to join a new tournament,1) Click "Tham gia bằng mã" or equivalent,Modal asks for tournamentId + code,P2
+TC029,AI,Player Roster,Bulk-add players via AI,Owner logged in + tournament selected,1) Paste 20-name roster 2) Click AI button,All 20 inserted; each gets avatar URL,P2
+TC030,AI,Match Events,Suggest events from summary,Owner logged in,1) Paste match summary 2) AI prefill,Filled in events form; NOT auto-saved (user clicks Save),P2
+TC031,Nav,View,Navigate between views,Any state,1) Click each tab in navbar (catalog/tournaments/myleague/bilac/daily/replays/leaderboards),View switches; active tab highlights orange,P1
+TC032,Logout,Idempotent,Logout twice,Logged in,1) Logout 2) Logout again (via dropdown reuse),No error; navbar stays on login button,P2
+TC033,Auth,Profile edit,Edit displayName via dropdown,Logged in,1) Open dropdown 2) Click "Sửa" 3) Change name 4) Save,New name appears in navbar and dropdown,P2
+TC034,Auth,Avatar cycle,Cycle avatar randomly,Logged in,1) Open dropdown 2) Click refresh icon on avatar,Avatar changes; persisted on reload,P2
+TC035,BiLac,UI,Default tournaments visible at first run,Fresh user,1) Register/login; open BiLắc,Seed tournaments visible because user is auto-member of legacy "Giải Đấu Văn Phòng" or empty list,P2

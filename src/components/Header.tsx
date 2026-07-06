@@ -121,7 +121,7 @@ export default function Header({
 
         {/* Desktop: Profile Card / Badges / Auth */}
         <div className="hidden md:flex items-center gap-2.5 relative">
-          {profile && profile.username ? (
+          {profile ? (
             /* Logged In Desktop: Clickable User Avatar + Name Trigger */
             <div className="relative">
               <button
@@ -219,7 +219,7 @@ export default function Header({
                                 </button>
                               </div>
                             )}
-                            <div className="text-[11px] text-stone-400 font-mono mt-0.5">@{profile.username}</div>
+                            <div className="text-[11px] text-stone-400 font-mono mt-0.5">@{profile.username ?? profile.id}</div>
                             
                             <div className="flex items-center gap-3.5 mt-1.5">
                               <span className="text-[10px] text-stone-300 flex items-center gap-0.5 font-mono bg-stone-950/40 px-2 py-0.5 rounded border border-stone-800">
@@ -359,7 +359,7 @@ export default function Header({
 
         {/* Mobile: Hamburger + Avatar button */}
         <div className="flex md:hidden items-center gap-2.5">
-          {profile && profile.username ? (
+          {profile ? (
             /* Logged in on mobile: Clickable Avatar to toggle bottom sheet settings */
             <button
               onClick={() => {
@@ -477,7 +477,7 @@ export default function Header({
                     <button
                       onClick={() => {
                         setIsMenuOpen(false);
-                        if (profile && profile.username) {
+                        if (profile) {
                           onSignOut?.();
                         } else {
                           onOpenAuthModal?.();
@@ -485,7 +485,7 @@ export default function Header({
                       }}
                       className="text-xs font-extrabold text-orange-400 hover:text-orange-300 underline cursor-pointer"
                     >
-                      {profile && profile.username ? 'Đăng xuất' : '🔑 Đăng nhập'}
+                      {profile ? 'Đăng xuất' : '🔑 Đăng nhập'}
                     </button>
                   </div>
                   
@@ -643,7 +643,7 @@ export default function Header({
                           </button>
                         </div>
                       )}
-                      <div className="text-xs text-stone-400 font-mono mt-0.5">@{profile.username}</div>
+                      <div className="text-xs text-stone-400 font-mono mt-0.5">@{profile.username ?? profile.id}</div>
 
                       <div className="flex flex-wrap items-center gap-2 mt-2">
                         <span className="text-[10px] text-stone-300 flex items-center gap-0.5 font-mono bg-stone-950/40 px-2 py-0.5 rounded border border-stone-800">
