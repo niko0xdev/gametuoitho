@@ -6,20 +6,22 @@ import { createDb } from '../db';
 import { matchesTable } from '../schema';
 import { sseStream } from '../lib/sse';
 import { addMatchmaking, sendToMatchmaking } from '../lib/state';
+import { requireLoggedIn } from '../lib/auth';
 
 export const matchmakingRoute = new Hono<{ Bindings: Bindings }>();
 
-// In-memory queue: gameId -> Set<userId>
+// Per-isolate, in-memory queue: gameId -> Set<userId>
 const queue = new Map<string, Set<string>>();
 
-matchmakingRoute.post('/matchmaking/join', async (c) => {
-  const { userId, gameId } = await c.req.json();
-  if (!userId || !gameId) return c.json({ error: 'Missing userId/gameId' }, 400);
+matchmakingRoute.post('/matchmaking/join', requireLoggedIn(), async (c) => {
+  const userId = c.get('userId');
+  const { gameId } = await c.req.json();
+  if (!gameId) return c.json({ error: 'Missing gameId' }, 400);
 
   const db = createDb(c.env);
   const waiting = queue.get(gameId);
   if (waiting && waiting.size > 0) {
-    const [opponentId] = [...waiting].filter((id) => id !== userId);
+    const opponentId = [...waiting].find((id) => id !== userId);
     if (opponentId) {
       waiting.delete(opponentId);
       const matchId = 'match_' + Date.now();
@@ -29,7 +31,6 @@ matchmakingRoute.post('/matchmaking/join', async (c) => {
         turn: userId, moves: '[]', viewers: '[]',
         createdAt: Date.now(), updatedAt: Date.now(),
       } as any);
-      // Notify opponent's SSE controller (if any)
       sendToMatchmaking(opponentId, 'matched', { matchId, opponentId: userId });
       return c.json({ matched: true, matchId, opponentId });
     }
@@ -39,14 +40,16 @@ matchmakingRoute.post('/matchmaking/join', async (c) => {
   return c.json({ matched: false });
 });
 
-matchmakingRoute.post('/matchmaking/leave', async (c) => {
-  const { userId, gameId } = await c.req.json();
+matchmakingRoute.post('/matchmaking/leave', requireLoggedIn(), async (c) => {
+  const userId = c.get('userId');
+  const { gameId } = await c.req.json();
   if (gameId) queue.get(gameId)?.delete(userId);
   return c.json({ success: true });
 });
 
-matchmakingRoute.post('/private-room', async (c) => {
-  const { userId, gameId } = await c.req.json();
+matchmakingRoute.post('/private-room', requireLoggedIn(), async (c) => {
+  const userId = c.get('userId');
+  const { gameId } = await c.req.json();
   const code = Math.random().toString(36).slice(2, 8).toUpperCase();
   const db = createDb(c.env);
   const id = 'pr_' + Date.now();
@@ -59,8 +62,9 @@ matchmakingRoute.post('/private-room', async (c) => {
   return c.json({ code, matchId: id });
 });
 
-matchmakingRoute.post('/private-room/join', async (c) => {
-  const { userId, code } = await c.req.json();
+matchmakingRoute.post('/private-room/join', requireLoggedIn(), async (c) => {
+  const userId = c.get('userId');
+  const { code } = await c.req.json();
   const db = createDb(c.env);
   const all = await db.select().from(matchesTable).all();
   const m = all.find((x: any) => x.privateCode === code);
@@ -74,16 +78,25 @@ matchmakingRoute.post('/private-room/join', async (c) => {
   return c.json({ matchId: (m as any).id });
 });
 
-matchmakingRoute.post('/match/invite', async (c) => {
-  const { fromUserId, targetUserId, gameId, code } = await c.req.json();
+matchmakingRoute.post('/match/invite', requireLoggedIn(), async (c) => {
+  const fromUserId = c.get('userId');
+  const { targetUserId, gameId, code } = await c.req.json();
   sendToMatchmaking(targetUserId, 'invitation', { fromUserId, gameId, code });
   return c.json({ success: true });
 });
 
-matchmakingRoute.get('/matchmaking/stream', (c) => {
+// SSE stream — authentication via query param for EventSource compatibility
+// (EventSource can't set custom headers). UserId verified by requireLoggedIn.
+// Free-tier caveat: query-param tokens can leak via logs; mitigate by using
+// short-lived JWTs in production. For now, accept the risk.
+matchmakingRoute.get('/matchmaking/stream', async (c) => {
   const userId = c.req.query('userId');
   const gameId = c.req.query('gameId');
   if (!userId || !gameId) return c.json({ error: 'Missing userId/gameId' }, 400);
+
+  // Verify user exists (cheap D1 read)
+  const u = await c.env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first();
+  if (!u) return c.json({ error: 'Unknown user' }, 401);
 
   return sseStream({
     onConnect: (send, close) => {

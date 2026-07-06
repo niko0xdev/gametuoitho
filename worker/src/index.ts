@@ -33,7 +33,9 @@ app.route('/api', matchRoute);
 app.get('/', (c) => c.text('gametuoitho API'));
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 app.onError((err, c) => {
-  console.error('Worker error:', err);
-  return c.json({ error: err.message || 'Internal error' }, 500);
+  // F4: don't leak internal error details (D1 SQL, table names, etc.) to clients.
+  const requestId = crypto.randomUUID();
+  console.error(`[${requestId}] Worker error:`, err);
+  return c.json({ error: 'Internal error', requestId }, 500);
 });
 export default { fetch: app.fetch };

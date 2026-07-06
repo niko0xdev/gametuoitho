@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import type { Bindings } from '../db';
 import { createDb } from '../db';
 import { tournamentsTable, matchesTable } from '../schema';
+import { requireLoggedIn } from '../lib/auth';
 
 export const tournamentsRoute = new Hono<{ Bindings: Bindings }>();
 
@@ -12,8 +13,9 @@ tournamentsRoute.get('/', async (c) => {
   return c.json(await db.select().from(tournamentsTable).all());
 });
 
-tournamentsRoute.post('/create', async (c) => {
-  const { userId, name, gameId, maxPlayers, deadlineSeconds } = await c.req.json();
+tournamentsRoute.post('/create', requireLoggedIn(), async (c) => {
+  const userId = c.get('userId');
+  const { name, gameId, maxPlayers, deadlineSeconds } = await c.req.json();
   const id = 'tour_' + Date.now();
   const tournament = {
     id,
@@ -33,10 +35,12 @@ tournamentsRoute.post('/create', async (c) => {
   return c.json(tournament);
 });
 
-tournamentsRoute.post('/join', async (c) => {
-  const { userId, code } = await c.req.json();
+tournamentsRoute.post('/join', requireLoggedIn(), async (c) => {
+  const userId = c.get('userId');
+  const { code } = await c.req.json();
+  if (!code) return c.json({ error: 'Thiếu mã giải đấu!' }, 400);
   const db = createDb(c.env);
-  // Legacy: `code` is treated as tournament id.
+  // Join by tournament id. (F6 follow-up: switch to short code if added to schema.)
   const rows = await db.select().from(tournamentsTable).where(eq(tournamentsTable.id, code)).all();
   const t = rows[0];
   if (!t) return c.json({ error: 'Không thể tham gia giải đấu! Mã không hợp lệ.' }, 400);
@@ -61,15 +65,18 @@ tournamentsRoute.get('/:id', async (c) => {
   return c.json(rows[0]);
 });
 
-tournamentsRoute.post('/:id/start', async (c) => {
+tournamentsRoute.post('/:id/start', requireLoggedIn(), async (c) => {
   const db = createDb(c.env);
   const id = c.req.param('id');
+  const t = (await db.select().from(tournamentsTable).where(eq(tournamentsTable.id, id)).all())[0] as any;
+  if (!t) return c.json({ error: 'Không tìm thấy giải đấu!' }, 404);
+  if (t.organizer !== c.get('userId')) return c.json({ error: 'Chỉ người tạo mới được bắt đầu!' }, 403);
   await db.update(tournamentsTable).set({ status: 'RUNNING' } as any).where(eq(tournamentsTable.id, id));
   const rows = await db.select().from(tournamentsTable).where(eq(tournamentsTable.id, id)).all();
   return c.json(rows[0]);
 });
 
-tournamentsRoute.post('/:id/launch/:matchIndex', async (c) => {
+tournamentsRoute.post('/:id/launch/:matchIndex', requireLoggedIn(), async (c) => {
   const matchId = 'match_' + Date.now();
   const db = createDb(c.env);
   await db.insert(matchesTable).values({

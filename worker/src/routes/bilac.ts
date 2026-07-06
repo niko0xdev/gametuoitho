@@ -6,6 +6,7 @@ import { createDb } from '../db';
 import {
   bilacTournamentsTable, bilacPlayersTable, bilacMatchesTable,
 } from '../schema';
+import { requireLoggedIn } from '../lib/auth';
 
 export const bilacRoute = new Hono<{ Bindings: Bindings }>();
 
@@ -59,7 +60,7 @@ bilacRoute.post('/tournaments/access', async (c) => {
   return c.json({ success: true, tournament: { id: tour.id, name: (tour as any).name, description: (tour as any).description } });
 });
 
-bilacRoute.post('/tournaments', async (c) => {
+bilacRoute.post('/tournaments', requireLoggedIn(), async (c) => {
   const { name, code, description } = await c.req.json();
   if (!name || !name.trim()) return c.json({ error: 'Tên giải đấu không được để trống!' }, 400);
   if (!code || !code.trim()) return c.json({ error: 'Mã truy cập giải đấu không được để trống!' }, 400);

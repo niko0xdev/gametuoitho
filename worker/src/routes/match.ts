@@ -6,12 +6,14 @@ import { createDb } from '../db';
 import { matchesTable } from '../schema';
 import { sseStream } from '../lib/sse';
 import { addMatchStream, broadcastMatch } from '../lib/state';
+import { requireLoggedIn } from '../lib/auth';
 
 export const matchRoute = new Hono<{ Bindings: Bindings }>();
 
-matchRoute.post('/match/:id/move', async (c) => {
+matchRoute.post('/match/:id/move', requireLoggedIn(), async (c) => {
   const matchId = c.req.param('id');
-  const { userId, move } = await c.req.json();
+  const userId = c.get('userId');
+  const { move } = await c.req.json();
   const db = createDb(c.env);
   const rows = await db.select().from(matchesTable).where(eq(matchesTable.id, matchId)).all();
   const m = rows[0];
@@ -34,14 +36,15 @@ matchRoute.post('/match/:id/move', async (c) => {
   return c.json({ success: true, moveTs, turn: nextTurn });
 });
 
-matchRoute.post('/match/:id/forfeit', async (c) => {
+matchRoute.post('/match/:id/forfeit', requireLoggedIn(), async (c) => {
   const matchId = c.req.param('id');
-  const { userId } = await c.req.json();
+  const userId = c.get('userId');
   const db = createDb(c.env);
   const rows = await db.select().from(matchesTable).where(eq(matchesTable.id, matchId)).all();
   const m = rows[0];
   if (!m) return c.json({ error: 'Không tìm thấy trận đấu!' }, 404);
   const players: string[] = JSON.parse((m as any).players || '[]');
+  if (!players.includes(userId)) return c.json({ error: 'Không phải người chơi trong trận!' }, 403);
   const winner = players.find((p) => p !== userId) ?? null;
   await db.update(matchesTable).set({ status: 'ENDED', winner, updatedAt: Date.now() } as any).where(eq(matchesTable.id, matchId));
   broadcastMatch(matchId, 'ended', { winner, reason: 'forfeit' });

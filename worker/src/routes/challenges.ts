@@ -4,6 +4,7 @@ import { eq, and } from 'drizzle-orm';
 import type { Bindings } from '../db';
 import { createDb } from '../db';
 import { dailyChallengesTable } from '../schema';
+import { requireLoggedIn } from '../lib/auth';
 
 export const challengesRoute = new Hono<{ Bindings: Bindings }>();
 
@@ -26,9 +27,10 @@ challengesRoute.get('/:gameId/:date', async (c) => {
   return c.json(puzzle);
 });
 
-challengesRoute.post('/:gameId/:date/submit', async (c) => {
+challengesRoute.post('/:gameId/:date/submit', requireLoggedIn(), async (c) => {
   const { gameId, date } = c.req.param();
-  const { userId, displayName, avatar, score } = await c.req.json();
+  const userId = c.get('userId');
+  const { displayName, avatar, score } = await c.req.json();
   const db = createDb(c.env);
   const rows = await db.select().from(dailyChallengesTable)
     .where(and(eq(dailyChallengesTable.gameId, gameId), eq(dailyChallengesTable.date, date)))

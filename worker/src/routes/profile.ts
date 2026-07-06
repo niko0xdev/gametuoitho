@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import type { Bindings } from '../db';
 import { createDb } from '../db';
 import { profilesTable, usersTable } from '../schema';
+import { requireLoggedIn } from '../lib/auth';
 
 const defaultElo = {
   eloCaro: 1500, eloCoTuong: 1500, eloCoVua: 1500, eloOAnQuan: 1500,
@@ -29,9 +30,11 @@ profileRoute.get('/:userId', async (c) => {
   return c.json({ ...profile, role: u[0]?.role ?? 'user' });
 });
 
-profileRoute.post('/:userId/update', async (c) => {
+profileRoute.post('/:userId/update', requireLoggedIn(), async (c) => {
+  const target = c.req.param('userId');
+  if (target !== c.get('userId')) return c.json({ error: 'Không thể sửa profile của người khác!' }, 403);
   const { displayName, avatar } = await c.req.json();
-  const profile = await getOrInitProfile(c.req.param('userId'), c);
+  const profile = await getOrInitProfile(target, c);
   if (displayName) profile.displayName = displayName;
   if (avatar) profile.avatar = avatar;
   const db = createDb(c.env);
@@ -43,8 +46,10 @@ profileRoute.post('/:userId/update', async (c) => {
   return c.json({ ...profile, role: u[0]?.role ?? 'user' });
 });
 
-profileRoute.post('/:userId/reset-elo', async (c) => {
-  const profile = await getOrInitProfile(c.req.param('userId'), c);
+profileRoute.post('/:userId/reset-elo', requireLoggedIn(), async (c) => {
+  const target = c.req.param('userId');
+  if (target !== c.get('userId')) return c.json({ error: 'Không thể reset ELO của người khác!' }, 403);
+  const profile = await getOrInitProfile(target, c);
   const db = createDb(c.env);
   await db.update(profilesTable).set({ ...defaultElo }).where(eq(profilesTable.id, profile.id));
   const u = await db.select().from(usersTable).where(eq(usersTable.id, profile.id)).all();

@@ -2,13 +2,19 @@
 import { Hono } from 'hono';
 import type { Bindings } from '../db';
 import { callStructured } from '../lib/ai';
+import { requireLoggedIn } from '../lib/auth';
+
+const MAX_SUMMARY_BYTES = 32 * 1024; // 32 KB cap (F3: prevents OpenAI bill abuse)
 
 export const aiRoute = new Hono<{ Bindings: Bindings }>();
 
-aiRoute.post('/parse-roster', async (c) => {
+aiRoute.post('/parse-roster', requireLoggedIn(), async (c) => {
   const { summary } = await c.req.json();
   if (!summary || typeof summary !== 'string' || summary.trim() === '') {
     return c.json({ error: 'Nội dung tóm tắt không được để trống!' }, 400);
+  }
+  if (new TextEncoder().encode(summary).byteLength > MAX_SUMMARY_BYTES) {
+    return c.json({ error: `Nội dung vượt quá ${MAX_SUMMARY_BYTES / 1024} KB!` }, 413);
   }
   if (!c.env.OPENAI_API_KEY || !c.env.OPENAI_MODEL) {
     return c.json({ error: 'Chưa cấu hình OPENAI_API_KEY/OPENAI_MODEL trên Worker secrets!' }, 500);
