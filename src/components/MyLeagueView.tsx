@@ -178,7 +178,7 @@ interface MyLeagueViewProps {
 export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagueViewProps) {
   const [leagues, setLeagues] = useState<MyLeague[]>([]);
   const [selectedLeague, setSelectedLeague] = useState<MyLeague | null>(null);
-  const [activeTab, setActiveTab] = useState<'schedule' | 'standings' | 'teams'>('schedule');
+  const [activeTab, setActiveTab] = useState<'schedule' | 'standings' | 'teams' | 'stats'>('schedule');
 
   // Permissions State
   const [permissions, setPermissions] = useState<Record<string, boolean>>(() => {
