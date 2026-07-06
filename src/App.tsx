@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, Trophy, Sparkles, History, Gamepad2, AlertCircle, Swords, Bell, X, Mail } from 'lucide-react';
-import Header from './components/HeaderLegacy.tsx';
+import Header from './components/Header.tsx';
 import Catalog from './components/Catalog.tsx';
 import Leaderboards from './components/Leaderboards.tsx';
 import TournamentsView from './components/TournamentsView.tsx';
