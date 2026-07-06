@@ -235,12 +235,19 @@ export default function App() {
 
           case 'MATCH_STATE_UPDATE':
             if (payload && payload.id && payload.status === 'PLAYING') {
-              playRetroBeep(987, 'sine', 0.2);
-              setActiveMatchId(payload.id);
-              setSpectateMode(false);
-              setMatchmakingStatus({ gameId: null, status: 'IDLE' });
-              setPrivateRoomCode(null);
-              setErrorLocal(null);
+              // Chỉ auto-rejoin nếu user đã có activeMatchId = match này (reconnect/resume).
+              // Nếu chưa có → đây là server replay sau khi user reload → KHÔNG đưa user vào game cũ.
+              setActiveMatchId(prev => {
+                if (prev === payload.id) return prev; // đã ở trong match
+                return prev; // giữ nguyên state, không force-join
+              });
+              if (activeMatchId === payload.id) {
+                playRetroBeep(987, 'sine', 0.2);
+                setSpectateMode(false);
+                setMatchmakingStatus({ gameId: null, status: 'IDLE' });
+                setPrivateRoomCode(null);
+                setErrorLocal(null);
+              }
             }
             break;
 
