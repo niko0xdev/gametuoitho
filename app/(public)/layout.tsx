@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Header } from '@/components/Header';
+import { Header } from '../../src/components/Header';
 
 export default function PublicLayout({ children }: { children: ReactNode }) {
   return (
