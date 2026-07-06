@@ -11,6 +11,8 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
   if (access.tournamentId !== ctx.params.id) {
     return NextResponse.json({ error: 'Mã giải đấu không khớp' }, { status: 403 });
   }
+  const member = await requireBiLacMember(access);
+  if (member instanceof NextResponse) return member;
   const tour = db.getBiLacTournament(ctx.params.id);
   if (!tour) return NextResponse.json({ error: 'Không tìm thấy giải đấu' }, { status: 404 });
   return NextResponse.json({
@@ -25,6 +27,9 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
 export async function DELETE(req: Request, ctx: { params: { id: string } }) {
   const access = await checkBiLacTournamentAccess(req as never);
   if (access instanceof NextResponse) return access;
+  if (access.tournamentId !== ctx.params.id) {
+    return NextResponse.json({ error: 'Mã giải đấu không khớp' }, { status: 403 });
+  }
   const member = await requireBiLacMember(access);
   if (member instanceof NextResponse) return member;
   if (member.role !== 'owner') {
