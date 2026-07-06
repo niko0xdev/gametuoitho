@@ -77,6 +77,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
         throw new Error(data.error || 'Đăng nhập không thành công');
       }
       triggerBeep(880, 'sine', 0.25);
+      if (data.user?.id) localStorage.setItem('userId', data.user.id);
       onLoginSuccess(data.user);
       onClose();
     } catch (err: any) {
@@ -114,6 +115,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
       }
       triggerBeep(880, 'sine', 0.3);
       setSuccessMsg('Đăng ký tài khoản mới thành công!');
+      if (data.user?.id) localStorage.setItem('userId', data.user.id);
       onLoginSuccess(data.user);
       onClose();
     } catch (err: any) {
@@ -224,6 +226,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
         throw new Error(data.error || 'Đăng nhập Google SSO thất bại');
       }
       triggerBeep(987, 'sine', 0.3);
+      if (data.user?.id) localStorage.setItem('userId', data.user.id);
       onLoginSuccess(data.user);
       onClose();
     } catch (err: any) {
