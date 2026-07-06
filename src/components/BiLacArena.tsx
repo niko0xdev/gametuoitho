@@ -18,9 +18,13 @@ import {
   Heart,
   QrCode,
   Copy,
-  X
+  X,
+  Sparkles,
+  Loader2,
+  Shield,
+  LogIn
 } from 'lucide-react';
-import { BiLacPlayer, BiLacMatch } from '../types';
+import { BiLacPlayer, BiLacMatch, UserProfile } from '../types';
 
 // Simple sound synthesizer for retro beep effects
 const playBeep = (freq: number, type: OscillatorType = 'sine', duration = 0.1) => {
@@ -41,7 +45,14 @@ const playBeep = (freq: number, type: OscillatorType = 'sine', duration = 0.1) =
   }
 };
 
-export default function BiLacArena() {
+export default function BiLacArena({
+  userProfile,
+  onOpenAuthModal,
+}: {
+  userProfile?: UserProfile | null;
+  onOpenAuthModal?: () => void;
+} = {}) {
+  const loggedInUserId = userProfile?.id ?? null;
   const [players, setPlayers] = useState<BiLacPlayer[]>([]);
   const [matches, setMatches] = useState<BiLacMatch[]>([]);
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([]);
@@ -49,6 +60,11 @@ export default function BiLacArena() {
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // AI bulk-add players
+  const [aiBulkText, setAiBulkText] = useState('');
+  const [isAiBulkLoading, setIsAiBulkLoading] = useState(false);
+  const [aiBulkPreview, setAiBulkPreview] = useState<string[] | null>(null);
   const [activeTab, setActiveTab] = useState<'matchmaking' | 'leaderboards' | 'history'>('matchmaking');
   const [leaderboardTab, setLeaderboardTab] = useState<'weekly' | 'alltime'>('weekly');
 
@@ -89,15 +105,16 @@ export default function BiLacArena() {
   const [newTournamentCode, setNewTournamentCode] = useState<string>('');
   const [newTournamentDesc, setNewTournamentDesc] = useState<string>('');
 
-  // Custom fetch function with tournament credentials in headers
+  // Custom fetch function with tournament credentials + current user id in headers
   const bilacFetch = async (url: string, options: RequestInit = {}) => {
     const tid = currentTournament?.id || '';
     const code = localStorage.getItem('bilac_tournament_code') || '';
-    const headers = {
-      ...(options.headers || {}),
+    const headers: Record<string, string> = {
+      ...((options.headers as Record<string, string>) || {}),
       'x-tournament-id': tid,
-      'x-tournament-code': code
+      'x-tournament-code': code,
     };
+    if (loggedInUserId) headers['x-user-id'] = loggedInUserId;
     return fetch(url, { ...options, headers });
   };
 
@@ -382,11 +399,96 @@ export default function BiLacArena() {
     }
   };
 
+  // AI bulk-add: tách danh sách tên từ text tự do qua API, preview, xác nhận thêm.
+  const handleAiBulkPreview = async () => {
+    setError(null);
+    setSuccessMsg(null);
+    setAiBulkPreview(null);
+    if (!aiBulkText.trim()) {
+      setError('Vui lòng dán danh sách tên cần tách!');
+      return;
+    }
+    setIsAiBulkLoading(true);
+    try {
+      const res = await fetch('/api/ai/parse-players', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: aiBulkText }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'AI tách tên thất bại!');
+        playBeep(220, 'sawtooth', 0.25);
+        return;
+      }
+      const names: string[] = Array.isArray(data?.names) ? data.names : [];
+      if (names.length === 0) {
+        setError('AI không nhận diện được tên nào. Vui lòng thêm chút ngữ cảnh!');
+        playBeep(220, 'sawtooth', 0.25);
+        return;
+      }
+      const existing = new Set(players.map(p => p.name.trim().toLowerCase()));
+      const fresh = names.filter(n => !existing.has(n.trim().toLowerCase()));
+      setAiBulkPreview(fresh);
+      if (fresh.length === 0) {
+        setSuccessMsg(`AI tách được ${names.length} tên — tất cả đã có trong danh sách, không cần thêm.`);
+        setTimeout(() => setSuccessMsg(null), 4000);
+      } else {
+        setSuccessMsg(`AI tách được ${names.length} tên — sẽ thêm ${fresh.length} tên mới (bỏ qua ${names.length - fresh.length} tên trùng).`);
+        playBeep(587, 'sine', 0.12);
+      }
+    } catch (e) {
+      setError('Lỗi kết nối máy chủ khi gọi AI!');
+    } finally {
+      setIsAiBulkLoading(false);
+    }
+  };
+
+  const handleAiBulkConfirm = async () => {
+    if (!aiBulkPreview || aiBulkPreview.length === 0) return;
+    setError(null);
+    setSuccessMsg(null);
+    setIsAiBulkLoading(true);
+    let added = 0;
+    let failed = 0;
+    try {
+      for (const name of aiBulkPreview) {
+        try {
+          const res = await bilacFetch('/api/bilac/players', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+          });
+          const data = await res.json();
+          if (res.ok) {
+            added++;
+            setPlayers(prev => [...prev, data]);
+          } else {
+            failed++;
+          }
+        } catch (e) {
+          failed++;
+        }
+      }
+      setSuccessMsg(`Đã thêm ${added} thành viên mới${failed ? ` (${failed} lỗi)` : ''}.`);
+      setTimeout(() => setSuccessMsg(null), 4000);
+      if (added > 0) playBeep(880, 'sine', 0.3);
+      setAiBulkText('');
+      setAiBulkPreview(null);
+    } finally {
+      setIsAiBulkLoading(false);
+    }
+  };
+
+  const handleAiBulkCancel = () => {
+    setAiBulkPreview(null);
+  };
+
   const handleDeletePlayer = async (id: string, name: string) => {
     setError(null);
-    const hasMatches = matches.some(m => 
-      (m.team1 && m.team1.includes(id)) || 
-      (m.team2 && m.team2.includes(id)) || 
+    const hasMatches = matches.some(m =>
+      (m.team1 && m.team1.includes(id)) ||
+      (m.team2 && m.team2.includes(id)) ||
       m.benched === id
     );
 
@@ -787,6 +889,35 @@ export default function BiLacArena() {
   const ongoingMatch = matches.find(m => m.status === 'PLAYING');
 
   if (!currentTournament) {
+    if (!loggedInUserId) {
+      // Bắt buộc đăng nhập trước khi truy cập Bi Lắc Arena.
+      return (
+        <div className="w-full max-w-3xl mx-auto px-4 py-16 animate-fade-in" id="bilac_login_required">
+          <div className="bg-white p-8 sm:p-10 rounded-2xl border-2 border-orange-300 shadow-xl text-center">
+            <div className="flex justify-center mb-5">
+              <span className="p-4 bg-orange-100 text-orange-600 rounded-2xl shadow-sm">
+                <Swords className="w-12 h-12" />
+              </span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-stone-900 mb-2">
+              Vui lòng đăng nhập để vào Đấu Trường Bi Lắc
+            </h2>
+            <p className="text-stone-600 text-sm sm:text-base max-w-xl mx-auto mb-7 leading-relaxed">
+              Đấu trường Bi Lắc yêu cầu tài khoản để đảm bảo quyền quản lý (thêm thành viên, tạo trận, ghi điểm, hủy trận).
+              Sau khi đăng nhập bạn có thể tạo giải mới hoặc tham gia giải có sẵn bằng mã code.
+            </p>
+            <button
+              id="btn_login_for_bilac"
+              onClick={() => onOpenAuthModal?.()}
+              className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold px-7 py-3 rounded-2xl shadow-lg cursor-pointer transition-all flex items-center justify-center gap-2 mx-auto"
+            >
+              <Shield className="w-5 h-5" />
+              🔑 Đăng nhập / Đăng ký ngay
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="w-full max-w-4xl mx-auto px-4 py-12 animate-fade-in" id="bilac_portal_root">
         <div className="text-center mb-10">
@@ -1374,6 +1505,101 @@ export default function BiLacArena() {
                   Thêm
                 </button>
               </form>
+            </div>
+
+            {/* AI BULK ADD PLAYERS */}
+            <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm" id="ai_bulk_add_panel">
+              <h2 className="text-sm font-bold text-stone-900 mb-1 flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-orange-500" />
+                Thêm nhanh bằng AI
+              </h2>
+              <p className="text-stone-500 text-[11px] mb-3">
+                Dán danh sách tên (nhiều dòng, có team, có số thứ tự đều được) — AI sẽ tự tách thành từng tên đầy đủ.
+              </p>
+
+              <textarea
+                id="ai_bulk_textarea"
+                value={aiBulkText}
+                onChange={(e) => setAiBulkText(e.target.value)}
+                placeholder={'Ví dụ:\n1. Đội UTE FC:\n- Nguyễn Văn A\n- Trần Văn B\n\n2. Team BK Stars: Lê Văn C, Phạm Văn D'}
+                rows={5}
+                disabled={isAiBulkLoading}
+                className="w-full px-3 py-2 border border-stone-300 rounded-xl text-xs focus:ring-2 focus:ring-orange-500 outline-none resize-y min-h-[100px] disabled:bg-stone-100"
+              />
+
+              <div className="flex gap-2 mt-3">
+                {aiBulkPreview === null ? (
+                  <button
+                    id="btn_ai_bulk_preview"
+                    type="button"
+                    onClick={handleAiBulkPreview}
+                    disabled={isAiBulkLoading || !aiBulkText.trim()}
+                    className="flex-1 px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold rounded-xl text-xs cursor-pointer transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                  >
+                    {isAiBulkLoading ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Đang tách...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        AI tách tên
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      id="btn_ai_bulk_confirm"
+                      type="button"
+                      onClick={handleAiBulkConfirm}
+                      disabled={isAiBulkLoading || aiBulkPreview.length === 0}
+                      className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs cursor-pointer transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isAiBulkLoading ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Đang thêm...
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          Thêm {aiBulkPreview.length} tên
+                        </>
+                      )}
+                    </button>
+                    <button
+                      id="btn_ai_bulk_cancel"
+                      type="button"
+                      onClick={handleAiBulkCancel}
+                      disabled={isAiBulkLoading}
+                      className="px-4 py-2 bg-stone-200 hover:bg-stone-300 text-stone-700 font-bold rounded-xl text-xs cursor-pointer transition-all disabled:opacity-50"
+                    >
+                      Hủy
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {aiBulkPreview !== null && (
+                <div id="ai_bulk_preview_list" className="mt-3 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl max-h-[160px] overflow-y-auto">
+                  <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-1.5">
+                    Xác nhận {aiBulkPreview.length} tên sẽ thêm:
+                  </p>
+                  {aiBulkPreview.length === 0 ? (
+                    <p className="text-xs text-stone-500 italic">Không có tên mới nào để thêm.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {aiBulkPreview.map((n, i) => (
+                        <span key={i} className="px-2 py-0.5 bg-white border border-emerald-200 text-[11px] font-semibold text-emerald-800 rounded-lg">
+                          {n}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* TEAM PLAYERS DIRECTORY LIST */}

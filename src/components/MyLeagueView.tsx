@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { 
+import {
   Trophy, Users, Calendar, PlusCircle, Award, Trash2, Check, X, Plus,
   ChevronRight, Play, Save, Shield, Settings, Info, RefreshCw, Edit3, Dices,
-  Lock, Unlock, Eye, EyeOff, ShieldAlert
+  Lock, Unlock, Eye, EyeOff, ShieldAlert,
+  Sparkles, Loader2
 } from 'lucide-react';
 import { playRetroBeep } from './games/CaroBoard.tsx';
 import { UserProfile } from '../types.ts';
@@ -263,6 +264,11 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
   const [newEventPlayerName, setNewEventPlayerName] = useState<string>('');
   const [isCustomPlayer, setIsCustomPlayer] = useState<boolean>(false);
   const [newEventMinute, setNewEventMinute] = useState<string>('');
+
+  // AI summary -> structured events (prefill only; user must Save manually)
+  const [aiSummaryText, setAiSummaryText] = useState<string>('');
+  const [isAiEventLoading, setIsAiEventLoading] = useState<boolean>(false);
+  const [aiEventPreview, setAiEventPreview] = useState<Array<{ type: 'goal'|'yellow'|'red'; teamSide: 'home'|'away'|'unknown'; playerName: string; minute?: number; note?: string }> | null>(null);
 
   const saveTeamPlayers = () => {
     if (!selectedLeague || !editingTeamPlayers) return;
@@ -572,7 +578,7 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
     setAiSuccessMessage('');
 
     try {
-      const response = await fetch('/api/gemini/parse-roster', {
+      const response = await fetch('/api/ai/parse-roster', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -944,6 +950,109 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
   };
 
   // Save score and progress the tournament logic
+  // AI: parse tóm tắt -> danh sách events prefill (không tự submit; user bấm áp dụng để fill vào editingMatchEvents rồi Save bình thường).
+  const handleAiPrefillEvents = async () => {
+    if (!editingMatch || !selectedLeague) {
+      alert('Vui lòng mở trận đấu cần chỉnh sửa trước!');
+      return;
+    }
+    if (!aiSummaryText.trim()) {
+      alert('Vui lòng nhập tóm tắt diễn biến trận đấu trước!');
+      return;
+    }
+    setIsAiEventLoading(true);
+    setAiEventPreview(null);
+    try {
+      const homeTeam = selectedLeague.teams.find(t => t.id === editingMatch.home);
+      const awayTeam = selectedLeague.teams.find(t => t.id === editingMatch.away);
+      const res = await fetch('/api/ai/parse-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          summary: aiSummaryText,
+          homeTeamName: homeTeam?.name || 'đội nhà',
+          awayTeamName: awayTeam?.name || 'đội khách',
+          homePlayers: homeTeam?.players || [],
+          awayPlayers: awayTeam?.players || [],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'AI không tách được diễn biến.');
+        playRetroBeep(220, 'sawtooth', 0.25);
+        return;
+      }
+      const events: any[] = Array.isArray(data?.events) ? data.events : [];
+      setAiEventPreview(events);
+      if (events.length === 0) {
+        alert('AI không nhận diện được sự kiện nào. Vui lòng bổ sung thêm ngữ cảnh (ghi rõ tên cầu thủ, phút, loại thẻ/bàn thắng).');
+        playRetroBeep(220, 'sawtooth', 0.25);
+      } else {
+        playRetroBeep(659, 'sine', 0.12);
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Lỗi kết nối máy chủ khi gọi AI!');
+    } finally {
+      setIsAiEventLoading(false);
+    }
+  };
+
+  const handleAiApplyEvents = () => {
+    if (!editingMatch || !aiEventPreview || aiEventPreview.length === 0) return;
+    let homeDelta = 0;
+    let awayDelta = 0;
+    const mapped: MatchEvent[] = aiEventPreview
+      .filter(e => e.teamSide === 'home' || e.teamSide === 'away')
+      .map(e => {
+        const teamId = e.teamSide === 'home' ? editingMatch.home : editingMatch.away;
+        if (e.type === 'goal') {
+          if (e.teamSide === 'home') homeDelta++;
+          else awayDelta++;
+        }
+        return {
+          type: e.type,
+          teamId,
+          playerName: e.playerName || '',
+          minute: typeof e.minute === 'number' ? e.minute : undefined,
+        };
+      });
+
+    if (mapped.length === 0) {
+      alert('Không có sự kiện nào hợp lệ để áp dụng (thiếu thông tin đội).');
+      return;
+    }
+
+    // Trộn với editingMatchEvents hiện có, tránh trùng (cùng type+teamId+playerName+minute).
+    setEditingMatchEvents(prev => {
+      const existing = new Set(prev.map(p => `${p.type}|${p.teamId}|${p.playerName}|${p.minute ?? ''}`));
+      const merged = [...prev];
+      for (const ev of mapped) {
+        const k = `${ev.type}|${ev.teamId}|${ev.playerName}|${ev.minute ?? ''}`;
+        if (!existing.has(k)) {
+          merged.push(ev);
+          existing.add(k);
+        }
+      }
+      return merged.sort((a, b) => (a.minute || 0) - (b.minute || 0));
+    });
+
+    // Cộng dồn bàn thắng vào score nếu người dùng chưa tự nhập.
+    if (homeDelta > 0) {
+      setEditHomeScore(prev => String((parseInt(prev || '0') || 0) + homeDelta));
+    }
+    if (awayDelta > 0) {
+      setEditAwayScore(prev => String((parseInt(prev || '0') || 0) + awayDelta));
+    }
+
+    setAiEventPreview(null);
+    setAiSummaryText('');
+    playRetroBeep(880, 'sine', 0.2);
+    alert(`Đã điền ${mapped.length} sự kiện vào danh sách. Nhấn "Lưu kết quả" bên dưới để lưu trận đấu.`);
+  };
+
+  const handleAiCancelEvents = () => setAiEventPreview(null);
+
   const saveMatchScore = () => {
     if (!editingMatch || !selectedLeague) return;
 
@@ -2231,8 +2340,8 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
         </div>
       ) : (
         // LIST OF ALL ACTIVE/PAST LEAGUES
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in">
-          
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_360px] gap-6 animate-fade-in">
+
           {/* Sidebar Area: Quick-start and Permission Management */}
           <div className="md:col-span-1 flex flex-col gap-6">
             
@@ -2503,7 +2612,91 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
                 <h4 className="text-xs font-bold text-stone-700 flex items-center gap-1.5 uppercase tracking-wide">
                   <span>⚽</span> Diễn biến & Sự kiện Futsal
                 </h4>
-                
+
+                {/* AI summary -> prefill events panel */}
+                <div id="ai_summary_panel" className="bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-200 rounded-xl p-3 flex flex-col gap-2 mb-2">
+                  <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-orange-700">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>AI tóm tắt diễn biến (chỉ điền, không tự lưu)</span>
+                  </div>
+                  <textarea
+                    id="ai_summary_textarea"
+                    value={aiSummaryText}
+                    onChange={(e) => setAiSummaryText(e.target.value)}
+                    placeholder={'Ví dụ: Phút 12 Hoàng ghi bàn mở tỉ số cho Hà Nội. Phút 30 Duy nhận thẻ vàng. Phút 35 Long gỡ hoà 1-1...'}
+                    rows={3}
+                    disabled={isAiEventLoading}
+                    className="w-full bg-white border border-orange-200 rounded-lg text-xs p-2 focus:outline-hidden focus:border-orange-500 resize-y min-h-[70px] disabled:bg-stone-100"
+                  />
+                  {aiEventPreview === null ? (
+                    <button
+                      id="btn_ai_event_preview"
+                      type="button"
+                      onClick={handleAiPrefillEvents}
+                      disabled={isAiEventLoading || !aiSummaryText.trim()}
+                      className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold py-1.5 px-3 rounded-lg text-[11px] cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-xs"
+                    >
+                      {isAiEventLoading ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Đang tách...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5" />
+                          AI điền sự kiện
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    <div id="ai_event_preview_list" className="flex flex-col gap-2 p-2 bg-white border border-orange-200 rounded-lg">
+                      <p className="text-[10px] font-bold text-stone-700 uppercase tracking-wider">
+                        Xem trước: {aiEventPreview.length} sự kiện nhận diện được
+                      </p>
+                      <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                        {aiEventPreview.map((ev, i) => {
+                          const teamLabel = ev.teamSide === 'home' ? 'Nhà' : ev.teamSide === 'away' ? 'Khách' : '?';
+                          const icon = ev.type === 'goal' ? '⚽' : ev.type === 'yellow' ? '🟨' : '🟥';
+                          return (
+                            <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-stone-100 border border-stone-200 rounded-md text-[10px] font-bold text-stone-700">
+                              <span>{icon}</span>
+                              {ev.minute ? `${ev.minute}'` : '-'}
+                              <span className="text-stone-400">·</span>
+                              {ev.playerName || '(không rõ)'}
+                              <span className="text-stone-400">·</span>
+                              <span className="text-orange-600">{teamLabel}</span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          id="btn_ai_event_apply"
+                          type="button"
+                          onClick={handleAiApplyEvents}
+                          disabled={isAiEventLoading}
+                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-3 rounded-lg text-[11px] cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          Điền vào danh sách
+                        </button>
+                        <button
+                          id="btn_ai_event_cancel"
+                          type="button"
+                          onClick={handleAiCancelEvents}
+                          disabled={isAiEventLoading}
+                          className="px-3 py-1.5 bg-stone-200 hover:bg-stone-300 text-stone-700 font-bold rounded-lg text-[11px] cursor-pointer disabled:opacity-50"
+                        >
+                          Hủy
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-stone-500 italic">
+                        Sau khi điền, bấm "Lưu kết quả" bên dưới để hoàn tất.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
                 {/* List of current events */}
                 {editingMatchEvents.length > 0 ? (
                   <div className="flex flex-col gap-1.5 max-h-36 overflow-y-auto p-2 bg-stone-50 rounded-xl border border-stone-200">

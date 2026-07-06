@@ -93,6 +93,17 @@ export const bilacTournamentsTable = sqliteTable('bilac_tournaments', {
   code: text('code').notNull(),
   description: text('description'),
   createdAt: integer('created_at').notNull(),
+  ownerUserId: text('owner_user_id'), // userId của người tạo giải
+});
+
+export const bilacTournamentMembersTable = sqliteTable('bilac_tournament_members', {
+  id: text('id').primaryKey(),
+  tournamentId: text('tournament_id').notNull(),
+  userId: text('user_id').notNull(),
+  username: text('username').notNull(),
+  displayName: text('display_name').notNull(),
+  role: text('role').notNull(), // 'owner' | 'member'
+  joinedAt: integer('joined_at').notNull(),
 });
 
 export const myLeaguesTable = sqliteTable('my_leagues', {
