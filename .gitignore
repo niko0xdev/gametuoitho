@@ -8,7 +8,4 @@ coverage/
 !.env.example
 database.db
 database.json
-.next/
-tsconfig.tsbuildinfo
-
 
