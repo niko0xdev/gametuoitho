@@ -5,15 +5,16 @@ import {
   Swords, 
   Trophy, 
   Calendar, 
-  History, 
-  Plus, 
-  Minus, 
-  Trash2, 
-  Check, 
-  AlertCircle, 
-  Shuffle, 
-  Timer, 
+  History,
+  Plus,
+  Minus,
+  Trash2,
+  Check,
+  AlertCircle,
+  Shuffle,
+  Timer,
   RefreshCw,
+  RotateCcw,
   UserCheck,
   Heart,
   QrCode,
@@ -74,9 +75,16 @@ export default function BiLacArena({
   const [copiedField, setCopiedField] = useState<'account' | 'content' | null>(null);
 
   // Tournament States
-  const [currentTournament, setCurrentTournament] = useState<{ id: string; name: string; description?: string } | null>(() => {
-    const cached = localStorage.getItem('bilac_tournament');
-    return cached ? JSON.parse(cached) : null;
+  // Không auto-restore currentTournament từ localStorage — reload trang sẽ đưa user
+  // về portal list (luồng rõ ràng) thay vì tự động vào lại tour cũ.
+  const [currentTournament, setCurrentTournament] = useState<{ id: string; name: string; description?: string } | null>(null);
+  const [lastVisitedTournament, setLastVisitedTournament] = useState<{ id: string; name: string } | null>(() => {
+    try {
+      const raw = localStorage.getItem('bilac_tournament');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
   });
   const [myTournaments, setMyTournaments] = useState<any[]>(() => {
     try {
@@ -307,10 +315,14 @@ export default function BiLacArena({
         setError(data.error || 'Mã truy cập không đúng!');
         playBeep(180, 'sawtooth', 0.3);
       } else {
-        localStorage.setItem('bilac_tournament', JSON.stringify(data.tournament));
+        // KHÔNG auto-set currentTournament ở đây: set khi user thực sự vào trận.
+        // Chỉ track "last visited" để hiện nút resume ở portal.
         const trimmedCode = accessCodeInput.trim();
         localStorage.setItem('bilac_tournament_code', trimmedCode);
         localStorage.setItem(`bilac_tournament_code_${data.tournament.id}`, trimmedCode);
+        localStorage.setItem('bilac_tournament', JSON.stringify(data.tournament));
+        setLastVisitedTournament({ id: data.tournament.id, name: data.tournament.name });
+        setCurrentTournament(data.tournament);
 
         // Update personal list — KHÔNG lưu code vào cache để tránh rò rỉ access code qua localStorage.
         const newTour = {
@@ -332,6 +344,19 @@ export default function BiLacArena({
     } finally {
       setLoading(false);
     }
+  };
+
+  // Quick resume last-visited tournament from the explicit "Vào lại" card.
+  const handleResumeLastTournament = async () => {
+    if (!lastVisitedTournament) return;
+    const persistedCode = localStorage.getItem(`bilac_tournament_code_${lastVisitedTournament.id}`);
+    if (!persistedCode) {
+      // Cache cleared (logout) — đưa user vào form để nhập lại code.
+      setSelectedTournamentId(lastVisitedTournament.id);
+      setError('Vui lòng nhập lại mã code truy cập để vào giải đấu này.');
+      return;
+    }
+    await handleQuickAccessTournament({ id: lastVisitedTournament.id, name: lastVisitedTournament.name, code: persistedCode });
   };
 
   // Quick access a previously entered tournament
@@ -1039,6 +1064,29 @@ export default function BiLacArena({
           <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl flex items-start gap-3 text-sm animate-fade-in" id="portal_success">
             <Check className="w-5 h-5 shrink-0 mt-0.5" />
             <span>{successMsg}</span>
+          </div>
+        )}
+
+        {/* RESUME LAST VISITED */}
+        {lastVisitedTournament && !currentTournament && (
+          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between gap-3" id="resume_last_tournament_card">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-lg bg-blue-500 text-white flex items-center justify-center shrink-0">
+                <History className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[10px] font-mono text-blue-700 uppercase tracking-widest">Giải vừa truy cập</div>
+                <div className="font-bold text-blue-950 truncate">{lastVisitedTournament.name}</div>
+              </div>
+            </div>
+            <button
+              id="btn_resume_last_tournament"
+              onClick={() => handleResumeLastTournament()}
+              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm cursor-pointer transition-colors flex items-center gap-1.5 shrink-0"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Vào lại
+            </button>
           </div>
         )}
 
