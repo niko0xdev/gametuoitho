@@ -113,10 +113,9 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
         throw new Error(data.error || 'Đăng ký không thành công');
       }
       triggerBeep(880, 'sine', 0.3);
-      setSuccessMsg('Đăng ký tài khoản mới thành công! Bạn có thể đăng nhập ngay.');
-      setLoginUsername(registerUsername);
-      setLoginPassword(registerPassword);
-      setMode('login');
+      setSuccessMsg('Đăng ký tài khoản mới thành công!');
+      onLoginSuccess(data.user);
+      onClose();
     } catch (err: any) {
       setErrorMsg(err.message);
       triggerBeep(150, 'sawtooth', 0.2);

@@ -154,7 +154,14 @@ class Database {
         created_at INTEGER NOT NULL
       );
 
-      ALTER TABLE bilac_tournaments ADD COLUMN owner_user_id TEXT;
+    `);
+    // ALTER runs separately so try/catch can swallow "duplicate column" on re-init
+    try {
+      sqliteDb.exec(`ALTER TABLE bilac_tournaments ADD COLUMN owner_user_id TEXT;`);
+    } catch (err: any) {
+      if (!/duplicate column name/i.test(String(err?.message))) throw err;
+    }
+    sqliteDb.exec(`
 
       CREATE TABLE IF NOT EXISTS bilac_tournament_members (
         id TEXT PRIMARY KEY,
@@ -988,6 +995,23 @@ class Database {
       code: row.code,
       description: row.description || undefined,
       createdAt: row.createdAt
+    }));
+  }
+
+  // Return tournaments that userId is a member of (owner counts as member).
+  getBiLacTournamentsForUser(userId: string): BiLacTournament[] {
+    const rows = drizzleDb
+      .select({ t: bilacTournamentsTable })
+      .from(bilacTournamentsTable)
+      .innerJoin(bilacTournamentMembersTable, eq(bilacTournamentMembersTable.tournamentId, bilacTournamentsTable.id))
+      .where(eq(bilacTournamentMembersTable.userId, userId))
+      .all();
+    return rows.map(r => ({
+      id: r.t.id,
+      name: r.t.name,
+      code: r.t.code,
+      description: r.t.description || undefined,
+      createdAt: r.t.createdAt
     }));
   }
 

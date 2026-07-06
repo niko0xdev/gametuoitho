@@ -408,7 +408,10 @@ ${summary}
         username: trimmedUsername,
         email: trimmedEmail,
         role: 'user',
-        avatar
+        avatar,
+        elo: profile.elo,
+        honorScore: profile.honorScore,
+        badges: profile.badges
       }
     });
   });
@@ -454,7 +457,10 @@ ${summary}
         email: user.email,
         displayName: user.displayName,
         avatar: user.avatar,
-        role: user.role
+        role: user.role,
+        elo: profile.elo,
+        honorScore: profile.honorScore,
+        badges: profile.badges
       }
     });
   });
@@ -496,6 +502,15 @@ ${summary}
       db.saveProfile(profile);
     }
 
+    const googleProfile = db.getProfile(user.id) || {
+      id: user.id,
+      displayName: user.displayName,
+      avatar: user.avatar,
+      elo: { caro: 1500, co_tuong: 1500, co_vua: 1500, o_an_quan: 1500, co_ca_ngua: 1500, duoi_hinh_bat_chu: 1500, noi_chu: 1500, doan_tu: 1500 },
+      honorScore: 100,
+      badges: []
+    };
+
     res.json({
       success: true,
       user: {
@@ -504,7 +519,10 @@ ${summary}
         email: user.email,
         displayName: user.displayName,
         avatar: user.avatar,
-        role: user.role
+        role: user.role,
+        elo: googleProfile.elo,
+        honorScore: googleProfile.honorScore,
+        badges: googleProfile.badges
       }
     });
   });
@@ -841,7 +859,15 @@ ${summary}
       return res.status(403).json({ error: 'Mã code truy cập không chính xác!' });
     }
 
+    // Bắt buộc login + là thành viên của giải để đọc dữ liệu giải.
+    const uid = requireLoggedIn(req, res);
+    if (!uid) return;
+    if (!db.isBiLacTournamentMember(tournamentId as string, uid)) {
+      return res.status(403).json({ error: 'Bạn chưa là thành viên của giải đấu này. Vui lòng nhập mã code để tham gia!' });
+    }
+
     req.tournamentId = tournamentId;
+    req.userId = uid;
     next();
   };
 
@@ -890,9 +916,11 @@ ${summary}
     next();
   };
 
-  // 1. GET ALL TOURNAMENTS (Names & Metadata only, NO access codes)
+  // 1. GET TOURNAMENTS (chỉ trả giải mà user hiện tại là thành viên)
   app.get('/api/bilac/tournaments', (req, res) => {
-    const tours = db.getAllBiLacTournaments().map(t => ({
+    const uid = requireLoggedIn(req, res);
+    if (!uid) return;
+    const tours = db.getBiLacTournamentsForUser(uid).map(t => ({
       id: t.id,
       name: t.name,
       description: t.description,
@@ -901,11 +929,13 @@ ${summary}
     res.json(tours);
   });
 
-  // 2. CHECK ACCESS CODE FOR A TOURNAMENT
+  // 2. JOIN TOURNAMENT BY ACCESS CODE — user phải login. Nếu code đúng và chưa là thành viên thì auto-add.
   app.post('/api/bilac/tournaments/access', (req, res) => {
+    const uid = requireLoggedIn(req, res);
+    if (!uid) return;
     const { tournamentId, code } = req.body;
-    if (!tournamentId) {
-      return res.status(400).json({ error: 'Thiếu mã giải đấu!' });
+    if (!tournamentId || !code) {
+      return res.status(400).json({ error: 'Thiếu mã giải đấu hoặc mã code truy cập!' });
     }
     const tour = db.getBiLacTournament(tournamentId);
     if (!tour) {
@@ -913,6 +943,21 @@ ${summary}
     }
     if (tour.code !== code) {
       return res.status(403).json({ error: 'Mã truy cập không chính xác!' });
+    }
+    if (!db.isBiLacTournamentMember(tournamentId, uid)) {
+      const user = db.getUser(uid);
+      if (!user) {
+        return res.status(401).json({ error: 'Tài khoản không tồn tại!' });
+      }
+      db.saveBiLacTournamentMember({
+        id: 'member_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+        tournamentId,
+        userId: uid,
+        username: user.username,
+        displayName: user.displayName,
+        role: 'member',
+        joinedAt: Date.now()
+      });
     }
     res.json({ success: true, tournament: { id: tour.id, name: tour.name, description: tour.description } });
   });

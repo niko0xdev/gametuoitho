@@ -15,7 +15,7 @@ import AuthModal from './components/AuthModal.tsx';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function App() {
-  const [userId, setUserId] = useState<string>(() => localStorage.getItem('auth_userId') || 'user_a');
+  const [userId, setUserId] = useState<string | null>(() => localStorage.getItem('auth_userId'));
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [activeView, setActiveView] = useState<'catalog' | 'tournaments' | 'daily' | 'replays' | 'leaderboards' | 'bilac' | 'myleague'>('catalog');
@@ -29,7 +29,8 @@ export default function App() {
 
   const handleSignOut = () => {
     localStorage.removeItem('auth_userId');
-    setUserId('user_a');
+    setUserId(null);
+    setProfile(null);
     playRetroBeep(440, 'triangle', 0.25);
   };
 
@@ -160,11 +161,16 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchProfile(userId);
+    if (userId) {
+      fetchProfile(userId);
+    } else {
+      setProfile(null);
+    }
   }, [userId]);
 
   // 2. Establish lobby WebSocket connection
   useEffect(() => {
+    if (!userId) return;
     // Re-establish socket whenever userId changes
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
@@ -324,6 +330,7 @@ export default function App() {
 
   // 4. Edit display name and avatar
   const handleUpdateProfile = async (displayName: string, avatar?: string) => {
+    if (!userId) return;
     try {
       const res = await fetch(`/api/profile/${userId}/update`, {
         method: 'POST',
@@ -340,6 +347,7 @@ export default function App() {
   };
 
   const handleResetElo = async () => {
+    if (!userId) return;
     try {
       const res = await fetch(`/api/profile/${userId}/reset-elo`, {
         method: 'POST'
@@ -444,7 +452,7 @@ export default function App() {
       {activeMatchId ? (
         <GameBoard
           matchId={activeMatchId}
-          userId={userId}
+          userId={userId || ''}
           userProfile={profile!}
           onExit={() => {
             setActiveMatchId(null);
@@ -475,7 +483,7 @@ export default function App() {
             )}
             {activeView === 'tournaments' && (
               <TournamentsView
-                userId={userId}
+                userId={userId || ''}
                 onJoinMatch={(matchId) => {
                   setActiveMatchId(matchId);
                   setSpectateMode(false);
@@ -487,18 +495,18 @@ export default function App() {
               />
             )}
             {activeView === 'myleague' && (
-              <MyLeagueView userId={userId} userProfile={profile} />
+              <MyLeagueView userId={userId || ''} userProfile={profile} />
             )}
             {activeView === 'daily' && (
               <DailyChallengesView
-                userId={userId}
-                displayName={profile?.displayName || `Kỳ thủ ${userId.substring(0, 5)}`}
+                userId={userId || ''}
+                displayName={profile?.displayName || 'Khách'}
                 avatar={profile?.avatar || ''}
               />
             )}
             {activeView === 'replays' && (
               <ReplayView
-                userId={userId}
+                userId={userId || ''}
               />
             )}
             {activeView === 'leaderboards' && (
