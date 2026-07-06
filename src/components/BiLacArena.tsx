@@ -65,7 +65,7 @@ export default function BiLacArena({
   const [aiBulkText, setAiBulkText] = useState('');
   const [isAiBulkLoading, setIsAiBulkLoading] = useState(false);
   const [aiBulkPreview, setAiBulkPreview] = useState<string[] | null>(null);
-  const [activeTab, setActiveTab] = useState<'matchmaking' | 'leaderboards' | 'history'>('matchmaking');
+  const [activeTab, setActiveTab] = useState<'matchmaking' | 'leaderboards' | 'history' | 'members'>('matchmaking');
   const [leaderboardTab, setLeaderboardTab] = useState<'weekly' | 'alltime'>('weekly');
 
   // Donate States
@@ -105,9 +105,16 @@ export default function BiLacArena({
   const [newTournamentCode, setNewTournamentCode] = useState<string>('');
   const [newTournamentDesc, setNewTournamentDesc] = useState<string>('');
 
-  // Custom fetch function with tournament credentials + current user id in headers
+  // Members state (fetched for owner when on members tab)
+  const [members, setMembers] = useState<Array<{ userId: string; username: string; displayName: string; role: 'owner' | 'member'; joinedAt: number }>>([]);
+  const [inviteUsername, setInviteUsername] = useState<string>('');
+  const [myMemberRole, setMyMemberRole] = useState<'owner' | 'member' | null>(null);
+
+  // Custom fetch function with tournament credentials + current user id in headers.
+  // Always attaches x-user-id when logged in (covers /api/bilac/* AND other backend routes
+  // that need to identify the caller).
   const bilacFetch = async (url: string, options: RequestInit = {}) => {
-    const tid = currentTournament?.id || '';
+    const tid = currentTournament?.id || localStorage.getItem('bilac_tournament') || '';
     const code = localStorage.getItem('bilac_tournament_code') || '';
     const headers: Record<string, string> = {
       ...((options.headers as Record<string, string>) || {}),
@@ -121,7 +128,7 @@ export default function BiLacArena({
   // Fetch all tournaments for the portal
   const fetchTournaments = async () => {
     try {
-      const res = await fetch('/api/bilac/tournaments');
+      const res = await bilacFetch('/api/bilac/tournaments');
       if (res.ok) {
         const data = await res.json();
         setAllTournaments(data);
@@ -165,13 +172,82 @@ export default function BiLacArena({
     }
   };
 
+  // Fetch members of the current tournament (any member can read).
+  const fetchMembers = async () => {
+    if (!currentTournament) return;
+    try {
+      const res = await bilacFetch('/api/bilac/tournaments/members');
+      if (res.ok) {
+        const data = await res.json();
+        setMembers(data.members || []);
+        const me = (data.members || []).find((m: any) => m.userId === loggedInUserId);
+        setMyMemberRole(me?.role ?? null);
+      }
+    } catch (e) {
+      console.error('Lỗi tải members:', e);
+    }
+  };
+
+  // Owner: mời user mới qua username.
+  const handleInviteMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteUsername.trim()) {
+      setError('Vui lòng nhập username!');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await bilacFetch('/api/bilac/tournaments/members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: inviteUsername.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Không thể thêm thành viên!');
+        return;
+      }
+      setSuccessMsg(`Đã thêm @${data.member.username} vào giải đấu!`);
+      setInviteUsername('');
+      await fetchMembers();
+    } catch (err) {
+      setError('Lỗi kết nối máy chủ!');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Owner: xoá member khỏi giải.
+  const handleRemoveMember = async (userId: string, username: string) => {
+    if (!confirm(`Xoá @${username} khỏi giải đấu?`)) return;
+    setLoading(true);
+    try {
+      const res = await bilacFetch(`/api/bilac/tournaments/members/${userId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setSuccessMsg(`Đã xoá @${username} khỏi giải!`);
+        await fetchMembers();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || 'Không thể xoá thành viên!');
+      }
+    } catch (err) {
+      setError('Lỗi kết nối máy chủ!');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!currentTournament) {
       fetchTournaments();
     } else {
       fetchData();
+      fetchMembers();
     }
-  }, [currentTournament]);
+    if (currentTournament && activeTab === 'members') {
+      fetchMembers();
+    }
+  }, [currentTournament, activeTab]);
 
   // Logout/switch tournament
   const handleLogoutTournament = () => {
@@ -213,7 +289,7 @@ export default function BiLacArena({
 
     setLoading(true);
     try {
-      const res = await fetch('/api/bilac/tournaments/access', {
+      const res = await bilacFetch('/api/bilac/tournaments/access', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -258,7 +334,7 @@ export default function BiLacArena({
     setSuccessMsg(null);
     setLoading(true);
     try {
-      const res = await fetch('/api/bilac/tournaments/access', {
+      const res = await bilacFetch('/api/bilac/tournaments/access', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -317,7 +393,7 @@ export default function BiLacArena({
 
     setLoading(true);
     try {
-      const res = await fetch('/api/bilac/tournaments', {
+      const res = await bilacFetch('/api/bilac/tournaments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1193,6 +1269,18 @@ export default function BiLacArena({
               <History className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
               <span>Lịch Sử</span>
             </button>
+            <button
+              id="tab_members"
+              onClick={() => { playBeep(523, 'sine', 0.08); setActiveTab('members'); }}
+              className={`px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg cursor-pointer transition-all flex-1 sm:flex-initial flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap ${
+                activeTab === 'members'
+                  ? 'bg-white text-stone-950 shadow-xs'
+                  : 'text-stone-500 hover:text-stone-800'
+              }`}
+            >
+              <UserPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+              <span>Thành viên</span>
+            </button>
           </div>
 
           <button
@@ -1825,7 +1913,7 @@ export default function BiLacArena({
                     <button
                       onClick={async () => {
                         try {
-                          const res = await fetch(`/api/bilac/matches/${m.id}`, { method: 'DELETE' });
+                          const res = await bilacFetch(`/api/bilac/matches/${m.id}`, { method: 'DELETE' });
                           if (res.ok) {
                             setMatches(prev => prev.filter(item => item.id !== m.id));
                             playBeep(150, 'sawtooth', 0.2);
@@ -2024,14 +2112,114 @@ export default function BiLacArena({
           <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
           <span>Donate mua server ☕</span>
         </div>
-        
-        {/* Floating Button */}
+
         <button
           onClick={() => { playBeep(659, 'sine', 0.15); setIsDonateModalOpen(true); }}
           className="w-12 h-12 rounded-full bg-gradient-to-r from-rose-500 to-orange-500 text-white flex items-center justify-center shadow-2xl hover:scale-110 active:scale-95 transition-all duration-300 relative cursor-pointer border border-rose-400/20"
           title="Donate mua server"
         >
-          {/* Pulsing ring effect */}
+          <span className="absolute inset-0 rounded-full bg-rose-500/40 animate-ping pointer-events-none"></span>
+          <Heart className="w-5 h-5 fill-white text-white relative z-10 animate-pulse" />
+        </button>
+      </div>
+
+      {activeTab === 'members' && (
+        <div className="bg-white p-6 sm:p-8 rounded-2xl border border-stone-200 shadow-sm" id="bilac_tab_members_content">
+          <div className="mb-6">
+            <h2 className="text-lg font-bold text-stone-900 flex items-center gap-1.5">
+              <UserPlus className="w-5 h-5 text-orange-500" />
+              Thành Viên Giải Đấu
+            </h2>
+            <p className="text-stone-500 text-xs mt-0.5">
+              {myMemberRole === 'owner'
+                ? 'Bạn là chủ giải. Mời thành viên qua username và quản lý quyền truy cập.'
+                : 'Danh sách thành viên được mời vào giải đấu này.'}
+            </p>
+          </div>
+
+          {myMemberRole === 'owner' && (
+            <form
+              onSubmit={handleInviteMember}
+              className="mb-6 flex flex-col sm:flex-row gap-2 items-stretch sm:items-center bg-stone-50 p-3 rounded-xl border border-stone-200"
+              id="form_invite_member"
+            >
+              <input
+                id="input_invite_username"
+                type="text"
+                placeholder="username của người cần mời"
+                value={inviteUsername}
+                onChange={(e) => setInviteUsername(e.target.value)}
+                className="flex-1 px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                autoComplete="off"
+              />
+              <button
+                id="btn_invite_member"
+                type="submit"
+                disabled={loading || !inviteUsername.trim()}
+                className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-bold shadow-sm transition-colors disabled:bg-stone-200 disabled:text-stone-400 cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <UserPlus className="w-4 h-4" />
+                Mời vào giải
+              </button>
+            </form>
+          )}
+
+          <div className="space-y-2" id="members_list">
+            {members.length === 0 && (
+              <p className="text-xs text-stone-500 italic">Chưa có thành viên nào.</p>
+            )}
+            {members.map((m) => (
+              <div
+                key={m.userId}
+                className="flex items-center justify-between gap-3 p-3 bg-stone-50 rounded-xl border border-stone-200"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-full bg-orange-500 text-white font-bold flex items-center justify-center shrink-0">
+                    {m.displayName.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-bold text-stone-900 truncate">{m.displayName}</div>
+                    <div className="text-xs text-stone-500 font-mono truncate">@{m.username}</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span
+                    className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase ${
+                      m.role === 'owner'
+                        ? 'bg-orange-500/20 text-orange-700'
+                        : 'bg-stone-200 text-stone-600'
+                    }`}
+                  >
+                    {m.role === 'owner' ? 'Chủ giải' : 'Thành viên'}
+                  </span>
+                  {myMemberRole === 'owner' && m.role !== 'owner' && (
+                    <button
+                      onClick={() => handleRemoveMember(m.userId, m.username)}
+                      disabled={loading}
+                      className="text-[10px] text-red-500 hover:text-red-700 underline font-mono cursor-pointer"
+                      title="Xoá khỏi giải"
+                    >
+                      Xoá
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-[10px] text-stone-400 mt-6 italic">
+            Mã truy cập hiện tại không tự động thêm thành viên — chỉ chủ giải mới có quyền mời.
+          </p>
+        </div>
+      )}
+
+      {/* Floating Button */}
+      <div className="fixed bottom-6 right-6 z-50">
+        <button
+          onClick={() => { playBeep(659, 'sine', 0.15); setIsDonateModalOpen(true); }}
+          className="w-12 h-12 rounded-full bg-gradient-to-r from-rose-500 to-orange-500 text-white flex items-center justify-center shadow-2xl hover:scale-110 active:scale-95 transition-all duration-300 relative cursor-pointer border border-rose-400/20"
+          title="Donate mua server"
+        >
           <span className="absolute inset-0 rounded-full bg-rose-500/40 animate-ping pointer-events-none"></span>
           <Heart className="w-5 h-5 fill-white text-white relative z-10 animate-pulse" />
         </button>
