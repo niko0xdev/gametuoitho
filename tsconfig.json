@@ -14,13 +14,42 @@
     "isolatedModules": true,
     "moduleDetection": "force",
     "allowJs": true,
-    "jsx": "react-jsx",
+    "jsx": "preserve",
+    "incremental": true,
+    "noEmit": true,
+    "baseUrl": ".",
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@app/*": [
+        "./app/*"
+      ],
+      "@server/*": [
+        "./server/*"
       ]
     },
     "allowImportingTsExtensions": true,
-    "noEmit": true
-  }
+    "ignoreDeprecations": "6.0",
+    "strict": false,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
+  },
+  "include": [
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "server/**/*.ts",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    ".next"
+  ]
 }
