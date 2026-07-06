@@ -8,4 +8,6 @@ coverage/
 !.env.example
 database.db
 database.json
+.next/
+*.tsbuildinfo
 
