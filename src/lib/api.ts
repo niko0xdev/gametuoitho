@@ -1,8 +1,8 @@
 const BASE = import.meta.env.VITE_API_BASE as string;
 
 function currentUserId(): string | null {
-  // Today: localStorage. If app switches store later, update only here.
-  return localStorage.getItem('userId');
+  // App.tsx stores userId under key 'auth_userId'. Single source of truth.
+  return localStorage.getItem('auth_userId');
 }
 
 export type ApiOptions = RequestInit & {

@@ -16,7 +16,7 @@ export function useMatchmaking(gameId: string | null): MatchmakingState & {
 
   useEffect(() => {
     if (!gameId || state.status !== 'WAITING') return;
-    const userId = localStorage.getItem('userId');
+    const userId = localStorage.getItem('auth_userId');
     if (!userId) {
       setState({ status: 'IDLE', error: 'Not logged in' });
       return;
@@ -38,7 +38,7 @@ export function useMatchmaking(gameId: string | null): MatchmakingState & {
   const start = async () => {
     if (!gameId) return;
     setState({ status: 'WAITING' });
-    const userId = localStorage.getItem('userId');
+    const userId = localStorage.getItem('auth_userId');
     try {
       const res = await api<{ matched: boolean; matchId?: string; opponentId?: string }>('/api/matchmaking/join', {
         method: 'POST',
@@ -53,7 +53,7 @@ export function useMatchmaking(gameId: string | null): MatchmakingState & {
   };
 
   const cancel = async () => {
-    const userId = localStorage.getItem('userId');
+    const userId = localStorage.getItem('auth_userId');
     if (!gameId) return;
     try {
       await api('/api/matchmaking/leave', {

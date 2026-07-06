@@ -48,7 +48,7 @@ export function useMatchStream(matchId: string | null) {
 
   const sendMove = async (move: unknown) => {
     if (!matchId) return;
-    const userId = localStorage.getItem('userId');
+    const userId = localStorage.getItem('auth_userId');
     // Optimistic update
     const ts = Date.now();
     setSnapshot((prev) =>
@@ -66,7 +66,7 @@ export function useMatchStream(matchId: string | null) {
 
   const forfeit = async () => {
     if (!matchId) return;
-    const userId = localStorage.getItem('userId');
+    const userId = localStorage.getItem('auth_userId');
     await api(`/api/match/${matchId}/forfeit`, {
       method: 'POST',
       body: JSON.stringify({ userId }),
