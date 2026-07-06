@@ -916,6 +916,29 @@ ${summary}
     next();
   };
 
+  // Middleware: require login + là owner của tournament.
+  const requireBiLacOwner = (req: any, res: any, next: any) => {
+    const uid = requireLoggedIn(req, res);
+    if (!uid) return;
+    const tournamentId = req.tournamentId || req.headers['x-tournament-id'] || req.query.tournamentId || req.body?.tournamentId;
+    if (!tournamentId) {
+      return res.status(400).json({ error: 'Thiếu mã giải đấu!' });
+    }
+    const tour = db.getBiLacTournament(tournamentId);
+    if (!tour) {
+      return res.status(404).json({ error: 'Không tìm thấy giải đấu này!' });
+    }
+    if (tour.code !== (req.headers['x-tournament-code'] || req.query.code)) {
+      return res.status(403).json({ error: 'Mã code truy cập không chính xác!' });
+    }
+    if (!db.isBiLacTournamentOwner(tournamentId, uid)) {
+      return res.status(403).json({ error: 'Chỉ chủ giải mới có quyền thực hiện thao tác này!' });
+    }
+    req.userId = uid;
+    req.tournamentId = tournamentId;
+    next();
+  };
+
   // 1. GET TOURNAMENTS (chỉ trả giải mà user hiện tại là thành viên)
   app.get('/api/bilac/tournaments', (req, res) => {
     const uid = requireLoggedIn(req, res);
@@ -929,7 +952,8 @@ ${summary}
     res.json(tours);
   });
 
-  // 2. JOIN TOURNAMENT BY ACCESS CODE — user phải login. Nếu code đúng và chưa là thành viên thì auto-add.
+  // 2. RESOLVE TOURNAMENT BY ACCESS CODE — user phải login VÀ phải đã được owner/invite add.
+  //    KHÔNG auto-add. Chỉ verify code đúng và user là member, trả về metadata.
   app.post('/api/bilac/tournaments/access', (req, res) => {
     const uid = requireLoggedIn(req, res);
     if (!uid) return;
@@ -945,19 +969,7 @@ ${summary}
       return res.status(403).json({ error: 'Mã truy cập không chính xác!' });
     }
     if (!db.isBiLacTournamentMember(tournamentId, uid)) {
-      const user = db.getUser(uid);
-      if (!user) {
-        return res.status(401).json({ error: 'Tài khoản không tồn tại!' });
-      }
-      db.saveBiLacTournamentMember({
-        id: 'member_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
-        tournamentId,
-        userId: uid,
-        username: user.username,
-        displayName: user.displayName,
-        role: 'member',
-        joinedAt: Date.now()
-      });
+      return res.status(403).json({ error: 'Bạn chưa được mời vào giải đấu này. Vui lòng liên hệ chủ giải để được thêm vào!' });
     }
     res.json({ success: true, tournament: { id: tour.id, name: tour.name, description: tour.description } });
   });
@@ -1002,6 +1014,61 @@ ${summary}
     });
 
     res.json({ success: true, tournament });
+  });
+
+  // 3a. LIST TOURNAMENT MEMBERS (any member can read).
+  app.get('/api/bilac/tournaments/members', checkBiLacTournamentAccess, (req: any, res) => {
+    const tournamentId = req.tournamentId;
+    const members = db.getBiLacTournamentMembers(tournamentId).map(m => ({
+      id: m.id,
+      userId: m.userId,
+      username: m.username,
+      displayName: m.displayName,
+      role: m.role,
+      joinedAt: m.joinedAt,
+    }));
+    res.json({ success: true, members });
+  });
+
+  // 3b. INVITE MEMBER BY USERNAME (owner only).
+  app.post('/api/bilac/tournaments/members', requireBiLacOwner, (req: any, res) => {
+    const tournamentId = req.tournamentId;
+    const { username } = req.body;
+    if (!username || !String(username).trim()) {
+      return res.status(400).json({ error: 'Vui lòng nhập username!' });
+    }
+    const trimmed = String(username).trim().toLowerCase();
+    const targetUser = db.getUserByUsername(trimmed);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'Không tìm thấy user có username này!' });
+    }
+    if (db.isBiLacTournamentMember(tournamentId, targetUser.id)) {
+      return res.status(400).json({ error: 'User này đã là thành viên của giải!' });
+    }
+    db.saveBiLacTournamentMember({
+      id: `mem-${tournamentId}-${targetUser.id}-${Date.now()}`,
+      tournamentId,
+      userId: targetUser.id,
+      username: targetUser.username,
+      displayName: targetUser.displayName,
+      role: 'member',
+      joinedAt: Date.now(),
+    });
+    res.json({ success: true, member: { userId: targetUser.id, username: targetUser.username, displayName: targetUser.displayName, role: 'member' } });
+  });
+
+  // 3c. REMOVE MEMBER (owner only, không thể xoá owner).
+  app.delete('/api/bilac/tournaments/members/:userId', requireBiLacOwner, (req: any, res) => {
+    const tournamentId = req.tournamentId;
+    const targetUserId = req.params.userId;
+    if (targetUserId === req.userId) {
+      return res.status(400).json({ error: 'Không thể tự xoá chủ giải!' });
+    }
+    if (!db.isBiLacTournamentMember(tournamentId, targetUserId)) {
+      return res.status(404).json({ error: 'User không phải thành viên của giải!' });
+    }
+    db.deleteBiLacTournamentMember(tournamentId, targetUserId);
+    res.json({ success: true });
   });
 
   // 4. GET PLAYERS FOR THE TOURNAMENT

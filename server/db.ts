@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import DatabaseDriver from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import {
   usersTable,
   profilesTable,
@@ -1061,6 +1061,39 @@ class Database {
   isBiLacTournamentMember(tournamentId: string, userId: string): boolean {
     const members = this.getBiLacTournamentMembers(tournamentId);
     return members.some(m => m.userId === userId);
+  }
+
+  isBiLacTournamentOwner(tournamentId: string, userId: string): boolean {
+    const members = this.getBiLacTournamentMembers(tournamentId);
+    return members.some(m => m.userId === userId && m.role === 'owner');
+  }
+
+  deleteBiLacTournamentMember(tournamentId: string, userId: string): void {
+    drizzleDb.delete(bilacTournamentMembersTable)
+      .where(and(
+        eq(bilacTournamentMembersTable.tournamentId, tournamentId),
+        eq(bilacTournamentMembersTable.userId, userId)
+      ))
+      .run();
+  }
+
+  getBiLacTournamentMember(tournamentId: string, userId: string): { id: string; tournamentId: string; userId: string; username: string; displayName: string; role: 'owner'|'member'; joinedAt: number } | undefined {
+    const row = drizzleDb.select().from(bilacTournamentMembersTable)
+      .where(and(
+        eq(bilacTournamentMembersTable.tournamentId, tournamentId),
+        eq(bilacTournamentMembersTable.userId, userId)
+      ))
+      .get();
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      tournamentId: row.tournamentId,
+      userId: row.userId,
+      username: row.username,
+      displayName: row.displayName,
+      role: row.role as 'owner' | 'member',
+      joinedAt: row.joinedAt,
+    };
   }
 
   // MyLeagues
