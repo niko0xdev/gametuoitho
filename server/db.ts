@@ -32,18 +32,18 @@ import {
 const DB_FILE = path.join(process.cwd(), 'database.json');
 const SQLITE_FILE = path.join(process.cwd(), 'database.db');
 
-let _db: BetterSqliteDb | null = null;
-const DEFAULT_DB = SQLITE_FILE;
+let _db: { file: string; db: BetterSqliteDb } | null = null;
 
-export function openDb(file: string = DEFAULT_DB): BetterSqliteDb {
-  if (file === ':memory:') {
-    return new DatabaseDriver(file);
+export function openDb(file?: string): BetterSqliteDb {
+  const target = file ?? process.env.DB_FILE ?? SQLITE_FILE;
+  if (target === ':memory:') {
+    return new DatabaseDriver(target);
   }
-  if (_db && file === DEFAULT_DB) return _db;
-  const db = new DatabaseDriver(file);
+  if (_db && _db.file === target) return _db.db;
+  const db = new DatabaseDriver(target);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
-  if (file === DEFAULT_DB) _db = db;
+  _db = { file: target, db };
   return db;
 }
 
