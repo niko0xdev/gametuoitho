@@ -2,3 +2,6 @@
 [install]
 saveExactLockfile = false
 auto = "auto"
+
+[test]
+preload = []
