@@ -1,0 +1,6 @@
+{
+  "name": "gametuoitho.space",
+  "description": "Multi-genre online brain-training platform with real-time competitive games, tournaments, spectator lobbies, daily challenges, and match replays.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
