@@ -28,8 +28,8 @@ import {
   MyLeague
 } from '../src/types.ts';
 
-const DB_FILE = path.join(process.cwd(), 'database.json');
-const SQLITE_FILE = path.join(process.cwd(), 'database.db');
+const DB_FILE = process.env.DB_FILE_JSON || path.join(process.cwd(), 'database.json');
+const SQLITE_FILE = process.env.DB_FILE || path.join(process.cwd(), 'database.db');
 
 export interface UserRecord {
   id: string; // userId, e.g. 'user_a' or generated
