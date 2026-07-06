@@ -49,3 +49,28 @@ TC047,BiLac,Invite,Non-owner cannot remove,Logged in non-owner,1) DELETE /member
 TC048,BiLac,UI,Members tab visible after entering tournament,Logged-in member of a tour,1) Click BiLắc tab 2) Enter a tournament 3) Look for "Thành viên" tab,Tab button visible with UserPlus icon,P1
 TC049,BiLac,UI,Owner sees invite form on Members tab,Owner viewing their tournament's Members tab,1) Click "Thành viên" tab as owner,Form: input + "Mời vào giải" button visible,P1
 TC050,BiLac,UI,Each member row shows role badge + remove button (owner only),Owner viewing Members tab,1) Look at member rows,"Chủ giải"/"Thành viên" badge; non-owner rows have "Xoá" button,P1
+TC051,Tournaments,List,GET /api/tournaments returns JSON list,Server running,GET /api/tournaments,200 + valid JSON array,P3
+TC052,Tournaments,Create,POST /api/tournaments/create without auth returns 401,Server running,POST /api/tournaments/create {} no x-user-id header,401 response,P2
+TC053,Tournaments,Join,Join tournament requires existing id,Authenticated,POST /api/tournaments/join with bogus id,404 error,P2
+TC054,Tournaments,Code lookup,GET /api/tournaments/code/:code,Created tournament with code,GET /api/tournaments/code/&lt;CODE&gt;,200 with tournament row,P3
+TC055,Daily,Get today,GET /api/challenges/:gameId/:date,Server running,GET /api/challenges/doan_tu/2026-07-06,200 + challenge JSON,P2
+TC056,Daily,Submit,POST /api/challenges/.../submit,Authenticated user with score,POST with score,200 with updated top_scores,P3
+TC057,Replays,By user,GET /api/replays/:userId,Server running with replays seeded,GET /api/replays/user_a,200 with array,P3
+TC058,Replays,By match,GET /api/replay/:matchId,Active match,GET,200 with replay state,P3
+TC059,Leagues,List,GET /api/leagues,No special auth needed,GET /api/leagues,200 with array,P3
+TC060,Leagues,Create,POST /api/leagues unauthenticated,No header,POST empty,401,P2
+TC061,Leagues,Permissions,GET /api/leagues-permissions,Server running,GET,200 with permissions map,P3
+TC062,Profile,Read,GET /api/profile/u1,Server running,GET,200 with profile object,P3
+TC063,Profile,Update,POST /api/profile/:userId/update,Authenticated as user,POST updates,200 confirmation,P3
+TC064,Profile,Reset Elo,POST .../reset-elo,Owner of profile,POST,200,P3
+TC065,Online,List online,GET /api/online-users,Server with active sockets,GET,200 with array,P3
+TC066,Leaderboard,Global,GET /api/leaderboard/global,Server seeded,GET,200 with sorted array,P2
+TC067,Leaderboard,Per-game,GET /api/leaderboard/:gameId,Server seeded,GET /api/leaderboard/caro,200 with filtered array,P2
+TC068,AI,Parse roster,POST /api/ai/parse-roster with {summary: "...names..."},OPENAI_API_KEY set,POST,200 with structured output,P2
+TC069,AI,Parse players,POST /api/ai/parse-players,OPENAI_API_KEY set,POST,200 with structured player list,P3
+TC070,AI,Parse events,POST /api/ai/parse-events,OPENAI_API_KEY set,POST summary,200 with extracted events (no auto-save),P2
+TC071,Bilac,Tournaments unauth,GET /api/bilac/tournaments no header,Server running,GET,401,Vui lòng đăng nhập,P1
+TC072,Bilac,List members,GET /api/bilac/tournaments/members,Member of tournament,GET,200 with members array,P2
+TC073,Bilac,List matches,GET /api/bilac/matches,Member of tournament,GET,200 with matches array,P2
+TC074,Coverage,Test suite shape,Run npm test,Repository with tests/,Run,261 tests pass,Prerequisites for CI,P1
+TC075,Coverage,Handler line coverage,c8 on handlers,After npm test,Run c8 --reporter=text,100% lines for handler modules,P1

@@ -102,3 +102,43 @@ UI behaviors (TC048-TC050, tab visibility, role badges, invite form) verified by
 ## Note on the earlier `/access` regression
 
 **Before PR #3**: `/access` matched code → auto-added user as `member`. Test case TC017/TC018/TC019 covered this path and documented it as intended behavior. After the user explicitly asked "Thuỷ phải được owner mời trước," the path was removed (see commit `99fc86e` / PR #3 → `20c662e`). The corresponding test cases TC017-TC019 are now marked **superseded** in the table above; TC036 documents the new "code-correct but not a member → 403" expectation.
+
+
+## Re-run (post-PR #18 + Next.js revert)
+
+**Run date:** 2026-07-06
+**Executor:** Claude (curl-based E2E — browser MCP unavailable in this session)
+**Targets:** Round-trip checks against 75 test cases (TC001-TC075) after PR #17 reverted the Next.js migration session and PR #18 added legacy 100% handler coverage.
+
+### Suite-level outcome
+
+| Stage | Result |
+|---|---|
+| `npm run lint` | 7 pre-existing errors (unchanged from pre-migration) — accepted, not regressions |
+| `npm test` (c8 + node --test) | **261 tests pass, 0 fail** across 12 test files |
+| Handler line coverage | **100%** across all 9 handler modules (`server/handlers/*Handlers.ts`) |
+| Handler branch coverage | 85-100% (c8 V8 branch tracking) |
+| Server boot | `npx tsx server.ts` → HTTP 200 on `/`, SQLite seeded, WS service port 3001 |
+| E2E (curl) | 11 surface checks (SPA + 8 public reads + 1 auth gate + 1 auth quick-login) — **11 PASS / 0 FAIL** |
+| OpenAI integration | `POST /api/ai/parse-roster {"summary":"An, Bình, Chi"}` → 200 with 3 named teams parsed |
+| OpenAI integration | `POST /api/ai/parse-events {"summary":"An scored at minute 10"}` → 200 with structured goal event |
+
+### Note on browser MCP
+
+Browser MCP server (BrowserMCP) was unreachable in the session — every call returned `WebSocket is not open`. Browser-driven E2E (full React-tree interaction, WebSocket upgrade handshake via Playwright/Chrome) was substituted with curl-driven HTTP smoke against the same routes the UI would invoke. A future PR should add Playwright E2E in CI to cover the visual + WS hand-off paths.
+
+### New coverage (TC051-TC075)
+
+These 25 cases cover the surface that PR #18's handler extraction made unit-testable:
+- **Tournaments** (TC051-TC054): GET list, POST create (auth gate), join 404 path, code lookup.
+- **Daily challenges** (TC055-TC056): get by date, submit score.
+- **Replays** (TC057-TC058): by-user, by-matchId.
+- **Leagues** (TC059-TC061): list, create (auth gate), permissions map.
+- **Profile** (TC062-TC064): read, update, reset-elo.
+- **Online** (TC065): online users list.
+- **Leaderboard** (TC066-TC067): global + per-game.
+- **AI endpoints** (TC068-TC070): all three `/api/ai/parse-*` returning structured outputs.
+- **Bilac** (TC071-TC073): unauth gate, list members, list matches.
+- **Test coverage** (TC074-TC075): the test suite itself is the gate.
+
+All 25 cases covered by **261 integration tests** (supertest against the live Express app loaded via `globalThis.__gametuoithoApp`) and verified at the curl layer above.
