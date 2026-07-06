@@ -4,11 +4,15 @@ import { cors } from './lib/cors';
 import type { Bindings } from './db';
 import { healthRoute } from './routes/health';
 import { authRoute } from './routes/auth';
+import { profileRoute } from './routes/profile';
+import { leaderboardRoute } from './routes/leaderboard';
 
 const app = new Hono<{ Bindings: Bindings }>();
 app.use('*', cors());
 app.route('/api/health', healthRoute);
 app.route('/api/auth', authRoute);
+app.route('/api/profile', profileRoute);
+app.route('/api/leaderboard', leaderboardRoute);
 app.get('/', (c) => c.text('gametuoitho API'));
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 app.onError((err, c) => {
