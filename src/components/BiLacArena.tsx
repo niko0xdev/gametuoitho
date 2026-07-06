@@ -79,23 +79,17 @@ export default function BiLacArena({
     return cached ? JSON.parse(cached) : null;
   });
   const [myTournaments, setMyTournaments] = useState<any[]>(() => {
-    const cached = localStorage.getItem('bilac_my_tournaments');
-    if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch (e) {
-        return [];
-      }
+    try {
+      const cached = localStorage.getItem('bilac_my_tournaments');
+      const parsed = cached ? JSON.parse(cached) : [];
+      // Strip any cached default-seed tours so the list only contains entries
+      // that the server actually granted this user membership to.
+      return Array.isArray(parsed)
+        ? parsed.filter((t: any) => t && t.id !== 'default-tour')
+        : [];
+    } catch {
+      return [];
     }
-    // Pre-populate with default seed tournament so they don't see an empty list
-    const defaultTour = {
-      id: 'default-tour',
-      name: 'Giải Đấu Văn Phòng',
-      description: 'Giải đấu giao lưu bi lắc văn phòng mặc định',
-      code: '1234',
-      lastAccessed: Date.now()
-    };
-    return [defaultTour];
   });
   const [allTournaments, setAllTournaments] = useState<any[]>([]);
   const [accessCodeInput, setAccessCodeInput] = useState<string>('');
@@ -132,6 +126,17 @@ export default function BiLacArena({
       if (res.ok) {
         const data = await res.json();
         setAllTournaments(data);
+        // Cross-check cached myTournaments against the API result so cards for tours
+        // the current user no longer has access to (removed by owner, or never a member)
+        // don't leak from localStorage.
+        setMyTournaments(prev => {
+          const allowedIds = new Set(data.map((d: any) => d.id));
+          const filtered = prev.filter(t => allowedIds.has(t.id));
+          if (filtered.length !== prev.length) {
+            localStorage.setItem('bilac_my_tournaments', JSON.stringify(filtered));
+          }
+          return filtered;
+        });
         if (data.length > 0 && !selectedTournamentId) {
           setSelectedTournamentId(data[0].id);
         }
@@ -303,14 +308,15 @@ export default function BiLacArena({
         playBeep(180, 'sawtooth', 0.3);
       } else {
         localStorage.setItem('bilac_tournament', JSON.stringify(data.tournament));
-        localStorage.setItem('bilac_tournament_code', accessCodeInput.trim());
+        const trimmedCode = accessCodeInput.trim();
+        localStorage.setItem('bilac_tournament_code', trimmedCode);
+        localStorage.setItem(`bilac_tournament_code_${data.tournament.id}`, trimmedCode);
 
-        // Update personal list
+        // Update personal list — KHÔNG lưu code vào cache để tránh rò rỉ access code qua localStorage.
         const newTour = {
           id: data.tournament.id,
           name: data.tournament.name,
           description: data.tournament.description || '',
-          code: accessCodeInput.trim(),
           lastAccessed: Date.now()
         };
         const updated = [newTour, ...myTournaments.filter(t => t.id !== newTour.id)];
@@ -333,13 +339,22 @@ export default function BiLacArena({
     setError(null);
     setSuccessMsg(null);
     setLoading(true);
+    // Cache không lưu code nữa — nếu tour trong cache chưa có code, lấy code đã lưu riêng
+    // cho tour này (nếu có) hoặc yêu cầu nhập lại.
+    const code = tour.code || localStorage.getItem(`bilac_tournament_code_${tour.id}`) || '';
+    if (!code) {
+      setLoading(false);
+      setError('Vui lòng nhập mã code truy cập ở form bên dưới để vào giải đấu này.');
+      setSelectedTournamentId(tour.id);
+      return;
+    }
     try {
       const res = await bilacFetch('/api/bilac/tournaments/access', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tournamentId: tour.id,
-          code: tour.code
+          code
         })
       });
       const data = await res.json();
@@ -348,11 +363,13 @@ export default function BiLacArena({
         playBeep(180, 'sawtooth', 0.3);
       } else {
         localStorage.setItem('bilac_tournament', JSON.stringify(data.tournament));
-        localStorage.setItem('bilac_tournament_code', tour.code);
+        localStorage.setItem('bilac_tournament_code', code);
+        localStorage.setItem(`bilac_tournament_code_${tour.id}`, code);
 
-        // Update timestamp
+        // Update timestamp — KHÔNG lưu access code vào cache để tránh rò rỉ qua localStorage.
+        const { code: _omit, ...tourNoCode } = tour;
         const updated = [
-          { ...tour, lastAccessed: Date.now() },
+          { ...tourNoCode, lastAccessed: Date.now() },
           ...myTournaments.filter(t => t.id !== tour.id)
         ];
         localStorage.setItem('bilac_my_tournaments', JSON.stringify(updated));
@@ -409,14 +426,15 @@ export default function BiLacArena({
       } else {
         setSuccessMsg(`Đã tạo thành công giải đấu "${data.tournament.name}"!`);
         localStorage.setItem('bilac_tournament', JSON.stringify(data.tournament));
-        localStorage.setItem('bilac_tournament_code', newTournamentCode.trim());
+        const trimmedNewCode = newTournamentCode.trim();
+        localStorage.setItem('bilac_tournament_code', trimmedNewCode);
+        localStorage.setItem(`bilac_tournament_code_${data.tournament.id}`, trimmedNewCode);
 
-        // Save to myTournaments list
+        // Save to myTournaments list (không cache access code).
         const newTour = {
           id: data.tournament.id,
           name: data.tournament.name,
           description: data.tournament.description || '',
-          code: newTournamentCode.trim(),
           lastAccessed: Date.now()
         };
         const updated = [newTour, ...myTournaments.filter(t => t.id !== newTour.id)];
