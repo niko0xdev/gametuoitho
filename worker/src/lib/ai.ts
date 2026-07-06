@@ -41,7 +41,7 @@ export async function callStructured(input: CallStructuredInput): Promise<unknow
   });
 
   if (!res.ok) {
-    const errBody = await res.json().catch(() => ({}));
+    const errBody = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
     const msg = errBody?.error?.message ?? `AI request failed (${res.status})`;
     throw new Error(msg);
   }
