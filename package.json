@@ -10,7 +10,12 @@
     "clean": "rm -rf dist database.json",
     "lint": "tsc --noEmit",
     "test": "c8 --reporter=text --reporter=lcov --include='server/**/*.ts' --include='src/lib/**/*.ts' --exclude='**/*.test.ts' --exclude='server/roomManager.ts' --exclude='server/db.ts' npx tsx --test tests/**/*.test.ts",
-    "test:fast": "npx tsx --test tests/**/*.test.ts"
+    "test:fast": "npx tsx --test tests/**/*.test.ts",
+    "dev:worker": "concurrently -k -n vite,worker -c blue,green \"vite\" \"cd worker && npx wrangler dev --local --port 8787\"",
+    "deploy:worker": "cd worker && npx wrangler deploy",
+    "db:migrate:local": "cd worker && npx wrangler d1 migrations apply gametuoitho-db --local",
+    "db:migrate:remote": "cd worker && npx wrangler d1 migrations apply gametuoitho-db --remote",
+    "test:worker": "cd worker && npm test"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
@@ -34,6 +39,7 @@
     "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.21",
     "c8": "^11.0.0",
+    "concurrently": "^10.0.3",
     "drizzle-kit": "^0.31.10",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
