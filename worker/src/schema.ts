@@ -95,6 +95,16 @@ export const bilacTournamentsTable = sqliteTable('bilac_tournaments', {
   createdAt: integer('created_at').notNull(),
 });
 
+export const bilacTournamentMembersTable = sqliteTable('bilac_tournament_members', {
+  id: text('id').primaryKey(),
+  tournamentId: text('tournament_id').notNull(),
+  userId: text('user_id').notNull(),
+  username: text('username').notNull(),
+  displayName: text('display_name').notNull(),
+  role: text('role').notNull(), // 'owner' | 'member'
+  joinedAt: integer('joined_at').notNull(),
+});
+
 export const myLeaguesTable = sqliteTable('my_leagues', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),

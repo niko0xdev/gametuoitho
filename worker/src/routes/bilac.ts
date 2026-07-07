@@ -4,11 +4,19 @@ import { eq } from 'drizzle-orm';
 import type { Bindings } from '../db';
 import { createDb } from '../db';
 import {
-  bilacTournamentsTable, bilacPlayersTable, bilacMatchesTable,
+  bilacTournamentsTable, bilacPlayersTable, bilacMatchesTable, bilacTournamentMembersTable, usersTable,
 } from '../schema';
 import { requireLoggedIn } from '../lib/auth';
 
 export const bilacRoute = new Hono<{ Bindings: Bindings }>();
+
+// team1/team2 are stored as JSON strings; clients expect arrays.
+const serializeMatch = (m: any) => {
+  const parse = (v: any) => {
+    try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
+  };
+  return { ...m, team1: parse(m.team1), team2: parse(m.team2) };
+};
 
 function getBiLacWeeklyInterval(date: Date) {
   const utcMs = date.getTime() + (date.getTimezoneOffset() * 60000);
@@ -43,6 +51,19 @@ const checkAccess = async (c: any, next: any) => {
   await next();
 };
 
+// Require the logged-in user to be the tournament owner.
+const requireOwner = async (c: any, next: any) => {
+  const tournamentId = c.get('tournamentId');
+  const userId = c.req.header('x-user-id');
+  if (!userId) return c.json({ error: 'Yêu cầu đăng nhập!' }, 401);
+  const db = createDb(c.env);
+  const members = await db.select().from(bilacTournamentMembersTable).where(eq(bilacTournamentMembersTable.tournamentId, tournamentId)).all();
+  const me = members.find((m: any) => m.userId === userId && m.role === 'owner');
+  if (!me) return c.json({ error: 'Chỉ chủ giải đấu mới được thực hiện thao tác này!' }, 403);
+  c.set('userId', userId);
+  await next();
+};
+
 bilacRoute.get('/tournaments', async (c) => {
   const db = createDb(c.env);
   const all = await db.select().from(bilacTournamentsTable).all();
@@ -61,13 +82,74 @@ bilacRoute.post('/tournaments/access', async (c) => {
 });
 
 bilacRoute.post('/tournaments', requireLoggedIn(), async (c) => {
+  const creatorId = c.get('userId');
   const { name, code, description } = await c.req.json();
   if (!name || !name.trim()) return c.json({ error: 'Tên giải đấu không được để trống!' }, 400);
   if (!code || !code.trim()) return c.json({ error: 'Mã truy cập giải đấu không được để trống!' }, 400);
   const id = 'tour-' + Date.now();
   const db = createDb(c.env);
   await db.insert(bilacTournamentsTable).values({ id, name: name.trim(), code: code.trim(), description: description?.trim() ?? null, createdAt: Date.now() } as any);
+  // Auto-add creator as tournament owner.
+  const creatorRows = await db.select().from(usersTable).where(eq(usersTable.id, creatorId)).all();
+  const creator = creatorRows[0];
+  if (creator) {
+    await db.insert(bilacTournamentMembersTable).values({
+      id: `mem-${id}-${creatorId}`,
+      tournamentId: id,
+      userId: creatorId,
+      username: (creator as any).username,
+      displayName: (creator as any).displayName,
+      role: 'owner',
+      joinedAt: Date.now(),
+    } as any);
+  }
   return c.json({ success: true, tournament: { id, name: name.trim(), code: code.trim(), description: description?.trim() ?? '', createdAt: Date.now() } });
+});
+
+bilacRoute.get('/tournaments/members', checkAccess, async (c: any) => {
+  const tournamentId = c.get('tournamentId');
+  const db = createDb(c.env);
+  const members = await db.select().from(bilacTournamentMembersTable).where(eq(bilacTournamentMembersTable.tournamentId, tournamentId)).all();
+  return c.json({
+    success: true,
+    members: members.map((m: any) => ({ id: m.id, userId: m.userId, username: m.username, displayName: m.displayName, role: m.role, joinedAt: m.joinedAt })),
+  });
+});
+
+bilacRoute.post('/tournaments/members', checkAccess, requireOwner, async (c: any) => {
+  const tournamentId = c.get('tournamentId');
+  const { username } = await c.req.json();
+  if (!username || !String(username).trim()) return c.json({ error: 'Vui lòng nhập username!' }, 400);
+  const trimmed = String(username).trim().toLowerCase();
+  const db = createDb(c.env);
+  const userRows = await db.select().from(usersTable).where(eq(usersTable.username, trimmed)).all();
+  const target = userRows[0];
+  if (!target) return c.json({ error: 'Không tìm thấy user có username này!' }, 404);
+  const existing = await db.select().from(bilacTournamentMembersTable).where(eq(bilacTournamentMembersTable.tournamentId, tournamentId)).all();
+  if (existing.find((m: any) => m.userId === (target as any).id)) return c.json({ error: 'User này đã là thành viên của giải!' }, 400);
+  await db.insert(bilacTournamentMembersTable).values({
+    id: `mem-${tournamentId}-${(target as any).id}-${Date.now()}`,
+    tournamentId,
+    userId: (target as any).id,
+    username: (target as any).username,
+    displayName: (target as any).displayName,
+    role: 'member',
+    joinedAt: Date.now(),
+  } as any);
+  return c.json({ success: true, member: { userId: (target as any).id, username: (target as any).username, displayName: (target as any).displayName, role: 'member' } });
+});
+
+bilacRoute.delete('/tournaments/members/:userId', checkAccess, requireOwner, async (c: any) => {
+  const tournamentId = c.get('tournamentId');
+  const reqUserId = c.get('userId');
+  const targetUserId = c.req.param('userId');
+  if (targetUserId === reqUserId) return c.json({ error: 'Không thể tự xoá chủ giải!' }, 400);
+  const db = createDb(c.env);
+  const members = await db.select().from(bilacTournamentMembersTable).where(eq(bilacTournamentMembersTable.tournamentId, tournamentId)).all();
+  const target = members.find((m: any) => m.userId === targetUserId);
+  if (!target) return c.json({ error: 'User không phải thành viên của giải!' }, 404);
+  await db.delete(bilacTournamentMembersTable).where(eq(bilacTournamentMembersTable.id, (target as any).id));
+  return c.json({ success: true });
 });
 
 bilacRoute.get('/players', checkAccess, async (c: any) => {
@@ -105,7 +187,7 @@ bilacRoute.get('/matches', checkAccess, async (c: any) => {
   const tournamentId = c.get('tournamentId');
   const db = createDb(c.env);
   const all = await db.select().from(bilacMatchesTable).where(eq(bilacMatchesTable.tournamentId, tournamentId)).all();
-  return c.json(all);
+  return c.json(all.map(serializeMatch));
 });
 
 bilacRoute.post('/matches', checkAccess, async (c: any) => {
@@ -183,7 +265,7 @@ bilacRoute.post('/matches', checkAccess, async (c: any) => {
     tournamentId,
   };
   await db.insert(bilacMatchesTable).values(match as any);
-  return c.json(match);
+  return c.json(serializeMatch(match));
 });
 
 bilacRoute.post('/matches/:id/update', checkAccess, async (c: any) => {
@@ -196,7 +278,7 @@ bilacRoute.post('/matches/:id/update', checkAccess, async (c: any) => {
   if (!m) return c.json({ error: 'Không tìm thấy trận đấu!' }, 404);
   if ((m as any).tournamentId !== tournamentId) return c.json({ error: 'Bạn không có quyền chỉnh sửa trận đấu của giải đấu này!' }, 403);
   await db.update(bilacMatchesTable).set({ score1, score2, status } as any).where(eq(bilacMatchesTable.id, matchId));
-  return c.json({ ...m, score1, score2, status });
+  return c.json(serializeMatch({ ...m, score1, score2, status }));
 });
 
 bilacRoute.delete('/matches/:id', checkAccess, async (c: any) => {

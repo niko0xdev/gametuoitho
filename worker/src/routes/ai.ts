@@ -60,3 +60,40 @@ ${summary}
     return c.json({ error: 'Không thể phân tích dữ liệu bằng AI. Chi tiết: ' + (e.message || String(e)) }, 500);
   }
 });
+
+// Extract unique player names from free-form text (Bi Lắc bulk add).
+aiRoute.post('/parse-players', requireLoggedIn(), async (c) => {
+  const { text } = await c.req.json();
+  if (!text || typeof text !== 'string' || text.trim() === '') {
+    return c.json({ error: 'Vui lòng nhập danh sách tên cần tách!' }, 400);
+  }
+  if (new TextEncoder().encode(text).byteLength > MAX_SUMMARY_BYTES) {
+    return c.json({ error: `Nội dung vượt quá ${MAX_SUMMARY_BYTES / 1024} KB!` }, 413);
+  }
+  if (!c.env.OPENAI_API_KEY || !c.env.OPENAI_MODEL) {
+    return c.json({ error: 'Chưa cấu hình OPENAI_API_KEY/OPENAI_MODEL trên Worker secrets!' }, 500);
+  }
+
+  const schema = {
+    type: 'object',
+    properties: { names: { type: 'array', items: { type: 'string' } } },
+    required: ['names'],
+  };
+
+  try {
+    const result = await callStructured({
+      apiKey: c.env.OPENAI_API_KEY,
+      model: c.env.OPENAI_MODEL,
+      baseUrl: c.env.OPENAI_BASE_URL,
+      systemPrompt:
+        'Bạn là trợ lý AI trích xuất tên người chơi. Đọc văn bản tự do (danh sách cầu thủ, đội hình, văn bản hỗn độn) và trả về mảng JSON các tên đầy đủ duy nhất. Bỏ tiêu đề nhóm ("Đội X", "Team A"), bỏ số thứ tự đầu dòng ("1.", "-", "•"), bỏ trùng lặp (giữ lần xuất hiện đầu tiên). Mỗi tên là chuỗi tiếng Việt có dấu, đã trim. Chỉ trả JSON đúng schema.',
+      userPrompt: `Hãy trích xuất tất cả tên người chơi duy nhất từ văn bản dưới đây:\n"""\n${text}\n"""`,
+      functionName: 'extract_player_names',
+      schema,
+    });
+    return c.json(result);
+  } catch (e: any) {
+    console.error('AI error:', e);
+    return c.json({ error: 'Không thể tách tên bằng AI. Chi tiết: ' + (e.message || String(e)) }, 500);
+  }
+});
