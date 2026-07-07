@@ -86,50 +86,6 @@ authRoute.post('/login', async (c) => {
   });
 });
 
-authRoute.post('/google-sso', async (c) => {
-  const { email, displayName, avatar } = await c.req.json();
-  if (!email) return c.json({ error: 'Thiếu thông tin Google Account Email!' }, 400);
-  const te = email.trim().toLowerCase();
-  const db = createDb(c.env);
-
-  let rows = await db.select().from(usersTable).where(eq(usersTable.email, te)).all();
-  let user = rows[0];
-
-  if (!user) {
-    const userId = 'user_g_' + Date.now();
-    const tempUsername = te.split('@')[0] + '_g';
-    const finalAvatar = avatar || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(userId)}`;
-    const dn = displayName || te.split('@')[0];
-
-    await db.insert(usersTable).values({
-      id: userId,
-      username: tempUsername,
-      email: te,
-      passwordHash: '',
-      displayName: dn,
-      avatar: finalAvatar,
-      role: 'user',
-      isGoogleUser: 1,
-    });
-
-    await db.insert(profilesTable).values({
-      id: userId,
-      displayName: dn,
-      avatar: finalAvatar,
-      eloCaro: 1500, eloCoTuong: 1500, eloCoVua: 1500, eloOAnQuan: 1500,
-      eloCoCaNgua: 1500, eloDuoiHinhBatChu: 1500, eloNoiChu: 1500, eloDoanTu: 1500,
-      honorScore: 100, badges: '[]',
-    });
-
-    user = { id: userId, username: tempUsername, email: te, displayName: dn, avatar: finalAvatar, role: 'user' } as typeof user;
-  }
-
-  return c.json({
-    success: true,
-    user: { id: user.id, username: user.username, email: user.email, displayName: user.displayName, avatar: user.avatar, role: user.role },
-  });
-});
-
 authRoute.post('/forgot-password', async (c) => {
   const { email } = await c.req.json();
   if (!email) return c.json({ error: 'Vui lòng cung cấp địa chỉ email!' }, 400);

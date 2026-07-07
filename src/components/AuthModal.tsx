@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { 
-  Mail, Lock, User, Key, Chrome, ArrowLeft, 
+import {
+  Mail, Lock, User, Key, ArrowLeft,
   CheckCircle, AlertCircle, ShieldAlert, Sparkles, X, RefreshCw
 } from 'lucide-react';
 import { playRetroBeep } from './games/CaroBoard.tsx';
@@ -13,7 +13,7 @@ interface AuthModalProps {
   onLoginSuccess: (userProfile: UserProfile) => void;
 }
 
-type AuthMode = 'login' | 'register' | 'forgot_password' | 'enter_otp' | 'google_sso';
+type AuthMode = 'login' | 'register' | 'forgot_password' | 'enter_otp';
 
 export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModalProps) {
   const [mode, setMode] = useState<AuthMode>('login');
@@ -199,41 +199,6 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     }
   };
 
-  // Realistic mock Google SSO account options
-  const GOOGLE_ACCOUNTS = [
-    { email: 'son.nguyen@gmail.com', displayName: 'Sơn Nguyễn', avatar: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=son_google' },
-    { email: 'thuy.le@gmail.com', displayName: 'Thùy Lê', avatar: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=thuy_google' },
-    { email: 'long.tran@gmail.com', displayName: 'Long Trần', avatar: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=long_google' },
-  ];
-
-  const handleGoogleAccountSelect = async (acc: typeof GOOGLE_ACCOUNTS[number]) => {
-    setLoading(true);
-    setErrorMsg(null);
-    try {
-      const res = await fetch('/api/auth/google-sso', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: acc.email,
-          displayName: acc.displayName,
-          avatar: acc.avatar
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Đăng nhập Google SSO thất bại');
-      }
-      triggerBeep(987, 'sine', 0.3);
-      onLoginSuccess(data.user);
-      onClose();
-    } catch (err: any) {
-      setErrorMsg(err.message);
-      triggerBeep(150, 'sawtooth', 0.2);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 bg-stone-950/85 backdrop-blur-md flex items-center justify-center p-4 z-[9999] overflow-y-auto animate-fadeIn">
       {/* Container */}
@@ -260,14 +225,12 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
               {mode === 'register' && 'ĐĂNG KÝ KỲ THỦ'}
               {mode === 'forgot_password' && 'QUÊN MẬT KHẨU'}
               {mode === 'enter_otp' && 'XÁC THỰC MÃ OTP'}
-              {mode === 'google_sso' && 'GOOGLE IDENTITY'}
             </h2>
             <p className="text-xs text-stone-400 mt-1">
               {mode === 'login' && 'Đăng nhập để lưu điểm xếp hạng và tham gia đấu trường'}
               {mode === 'register' && 'Tạo tài khoản mới và nhận danh hiệu Khai Quốc'}
               {mode === 'forgot_password' && 'Nhập email liên kết để nhận mã khôi phục'}
               {mode === 'enter_otp' && 'Nhập mã OTP 6 số để tiến hành đặt mật khẩu mới'}
-              {mode === 'google_sso' && 'Đăng nhập nhanh không cần mật khẩu qua Google SSO'}
             </p>
           </div>
 
@@ -366,51 +329,6 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
                 >
                   {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'ĐĂNG NHẬP NGAY'}
                 </button>
-
-                {/* Separator */}
-                <div className="flex items-center my-2">
-                  <div className="flex-1 border-t border-stone-800" />
-                  <span className="px-3 text-[9px] font-mono uppercase tracking-widest text-stone-500">Hoặc tiếp tục với</span>
-                  <div className="flex-1 border-t border-stone-800" />
-                </div>
-
-                {/* Google SSO Button */}
-                <button
-                  type="button"
-                  onClick={() => handleSwitchMode('google_sso')}
-                  className="bg-stone-950 hover:bg-stone-800 text-stone-200 border border-stone-800 font-bold py-2.5 rounded-xl text-xs cursor-pointer flex items-center justify-center gap-2 transition-colors"
-                >
-                  <Chrome className="w-4 h-4 text-red-400" />
-                  <span>Đăng nhập qua Google Account</span>
-                </button>
-
-                {/* Test Accounts Quick Login */}
-                <div className="bg-stone-950 p-3 rounded-2xl border border-stone-800/80 mt-1">
-                  <div className="text-[9px] font-mono font-black text-stone-400 uppercase tracking-widest text-center mb-2">
-                    🎯 TÀI KHOẢN THỬ NGHIỆM (QUICK FILL)
-                  </div>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {[
-                      { name: 'Sơn (Admin)', user: 'son', pass: 'password123' },
-                      { name: 'Thủy (Kỳ thủ)', user: 'thuy', pass: 'password123' },
-                      { name: 'Long (Kỳ thủ)', user: 'long', pass: 'password123' },
-                    ].map((testAcc) => (
-                      <button
-                        key={testAcc.user}
-                        type="button"
-                        onClick={() => {
-                          setLoginUsername(testAcc.user);
-                          setLoginPassword(testAcc.pass);
-                          triggerBeep(650, 'sine', 0.08);
-                        }}
-                        className="py-1.5 px-1 bg-stone-900 hover:bg-stone-800 text-[10px] font-bold rounded-xl text-stone-300 border border-stone-800 hover:border-orange-500/50 transition-colors cursor-pointer text-center truncate"
-                        title={`Tài khoản: ${testAcc.user} / Mật khẩu: ${testAcc.pass}`}
-                      >
-                        {testAcc.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
 
                 {/* Direct switch to register */}
                 <p className="text-center text-[11px] text-stone-400 mt-3">
@@ -612,47 +530,6 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
               </motion.form>
             )}
 
-            {mode === 'google_sso' && (
-              <motion.div 
-                key="google-sso-view"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="flex flex-col gap-4"
-              >
-                <div className="bg-stone-950 p-4 border border-stone-800 rounded-2xl">
-                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-stone-400 block mb-3">Chọn tài khoản Google của bạn</span>
-                  
-                  <div className="flex flex-col gap-2">
-                    {GOOGLE_ACCOUNTS.map((acc) => (
-                      <button
-                        key={acc.email}
-                        onClick={() => handleGoogleAccountSelect(acc)}
-                        className="flex items-center gap-3 w-full p-2.5 rounded-xl border border-stone-800 hover:border-orange-400 bg-stone-900/40 hover:bg-stone-850 cursor-pointer text-left transition-all group"
-                      >
-                        <img 
-                          src={acc.avatar} 
-                          alt="Google profile picture" 
-                          className="w-8 h-8 rounded-full border border-stone-700 bg-stone-800 group-hover:scale-105 transition-transform" 
-                        />
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-xs font-bold text-stone-100 truncate group-hover:text-orange-400 transition-colors">{acc.displayName}</span>
-                          <span className="text-[10px] text-stone-500 font-mono truncate">{acc.email}</span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => handleSwitchMode('login')}
-                  className="bg-stone-950 hover:bg-stone-850 text-stone-300 border border-stone-800 font-bold py-2.5 rounded-xl text-xs cursor-pointer flex items-center justify-center gap-1.5 transition-colors w-full"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>QUAY LẠI ĐĂNG NHẬP THƯỜNG</span>
-                </button>
-              </motion.div>
-            )}
           </AnimatePresence>
         </div>
       </div>
