@@ -1,0 +1,15 @@
+{
+  "name": "Game Tuổi Thơ",
+  "short_name": "GameTuoiTho",
+  "description": "Cờ caro, cờ tướng, cờ vua, ô ăn quan, đuổi hình bắt chữ — chơi online miễn phí.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1c1917",
+  "theme_color": "#1c1917",
+  "lang": "vi",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
