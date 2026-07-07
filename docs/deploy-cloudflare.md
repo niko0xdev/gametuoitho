@@ -25,13 +25,12 @@ npx wrangler d1 create gametuoitho-db        # in ra database_id
 npm run db:migrate:remote                      # tạo bảng trên D1 production
 ```
 
-## 3. Worker secrets
+## 3. Worker secrets (provider: MiniMax-M3)
 ```bash
 cd worker
-npx wrangler secret put OPENAI_API_KEY        # dán API key
-npx wrangler secret put OPENAI_MODEL           # vd: gpt-4o-mini
-# chỉ set nếu dùng provider non-OpenAI (Groq/Ollama/OpenRouter):
-# npx wrangler secret put OPENAI_BASE_URL
+npx wrangler secret put OPENAI_API_KEY        # MiniMax API key (Bearer)
+npx wrangler secret put OPENAI_MODEL          # giá trị: MiniMax-M3
+npx wrangler secret put OPENAI_BASE_URL       # https://api.minimax.io/v1  (quốc tế; TQ: https://api.minimaxi.com/v1)
 ```
 
 ## 4. Deploy Worker
@@ -72,7 +71,8 @@ Mở `https://gametuoitho.space` → đăng ký / đăng nhập → test 1 game 
 - **Workers**: 100k req/ngày, **10ms CPU/req** — đã tránh bcrypt (giữ SHA-256). Đừng migrate bcrypt.
 - **D1**: 500 MB/db, ~5M rows read + 100k rows written mỗi ngày.
 - **Durable Objects**: 100k req/ngày, 13k GB-s/ngày — Hibernatable WS idle ≈ 0 GB-s.
-- **AI**: tiền provider, không phải Cloudflare.
+- **AI**: tiền provider, không phải Cloudflare. MiniMax-M3 **có phí** (không free) → hosting Cloudflare $0 nhưng AI tính tiền theo token.
+- **MiniMax-M3 là reasoning model**: code gửi `tools`+`tool_choice` để ép kết quả JSON vào `tool_calls.function.arguments` (path chính). `response_format: json_object` được gửi kèm làm fallback — MiniMax thường ignore field không hỗ trợ, nhưng nếu route `/api/ai/parse-roster` trả 4xx sau deploy, gỡ `response_format` trong `worker/src/lib/ai.ts`. Không dùng `JSON.parse(content)` fallback vì content chứa `<think>...`.
 - **Footgun**: điền `database_id` thật vào `worker/wrangler.toml` trước khi `npm run deploy:worker` (placeholder sẽ làm deploy fail hoặc binding D1 rỗng).
 - **Footgun local dev**: nếu quên `cp worker/.dev.vars.example worker/.dev.vars`, `wrangler dev` dùng CORS prod → frontend localhost bị chặn CORS. Chạy `npm run dev:worker` cần file này.
 - **DO migration**: `[[migrations]] new_sqlite_classes` tự apply ở lần `wrangler deploy` đầu tiên.
