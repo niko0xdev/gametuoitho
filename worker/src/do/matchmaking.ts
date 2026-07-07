@@ -5,63 +5,71 @@ import { createDb } from '../db';
 import { matchesTable } from '../schema';
 import { wsMessage } from '../lib/ws';
 
-type Attachment = { userId: string };
+type Attachment = { userId: string; gameId: string; matched: boolean };
 
-// One Durable Object per game. Owns the waiting queue and each waiting user's
-// WebSocket, so it can push 'matched' / 'invitation'. Because a DO serializes
-// all access for its instance, pairing is atomic and race-free across every
-// Worker isolate — the core fix for the per-isolate matchmaking bug.
+// One Durable Object per game. Membership in the waiting queue == having an
+// open matchmaking WebSocket, which the runtime preserves across DO eviction
+// (along with each socket's attachment). Pairing is triggered on every new WS
+// connect, so it works regardless of which isolate handled the connect and
+// survives the DO being evicted while a user waits — the core fix.
 export class MatchmakingDO extends DurableObject<Bindings> {
-  private queue = new Set<string>();
-
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get('upgrade') !== 'websocket') {
       return new Response('Expected WebSocket', { status: 426 });
     }
     const url = new URL(request.url);
     const userId = url.searchParams.get('userId');
-    if (!userId) return new Response('Missing userId', { status: 400 });
+    const gameId = url.searchParams.get('gameId');
+    if (!userId || !gameId) return new Response('Missing userId/gameId', { status: 400 });
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-    server.serializeAttachment({ userId } satisfies Attachment);
+    server.serializeAttachment({ userId, gameId, matched: false } satisfies Attachment);
     this.ctx.acceptWebSocket(server);
+
+    // Try to pair this connection with someone already waiting.
+    await this.tryPair(server);
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  // RPC: called by POST /matchmaking/join. Pair atomically with a waiting
-  // opponent, or enqueue and wait.
-  async join(
-    userId: string,
-    gameId: string,
-  ): Promise<{ matched: boolean; matchId?: string; opponentId?: string }> {
-    for (const id of this.queue) {
-      if (id !== userId) {
-        this.queue.delete(id);
-        const matchId = 'match_' + Date.now();
-        const db = createDb(this.env);
-        await db.insert(matchesTable).values({
-          id: matchId,
-          gameId,
-          status: 'PLAYING',
-          players: JSON.stringify([id, userId]),
-          turn: userId,
-          moves: '[]',
-          viewers: '[]',
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        } as any);
-        this.sendToUser(id, 'matched', { matchId, opponentId: userId });
-        return { matched: true, matchId, opponentId: id };
-      }
-    }
-    this.queue.add(userId);
-    return { matched: false };
-  }
+  // Find an unmatched, different-user waiting socket and pair with it. The DO
+  // serializes fetch handlers per instance, so concurrent connects are ordered.
+  private async tryPair(ws: WebSocket): Promise<void> {
+    const mine = ws.deserializeAttachment() as Attachment | undefined;
+    if (!mine || mine.matched) return;
 
-  // RPC: POST /matchmaking/leave
-  async leave(userId: string): Promise<void> {
-    this.queue.delete(userId);
+    for (const other of this.ctx.getWebSockets()) {
+      if (other === ws) continue;
+      const theirs = other.deserializeAttachment() as Attachment | undefined;
+      if (!theirs || theirs.matched || theirs.userId === mine.userId) continue;
+
+      const matchId = 'match_' + Date.now();
+      // Persist first: if this throws, neither user is marked matched, so the
+      // waiting user stays waitable and the joiner's upgrade fails (reconnect).
+      const db = createDb(this.env);
+      await db.insert(matchesTable).values({
+        id: matchId,
+        gameId: mine.gameId,
+        status: 'PLAYING',
+        // Initiator (this socket) is players[0] and moves first — matches the
+        // pre-DO route's [userId, opponentId] / turn:userId convention.
+        players: JSON.stringify([mine.userId, theirs.userId]),
+        turn: mine.userId,
+        moves: '[]',
+        viewers: '[]',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as any);
+
+      mine.matched = true;
+      ws.serializeAttachment(mine);
+      theirs.matched = true;
+      other.serializeAttachment(theirs);
+
+      ws.send(wsMessage('matched', { matchId, opponentId: theirs.userId }));
+      other.send(wsMessage('matched', { matchId, opponentId: mine.userId }));
+      return;
+    }
   }
 
   // RPC: POST /match/invite — push an invite to a connected target user.
@@ -71,14 +79,10 @@ export class MatchmakingDO extends DurableObject<Bindings> {
     gameId: string,
     code: string,
   ): Promise<void> {
-    this.sendToUser(targetUserId, 'invitation', { fromUserId, gameId, code });
-  }
-
-  private sendToUser(userId: string, event: string, data: Record<string, unknown>): void {
-    const msg = wsMessage(event, data);
+    const msg = wsMessage('invitation', { fromUserId, gameId, code });
     for (const ws of this.ctx.getWebSockets()) {
       const att = ws.deserializeAttachment() as Attachment | undefined;
-      if (att?.userId === userId) {
+      if (att?.userId === targetUserId) {
         try {
           ws.send(msg);
         } catch {
@@ -88,9 +92,8 @@ export class MatchmakingDO extends DurableObject<Bindings> {
     }
   }
 
-  async webSocketClose(ws: WebSocket): Promise<void> {
-    const att = ws.deserializeAttachment() as Attachment | undefined;
-    if (att?.userId) this.queue.delete(att.userId);
+  async webSocketClose(): Promise<void> {
+    // Membership is derived from live sockets, so nothing to clean up here.
   }
   async webSocketError(ws: WebSocket): Promise<void> {
     try {

@@ -14,8 +14,10 @@ export type MatchSnapshot = {
 
 const MAX_RECONNECTS = 5;
 
-// Derive ws:// or wss:// from the API base (http:// → ws://, https:// → wss://).
-const wsBase = (import.meta.env.VITE_API_BASE as string).replace(/^http/, 'ws');
+// Derive ws:// / wss:// from the API base inside connect() (not at module load)
+// so a missing/misconfigured VITE_API_BASE only fails this connection, not the
+// whole app. http:// -> ws://, https:// -> wss://.
+const wsBase = () => ((import.meta.env.VITE_API_BASE as string | undefined) ?? '').replace(/^http/, 'ws');
 
 export function useMatchStream(matchId: string | null) {
   const [snapshot, setSnapshot] = useState<MatchSnapshot | null>(null);
@@ -31,16 +33,34 @@ export function useMatchStream(matchId: string | null) {
     let ws: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout>;
 
+    const scheduleReconnect = () => {
+      if (cancelled) return;
+      if (reconnectAttemptsRef.current >= MAX_RECONNECTS) return;
+      reconnectAttemptsRef.current++;
+      const delay = 500 * Math.pow(2, reconnectAttemptsRef.current - 1);
+      reconnectTimer = setTimeout(connect, delay);
+    };
+
     const connect = () => {
       if (cancelled) return;
-      ws = new WebSocket(`${wsBase}/api/match/${matchId}/ws?userId=${encodeURIComponent(userId)}`);
+      try {
+        ws = new WebSocket(`${wsBase()}/api/match/${matchId}/ws?userId=${encodeURIComponent(userId)}`);
+      } catch {
+        scheduleReconnect();
+        return;
+      }
 
       ws.onopen = () => {
         reconnectAttemptsRef.current = 0;
       };
 
       ws.onmessage = (e) => {
-        const data = JSON.parse(e.data);
+        let data: any;
+        try {
+          data = JSON.parse(e.data);
+        } catch {
+          return; // ignore non-JSON frames (proxy error pages, stray pings)
+        }
         if (cancelled) return;
         if (data.event === 'snapshot') {
           lastTsRef.current = data.moves.length ? data.moves[data.moves.length - 1].ts : 0;
@@ -68,10 +88,7 @@ export function useMatchStream(matchId: string | null) {
 
       ws.onclose = () => {
         if (cancelled) return;
-        if (reconnectAttemptsRef.current >= MAX_RECONNECTS) return;
-        reconnectAttemptsRef.current++;
-        const delay = 500 * Math.pow(2, reconnectAttemptsRef.current - 1);
-        reconnectTimer = setTimeout(connect, delay);
+        scheduleReconnect();
       };
 
       ws.onerror = () => {

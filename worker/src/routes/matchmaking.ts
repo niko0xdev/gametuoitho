@@ -8,29 +8,6 @@ import { requireLoggedIn } from '../lib/auth';
 
 export const matchmakingRoute = new Hono<{ Bindings: Bindings }>();
 
-matchmakingRoute.post('/matchmaking/join', requireLoggedIn(), async (c) => {
-  const userId = c.get('userId');
-  const { gameId } = await c.req.json();
-  if (!gameId) return c.json({ error: 'Missing gameId' }, 400);
-
-  // Delegated to the per-game Durable Object: pairing is atomic and works
-  // across isolates. On a match, the DO inserts the D1 row and pushes
-  // 'matched' to the waiting opponent's WebSocket.
-  const stub = c.env.MATCHMAKING_DO.get(c.env.MATCHMAKING_DO.idFromName('queue:' + gameId));
-  const result = await stub.join(userId, gameId);
-  return c.json(result);
-});
-
-matchmakingRoute.post('/matchmaking/leave', requireLoggedIn(), async (c) => {
-  const userId = c.get('userId');
-  const { gameId } = await c.req.json();
-  if (gameId) {
-    const stub = c.env.MATCHMAKING_DO.get(c.env.MATCHMAKING_DO.idFromName('queue:' + gameId));
-    await stub.leave(userId);
-  }
-  return c.json({ success: true });
-});
-
 matchmakingRoute.post('/private-room', requireLoggedIn(), async (c) => {
   const userId = c.get('userId');
   const { gameId } = await c.req.json();
@@ -72,17 +49,17 @@ matchmakingRoute.post('/match/invite', requireLoggedIn(), async (c) => {
   return c.json({ success: true });
 });
 
-// WebSocket upgrade for the matchmaking queue. The per-game Durable Object owns
-// each waiting user's socket and pushes 'matched' / 'invitation'. Authentication
-// via query param (WS can't set custom headers); same trade-off as the old SSE
-// stream — mitigate with short-lived JWTs in production.
+// WebSocket upgrade for the matchmaking queue. Opening this socket IS joining
+// the queue: the per-game Durable Object pairs on connect and pushes 'matched' /
+// 'invitation'. Authentication via query param (WS can't set headers) — same
+// trade-off as the old SSE stream; mitigate with short-lived JWTs in production.
 matchmakingRoute.get('/matchmaking/ws', async (c) => {
   const userId = c.req.query('userId');
   const gameId = c.req.query('gameId');
-  if (!userId || !gameId) return c.json({ error: 'Missing userId/gameId' }, 400);
+  if (!userId || !gameId) return c.json({ error: 'Thiếu userId/gameId!' }, 400);
 
   const u = await c.env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first();
-  if (!u) return c.json({ error: 'Unknown user' }, 401);
+  if (!u) return c.json({ error: 'Người dùng không tồn tại!' }, 401);
 
   const id = c.env.MATCHMAKING_DO.idFromName('queue:' + gameId);
   return c.env.MATCHMAKING_DO.get(id).fetch(c.req.raw);

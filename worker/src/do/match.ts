@@ -23,9 +23,14 @@ export class MatchDO extends DurableObject<Bindings> {
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server, [userId]);
 
-    // Hydrate the client with the current match snapshot on connect.
+    // Hydrate the client with the current match snapshot on connect, or signal
+    // an error and close if the match doesn't exist (restores the old SSE path's
+    // explicit not-found behavior instead of hanging the client).
     const row = await this.env.DB.prepare('SELECT * FROM matches WHERE id = ?').bind(matchId).first();
-    if (row) {
+    if (!row) {
+      server.send(wsMessage('error', { error: 'Không tìm thấy trận đấu!' }));
+      server.close(4000, 'not found');
+    } else {
       server.send(
         wsMessage('snapshot', {
           matchId,
