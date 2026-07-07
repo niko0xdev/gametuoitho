@@ -4,8 +4,6 @@ import { eq } from 'drizzle-orm';
 import type { Bindings } from '../db';
 import { createDb } from '../db';
 import { matchesTable } from '../schema';
-import { sseStream } from '../lib/sse';
-import { addMatchStream, broadcastMatch } from '../lib/state';
 import { requireLoggedIn } from '../lib/auth';
 
 export const matchRoute = new Hono<{ Bindings: Bindings }>();
@@ -32,7 +30,9 @@ matchRoute.post('/match/:id/move', requireLoggedIn(), async (c) => {
     updatedAt: Date.now(),
   } as any).where(eq(matchesTable.id, matchId));
 
-  broadcastMatch(matchId, 'move', { userId, move, ts: moveTs, turn: nextTurn });
+  // Fan the move out to all subscribers via the match Durable Object.
+  const stub = c.env.MATCH_DO.get(c.env.MATCH_DO.idFromName('match:' + matchId));
+  await stub.broadcast('move', { userId, move, ts: moveTs, turn: nextTurn });
   return c.json({ success: true, moveTs, turn: nextTurn });
 });
 
@@ -47,7 +47,9 @@ matchRoute.post('/match/:id/forfeit', requireLoggedIn(), async (c) => {
   if (!players.includes(userId)) return c.json({ error: 'Không phải người chơi trong trận!' }, 403);
   const winner = players.find((p) => p !== userId) ?? null;
   await db.update(matchesTable).set({ status: 'ENDED', winner, updatedAt: Date.now() } as any).where(eq(matchesTable.id, matchId));
-  broadcastMatch(matchId, 'ended', { winner, reason: 'forfeit' });
+
+  const stub = c.env.MATCH_DO.get(c.env.MATCH_DO.idFromName('match:' + matchId));
+  await stub.broadcast('ended', { winner, reason: 'forfeit' });
   return c.json({ success: true, winner });
 });
 
@@ -67,27 +69,19 @@ matchRoute.get('/match/:id/state', async (c) => {
   });
 });
 
-matchRoute.get('/match/:id/stream', (c) => {
+// WebSocket upgrade: forwards the socket to the match's Durable Object, which
+// owns the hibernatable subscriber set and pushes snapshot/move/ended events.
+matchRoute.get('/match/:id/ws', async (c) => {
   const matchId = c.req.param('id');
-  // D1's prepare(...).all() is synchronous, so we can read snapshot inline.
-  const row = c.env.DB.prepare('SELECT * FROM matches WHERE id = ?').bind(matchId).first() as any;
-  return sseStream({
-    onConnect: (send, close) => {
-      if (!row) {
-        send('error', { error: 'Match not found' });
-        close();
-        return;
-      }
-      send('snapshot', {
-        matchId,
-        status: row.status,
-        players: JSON.parse(row.players || '[]'),
-        turn: row.turn,
-        moves: JSON.parse(row.moves || '[]'),
-        winner: row.winner,
-      });
-      return addMatchStream(matchId, { send, close });
-    },
-    heartbeatMs: 30000,
-  });
+  const userId = c.req.query('userId');
+  if (!userId) return c.json({ error: 'Missing userId' }, 401);
+  // Cheap existence check; same pattern the old SSE stream used.
+  const u = await c.env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first();
+  if (!u) return c.json({ error: 'Unknown user' }, 401);
+
+  const id = c.env.MATCH_DO.idFromName('match:' + matchId);
+  // Inject matchId into the query so the DO can hydrate the snapshot.
+  const url = new URL(c.req.raw.url);
+  url.searchParams.set('matchId', matchId);
+  return c.env.MATCH_DO.get(id).fetch(new Request(url, c.req.raw));
 });

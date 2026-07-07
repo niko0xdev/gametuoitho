@@ -9,7 +9,9 @@ export type MatchmakingState = {
 };
 
 const MAX_RECONNECTS = 5;
-const POLL_INTERVAL_MS = 3000; // Fallback polling when SSE keeps failing
+
+// Derive ws:// or wss:// from the API base (http:// → ws://, https:// → wss://).
+const wsBase = (import.meta.env.VITE_API_BASE as string).replace(/^http/, 'ws');
 
 export function useMatchmaking(gameId: string | null): MatchmakingState & {
   start: () => void;
@@ -17,9 +19,10 @@ export function useMatchmaking(gameId: string | null): MatchmakingState & {
 } {
   const [state, setState] = useState<MatchmakingState>({ status: 'IDLE' });
   const reconnectAttemptsRef = useRef(0);
-  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // F2: SSE reconnection + polling fallback. Mitigates per-isolate state loss on Workers.
+  // WebSocket subscription while WAITING: the per-game Durable Object pushes
+  // 'matched' the moment an opponent joins. Replaces the old per-isolate SSE
+  // stream (which broke across Worker isolates).
   useEffect(() => {
     if (!gameId || state.status !== 'WAITING') return;
     const userId = localStorage.getItem('auth_userId');
@@ -29,43 +32,41 @@ export function useMatchmaking(gameId: string | null): MatchmakingState & {
     }
 
     let cancelled = false;
-    let es: EventSource | null = null;
-
-    const startPollFallback = () => {
-      // After max reconnects, fall back to polling. The server doesn't have a
-      // /matchmaking/poll endpoint yet; for now we just stop and surface an error.
-      // The opponent's match will land in D1 — the user's next /api/matchmaking/join
-      // attempt (or page reload) will pick it up via REST.
-      setState({ status: 'IDLE', error: 'Kết nối thất bại. Vui lòng thử lại.' });
-    };
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
 
     const connect = () => {
       if (cancelled) return;
-      const url = `${import.meta.env.VITE_API_BASE}/api/matchmaking/stream?userId=${encodeURIComponent(userId)}&gameId=${encodeURIComponent(gameId)}`;
-      es = new EventSource(url);
+      ws = new WebSocket(
+        `${wsBase}/api/matchmaking/ws?userId=${encodeURIComponent(userId)}&gameId=${encodeURIComponent(gameId)}`
+      );
 
-      es.addEventListener('matched', (e) => {
-        const data = JSON.parse((e as MessageEvent).data);
+      ws.onopen = () => {
+        reconnectAttemptsRef.current = 0;
+      };
+
+      ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
         if (cancelled) return;
-        setState({ status: 'MATCHED', matchId: data.matchId, opponentId: data.opponentId });
-        es?.close();
-      });
+        if (data.event === 'matched') {
+          setState({ status: 'MATCHED', matchId: data.matchId, opponentId: data.opponentId });
+          ws?.close();
+        }
+      };
 
-      es.addEventListener('open', () => {
-        reconnectAttemptsRef.current = 0; // Reset on successful connect
-      });
-
-      es.onerror = () => {
-        es?.close();
+      ws.onclose = () => {
         if (cancelled) return;
         if (reconnectAttemptsRef.current >= MAX_RECONNECTS) {
-          startPollFallback();
+          setState({ status: 'IDLE', error: 'Kết nối thất bại. Vui lòng thử lại.' });
           return;
         }
         reconnectAttemptsRef.current++;
-        // Exponential backoff: 500ms, 1s, 2s, 4s, 8s
         const delay = 500 * Math.pow(2, reconnectAttemptsRef.current - 1);
-        setTimeout(connect, delay);
+        reconnectTimer = setTimeout(connect, delay);
+      };
+
+      ws.onerror = () => {
+        ws?.close();
       };
     };
 
@@ -73,8 +74,8 @@ export function useMatchmaking(gameId: string | null): MatchmakingState & {
 
     return () => {
       cancelled = true;
-      es?.close();
-      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      clearTimeout(reconnectTimer);
+      ws?.close();
     };
   }, [gameId, state.status]);
 

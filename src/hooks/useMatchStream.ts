@@ -14,65 +14,76 @@ export type MatchSnapshot = {
 
 const MAX_RECONNECTS = 5;
 
+// Derive ws:// or wss:// from the API base (http:// → ws://, https:// → wss://).
+const wsBase = (import.meta.env.VITE_API_BASE as string).replace(/^http/, 'ws');
+
 export function useMatchStream(matchId: string | null) {
   const [snapshot, setSnapshot] = useState<MatchSnapshot | null>(null);
   const lastTsRef = useRef<number>(0);
-  const reconnectAttemptsRef = useRef(0);
+  const reconnectAttemptsRef = useRef<number>(0);
 
   useEffect(() => {
     if (!matchId) return;
+    const userId = localStorage.getItem('auth_userId');
+    if (!userId) return;
+
     let cancelled = false;
-    let es: EventSource | null = null;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
 
     const connect = () => {
       if (cancelled) return;
-      const url = `${import.meta.env.VITE_API_BASE}/api/match/${matchId}/stream`;
-      es = new EventSource(url);
+      ws = new WebSocket(`${wsBase}/api/match/${matchId}/ws?userId=${encodeURIComponent(userId)}`);
 
-      es.addEventListener('snapshot', (e) => {
-        const data: MatchSnapshot = JSON.parse((e as MessageEvent).data);
-        lastTsRef.current = data.moves.length ? data.moves[data.moves.length - 1].ts : 0;
-        if (cancelled) return;
-        setSnapshot(data);
-      });
-
-      es.addEventListener('move', (e) => {
-        const data: MatchMove & { turn: string } = JSON.parse((e as MessageEvent).data);
-        // Dedup: ignore moves we already applied optimistically
-        if (data.ts <= lastTsRef.current) return;
-        lastTsRef.current = data.ts;
-        if (cancelled) return;
-        setSnapshot((prev) =>
-          prev
-            ? { ...prev, moves: [...prev.moves, { userId: data.userId, move: data.move, ts: data.ts }], turn: data.turn }
-            : prev
-        );
-      });
-
-      es.addEventListener('ended', (e) => {
-        const data: { winner: string | null; reason: string } = JSON.parse((e as MessageEvent).data);
-        if (cancelled) return;
-        setSnapshot((prev) => (prev ? { ...prev, status: 'ENDED', winner: data.winner } : prev));
-      });
-
-      es.addEventListener('open', () => {
+      ws.onopen = () => {
         reconnectAttemptsRef.current = 0;
-      });
+      };
 
-      es.onerror = () => {
-        es?.close();
+      ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (cancelled) return;
+        if (data.event === 'snapshot') {
+          lastTsRef.current = data.moves.length ? data.moves[data.moves.length - 1].ts : 0;
+          setSnapshot({
+            matchId: data.matchId,
+            status: data.status,
+            players: data.players,
+            turn: data.turn,
+            moves: data.moves,
+            winner: data.winner,
+          });
+        } else if (data.event === 'move') {
+          // Dedup: ignore moves we already applied optimistically.
+          if (data.ts <= lastTsRef.current) return;
+          lastTsRef.current = data.ts;
+          setSnapshot((prev) =>
+            prev
+              ? { ...prev, moves: [...prev.moves, { userId: data.userId, move: data.move, ts: data.ts }], turn: data.turn }
+              : prev
+          );
+        } else if (data.event === 'ended') {
+          setSnapshot((prev) => (prev ? { ...prev, status: 'ENDED', winner: data.winner } : prev));
+        }
+      };
+
+      ws.onclose = () => {
         if (cancelled) return;
         if (reconnectAttemptsRef.current >= MAX_RECONNECTS) return;
         reconnectAttemptsRef.current++;
         const delay = 500 * Math.pow(2, reconnectAttemptsRef.current - 1);
-        setTimeout(connect, delay);
+        reconnectTimer = setTimeout(connect, delay);
+      };
+
+      ws.onerror = () => {
+        ws?.close();
       };
     };
 
     connect();
     return () => {
       cancelled = true;
-      es?.close();
+      clearTimeout(reconnectTimer);
+      ws?.close();
     };
   }, [matchId]);
 
@@ -92,7 +103,6 @@ export function useMatchStream(matchId: string | null) {
       });
     } catch {
       // On failure: reload snapshot to reconcile (drop our optimistic entry).
-      // Simpler than rollback math — one extra D1 read is cheap.
       try {
         const fresh = await api<MatchSnapshot>(`/api/match/${matchId}/state`);
         lastTsRef.current = fresh.moves.length ? fresh.moves[fresh.moves.length - 1].ts : 0;

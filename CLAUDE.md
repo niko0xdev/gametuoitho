@@ -93,7 +93,7 @@ Don't commit:
 - Frontend: Cloudflare Pages, custom domain `gametuoitho.space`. Git auto-deploy.
 - Backend: Cloudflare Worker, custom domain `api.gametuoitho.space`. Code in `worker/`.
 - Database: Cloudflare D1 (SQLite-compatible), bound to Worker. `worker/migrations/` holds schema.
-- Realtime: SSE (Workers native streaming), not WebSocket. See `worker/src/routes/matchmaking.ts` + `match.ts`.
+- Realtime: Durable Objects + Hibernatable WebSockets. `MatchDO` (one per match, pub/sub hub) + `MatchmakingDO` (one per game, queue + atomic pairing). Classes in `worker/src/do/`; WS upgrade routes in `worker/src/routes/match.ts` + `matchmaking.ts`. Moves/forfeit stay HTTP (D1 is match authority); the DOs only fan out pushes.
 - AI: OpenAI-compatible via `OPENAI_API_KEY` / `OPENAI_MODEL` Worker secrets.
 - Local D1 lives at `.wrangler/state/v3/d1/` (gitignored).
 - Local dev modes:
@@ -101,6 +101,10 @@ Don't commit:
   - `npm run dev:worker` — Vite frontend + wrangler dev with local D1 (production-like).
 - Migrate data manually if moving from SQLite to D1 — `migrateFromJson` is not ported.
 
-## Per-isolate caveat (CRITICAL)
+## Realtime architecture (Durable Objects)
 
-Workers routes requests across many isolates. The matchmaking queue + SSE controller map live in a single isolate's memory. Two peers landing on different isolates will not see each other's state — matchmaking join may match locally but the opponent's SSE stream (on a different isolate) will never receive the `matched` event. Free-tier acceptable with **client reconnect + polling fallback** (see `src/hooks/useMatchmaking.ts`). Production-grade fix: migrate matchmaking/match broadcast to **Durable Objects**.
+Earlier the matchmaking queue + match-broadcast controller map lived in a single isolate's memory, so two peers on different isolates never saw each other (matchmaking wouldn't push `matched`; moves wouldn't broadcast). **Fixed:** both now run through Durable Objects, which serialize per-instance state and route across isolates.
+
+- `MatchmakingDO` — `getByName('queue:'+gameId)`. Owns the waiting queue + each user's WS. `join()` pairs atomically, inserts the D1 match row, pushes `matched` to the opponent's WS. Free-tier-safe (SQLite-backed DO).
+- `MatchDO` — `getByName('match:'+matchId)`. Hibernatable WS pub/sub hub; sends `snapshot` on connect and fans out `move`/`ended` deltas when the Worker calls `broadcast()` after a D1 write.
+- Free-tier note: Hibernatable WS idle = ~0 GB-s, so the DO duration budget (13k GB-s/day free) is fine. D1 writes stay at 2/match (create + end). Do **not** add per-move D1 writes or migrate to bcrypt (10ms CPU/req cap).

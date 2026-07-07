@@ -8,6 +8,18 @@ database_name = "gametuoitho-db"
 database_id = "REPLACE_AFTER_wrangler_d1_create"
 migrations_dir = "migrations"
 
+[[durable_objects.bindings]]
+name = "MATCH_DO"
+class_name = "MatchDO"
+
+[[durable_objects.bindings]]
+name = "MATCHMAKING_DO"
+class_name = "MatchmakingDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MatchDO", "MatchmakingDO"]
+
 [vars]
 CORS_ORIGIN = "http://localhost:5173"
 APP_URL = "http://localhost:5173"

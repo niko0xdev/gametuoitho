@@ -14,6 +14,9 @@ import { leaguesRoute } from './routes/leagues';
 import { aiRoute } from './routes/ai';
 import { matchmakingRoute } from './routes/matchmaking';
 import { matchRoute } from './routes/match';
+// Durable Object classes must be exported from the Worker entrypoint.
+export { MatchDO } from './do/match';
+export { MatchmakingDO } from './do/matchmaking';
 
 const app = new Hono<{ Bindings: Bindings }>();
 app.use('*', cors());
