@@ -2,6 +2,14 @@ name = "gametuoitho-api"
 main = "src/index.ts"
 compatibility_date = "2026-07-01"
 
+# Serve the API on the same origin as the SPA (Pages apex) so the frontend's
+# relative `/api/...` calls work without CORS or code changes. Pages keeps the
+# apex for everything else; `/api/*` (and www) hit this Worker.
+routes = [
+  "gametuoitho.space/api/*",
+  "www.gametuoitho.space/api/*",
+]
+
 # After `npx wrangler d1 create gametuoitho-db`, paste the printed database_id here.
 [[d1_databases]]
 binding = "DB"
