@@ -16,4 +16,5 @@ py-test/
 # Worker local state
 worker/.wrangler/
 worker/node_modules/
+worker/.dev.vars
 

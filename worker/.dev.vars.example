@@ -1,0 +1,7 @@
+# Copy to worker/.dev.vars (gitignored) for local `wrangler dev`.
+# These override the production [vars] in wrangler.toml during local dev only.
+CORS_ORIGIN="http://localhost:5173"
+APP_URL="http://localhost:5173"
+# Optional, for local AI route testing:
+# OPENAI_API_KEY="..."
+# OPENAI_MODEL="gpt-4o-mini"

@@ -2,6 +2,7 @@ name = "gametuoitho-api"
 main = "src/index.ts"
 compatibility_date = "2026-07-01"
 
+# After `npx wrangler d1 create gametuoitho-db`, paste the printed database_id here.
 [[d1_databases]]
 binding = "DB"
 database_name = "gametuoitho-db"
@@ -20,6 +21,8 @@ class_name = "MatchmakingDO"
 tag = "v1"
 new_sqlite_classes = ["MatchDO", "MatchmakingDO"]
 
+# Production values — `wrangler deploy` ships these. Local `wrangler dev`
+# overrides them via worker/.dev.vars (copy from worker/.dev.vars.example).
 [vars]
-CORS_ORIGIN = "http://localhost:5173"
-APP_URL = "http://localhost:5173"
+CORS_ORIGIN = "https://gametuoitho.space"
+APP_URL = "https://gametuoitho.space"
