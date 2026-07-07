@@ -1,82 +1,211 @@
-# Deploy gametuoitho.space lên Cloudflare (free tier)
+# Hướng dẫn deploy gametuoitho.space lên Cloudflare — từng bước
 
-Runbook deploy $0. Stack: Cloudflare **Worker** (API) + **D1** (SQLite) + **Durable Objects** (realtime) + **Pages** (frontend). Domain mua trên Namecheap.
+> 👉 **Bắt đầu ngay tại Bước 1.** Đó là việc duy nhất chờ lâu, làm trước rồi làm việc khác trong lúc chờ.
+>
+> **Mục tiêu**: app live ở `https://gametuoitho.space`, API ở `https://api.gametuoitho.space`. Hosting Cloudflare **$0**. AI dùng **MiniMax-M3** (có phí theo token — không phải chi phí Cloudflare).
+>
+> **Thời gian**: ~1–2 tiếng, phần lớn là chờ DNS.
 
-> Free tier = hosting Cloudflare $0. Chi phí AI (OpenAI/Groq/Ollama) là của provider, riêng. Total $0 chỉ khi dùng Ollama local hoặc Groq free tier.
+Stack: Cloudflare **Worker** (API) + **D1** (SQLite) + **Durable Objects** (realtime) + **Pages** (frontend).
 
-## 0. Yêu cầu trước
-- Tài khoản Cloudflare (free).
-- Domain `gametuoitho.space` đã mua trên Namecheap.
-- Đã login wrangler: `cd worker && npx wrangler login`.
-- (Local dev) `cp worker/.dev.vars.example worker/.dev.vars` — để `wrangler dev` dùng CORS localhost thay vì giá trị production trong `wrangler.toml [vars]`.
+---
 
-## 1. Chuyển DNS domain về Cloudflare (Namecheap)
-Cloudflare quản lý custom domain miễn phí khi DNS nằm trên Cloudflare.
-1. Cloudflare dashboard → **Add a Site** → nhập `gametuoitho.space` → plan **Free**.
-2. Cloudflare quét DNS cũ và gán 2 nameserver (dạng `xxx.ns.cloudflare.com`).
-3. **Namecheap** → *Domain List* → nút **Manage** cạnh `gametuoitho.space` → tab **Nameservers** → chọn **Custom DNS** → dán 2 nameserver Cloudflare → **Save** (tic xanh).
-4. Đợi Cloudflare email "…is active" (vài phút – vài giờ). Xem trạng thái ở dashboard home.
+## Bạn cần có trước
 
-## 2. Tạo D1 + áp dụng schema (remote)
+- [ ] Tài khoản Cloudflare (đăng ký free tại `dash.cloudflare.com`).
+- [ ] Domain `gametuoitho.space` đã mua trên **Namecheap**.
+- [ ] API key **MiniMax-M3** (lấy tại `platform.minimax.io`).
+- [ ] Máy đã cài **Node.js** và đã `git clone` repo `gametuoitho` về máy.
+- [ ] Code trên nhánh `main` đã có 2 PR: realtime Durable Objects + deploy config (đã merge).
+
+---
+
+## Bước 1 — Chuyển DNS domain về Cloudflare ⏳ *làm ĐẦU TIÊN*
+
+Cloudflare quản lý custom domain miễn phí **chỉ khi DNS nằm trên Cloudflare**. Việc này mất 10 phút – vài giờ chờ, nên khởi động trước.
+
+1. Đăng nhập **Cloudflare** → bấm **+ Add a Site** (góc trên bên phải).
+2. Nhập `gametuoitho.space` → **Continue**.
+3. Chọn plan **Free** → **Continue**.
+4. Cloudflare quét DNS cũ. Ở trang cuối, CF hiện **2 nameserver** dạng:
+   ```
+   something.ns.cloudflare.com
+   otherthing.ns.cloudflare.com
+   ```
+   → **Copy** 2 dòng này.
+5. Mở tab mới → đăng nhập **Namecheap** → **Domain List** → tìm `gametuoitho.space` → bấm nút **MANAGE** bên phải.
+6. Chuyển sang tab **Nameservers** → dropdown chọn **Custom DNS** *(không phải "Namecheap Basic DNS")*.
+7. Dán 2 nameserver Cloudflare vào ô **1** và **2** (bỏ trống ô 3-4-5) → bấm **✓ Save Changes** *(tic xanh "All changes saved")*.
+8. Về Cloudflare → bấm **Done, check nameservers**.
+
+- [ ] **Xong khi**: Cloudflare gửi email *"gametuoitho.space is active"* và dashboard hiện trạng thái **Active**.
+
+> ⏳ Trong lúc chờ DNS, làm tiếp **Bước 2 → 5** (không cần DNS).
+
+---
+
+## Bước 2 — Đăng nhập Wrangler CLI
+
+```bash
+cd <thư-mục-repo>/gametuoitho
+cd worker
+npx wrangler login
+```
+
+- Browser tự mở → chọn tài khoản Cloudflare → bấm **Allow**.
+
+- [ ] **Xong khi**: terminal hiện `Successfully logged in`.
+
+---
+
+## Bước 3 — Tạo database D1 + áp dụng schema
+
+```bash
+# vẫn trong worker/
+npx wrangler d1 create gametuoitho-db
+```
+
+Output có dòng:
+```
+✅ Successfully created DB 'gametuoitho-db'
+database_id = "b3f7...e91"        ← COPY chuỗi trong ngoặc kép
+```
+
+Mở file `worker/wrangler.toml`, tìm dòng:
+```toml
+database_id = "REPLACE_AFTER_wrangler_d1_create"
+```
+→ thay bằng `database_id` vừa copy. **Save** file.
+
+Tạo các bảng trên D1 production:
+```bash
+# về thư mục gốc repo
+cd ..
+npm run db:migrate:remote
+```
+- Gõ `y` khi hỏi xác nhận apply lên remote.
+
+- [ ] **Xong khi**: hiện `🚣🚣🚣` / `✅ ... migrations applied`.
+
+Commit `database_id` (giờ là giá trị thật) lên repo:
+```bash
+git add worker/wrangler.toml
+git commit -m "chore: set D1 database_id"
+git push
+```
+
+---
+
+## Bước 4 — Set Worker secrets (MiniMax-M3)
+
 ```bash
 cd worker
-npx wrangler d1 create gametuoitho-db        # in ra database_id
-# paste database_id đó vào worker/wrangler.toml (dòng database_id), commit
-npm run db:migrate:remote                      # tạo bảng trên D1 production
+npx wrangler secret put OPENAI_BASE_URL
+# dán: https://api.minimax.io/v1        rồi Enter
+
+npx wrangler secret put OPENAI_MODEL
+# dán: MiniMax-M3                       rồi Enter
+
+npx wrangler secret put OPENAI_API_KEY
+# dán: <API key MiniMax của bạn>        rồi Enter
 ```
 
-## 3. Worker secrets (provider: MiniMax-M3)
+> Nếu tài khoản MiniMax là vùng Trung Quốc đại lục, base URL dùng `https://api.minimaxi.com/v1`.
+
+- [ ] **Xong khi**: mỗi lệnh hiện `Success! Uploaded secret`.
+
+---
+
+## Bước 5 — Deploy Worker
+
 ```bash
-cd worker
-npx wrangler secret put OPENAI_API_KEY        # MiniMax API key (Bearer)
-npx wrangler secret put OPENAI_MODEL          # giá trị: MiniMax-M3
-npx wrangler secret put OPENAI_BASE_URL       # https://api.minimax.io/v1  (quốc tế; TQ: https://api.minimaxi.com/v1)
+# về thư mục gốc repo
+cd ..
+npm run deploy:worker
 ```
 
-## 4. Deploy Worker
+- [ ] **Xong khi**: hiện `Published gametuoitho-api` + URL dạng `https://gametuoitho-api.<account>.workers.dev`.
+
+Test ngay:
 ```bash
-npm run deploy:worker     # = wrangler deploy
-```
-→ API live tại `https://gametuoitho-api.<account-subdomain>.workers.dev`. Lệnh này ship `[vars]` (prod CORS/APP) + bindings D1/DO.
-
-## 5. Gắn custom domain API
-Cloudflare dashboard → **Workers & Pages** → `gametuoitho-api` → **Settings → Domains → Add → Custom domain** → nhập `api.gametuoitho.space`. Cloudflare tự thêm DNS record (DNS đã nằm trên CF). Đợi certificate **Active**.
-
-## 6. Deploy frontend (Pages)
-**Khuyến nghị Git auto-deploy:**
-1. Cloudflare dashboard → **Workers & Pages → Create → Pages → Connect to Git** → chọn repo `gametuoitho`.
-2. Build settings:
-   - Framework preset: **Vite**
-   - Build command: `npm run build:fe`
-   - Build output directory: `dist`
-   - Variables (Production): `VITE_API_BASE` = `https://api.gametuoitho.space`
-3. Save → Deploy. Các push sau tự rebuild.
-
-**Hoặc direct upload:**
-```bash
-VITE_API_BASE=https://api.gametuoitho.space npm run build:fe
-npx wrangler pages deploy dist --project-name gametuoitho
+curl https://gametuoitho-api.<account>.workers.dev/api/health
+# phải ra: {"ok":true,"ts":...}
 ```
 
-## 7. Gắn custom domain frontend
-Pages project → **Custom domains → Set up** → `gametuoitho.space` (thêm cả `www`). Cloudflare tự DNS + SSL.
+---
 
-## 8. Verify
-```bash
-curl https://api.gametuoitho.space/api/health        # {"ok":true,...}
-```
-Mở `https://gametuoitho.space` → đăng ký / đăng nhập → test 1 game (matchmaking qua WS + match stream). Kiểm tab Network: WS `/api/matchmaking/ws` và `/api/match/:id/ws` connect 101.
+## Bước 6 — Gắn custom domain API: `api.gametuoitho.space`
 
-## Free-tier watchouts
-- **Workers**: 100k req/ngày, **10ms CPU/req** — đã tránh bcrypt (giữ SHA-256). Đừng migrate bcrypt.
-- **D1**: 500 MB/db, ~5M rows read + 100k rows written mỗi ngày.
-- **Durable Objects**: 100k req/ngày, 13k GB-s/ngày — Hibernatable WS idle ≈ 0 GB-s.
-- **AI**: tiền provider, không phải Cloudflare. MiniMax-M3 **có phí** (không free) → hosting Cloudflare $0 nhưng AI tính tiền theo token.
-- **MiniMax-M3 là reasoning model**: code gửi `tools`+`tool_choice` để ép kết quả JSON vào `tool_calls.function.arguments` (path chính). `response_format: json_object` được gửi kèm làm fallback — MiniMax thường ignore field không hỗ trợ, nhưng nếu route `/api/ai/parse-roster` trả 4xx sau deploy, gỡ `response_format` trong `worker/src/lib/ai.ts`. Không dùng `JSON.parse(content)` fallback vì content chứa `<think>...`.
-- **Footgun**: điền `database_id` thật vào `worker/wrangler.toml` trước khi `npm run deploy:worker` (placeholder sẽ làm deploy fail hoặc binding D1 rỗng).
-- **Footgun local dev**: nếu quên `cp worker/.dev.vars.example worker/.dev.vars`, `wrangler dev` dùng CORS prod → frontend localhost bị chặn CORS. Chạy `npm run dev:worker` cần file này.
-- **DO migration**: `[[migrations]] new_sqlite_classes` tự apply ở lần `wrangler deploy` đầu tiên.
+> Cần **Bước 1 đã xong** (domain Active trên Cloudflare).
 
-## Local dev (nhắc lại)
-- `npm run dev` — legacy Express + better-sqlite3 (offline, không dùng Worker code).
-- `npm run dev:worker` — Vite + wrangler dev + local D1 (production-like, test realtime ở đây).
+1. Cloudflare dashboard → menu trái **Workers & Pages** → chọn **gametuoitho-api**.
+2. Vào tab **Settings** → mục **Domains & Routes** (hoặc **Domains**) → bấm **Add** → **Custom domain**.
+3. Nhập `api.gametuoitho.space` → **Add domain**.
+4. Cloudflare tự thêm DNS record. Chờ status chuyển **Active** (~1–3 phút, cấp SSL).
+
+- [ ] **Test**: `curl https://api.gametuoitho.space/api/health` → `{"ok":true,...}`.
+
+---
+
+## Bước 7 — Deploy frontend (Cloudflare Pages)
+
+1. Cloudflare dashboard → **Workers & Pages** → **Create application** → tab **Pages** → **Connect to Git**.
+2. Chọn GitHub account → chọn repo **gametuoitho** → **Begin setup**.
+3. Điền build settings:
+   - **Project name**: `gametuoitho`
+   - **Production branch**: `main`
+   - **Framework preset**: `Vite`
+   - **Build command**: `npm run build:fe`
+   - **Build output directory**: `dist`
+   - Mục **Environment variables (advanced)** → **Add variable**:
+     - **Variable name**: `VITE_API_BASE`
+     - **Value**: `https://api.gametuoitho.space`
+4. Bấm **Save and Deploy**. Chờ build (~1–2 phút).
+
+- [ ] **Xong khi**: build **xanh** + có URL `https://gametuoitho.pages.dev`. Mở URL thấy app load.
+
+---
+
+## Bước 8 — Gắn custom domain frontend: `gametuoitho.space`
+
+1. Cloudflare dashboard → **Workers & Pages** → project **gametuoitho** (Pages) → tab **Custom domains** → **Set up a custom domain**.
+2. Nhập `gametuoitho.space` → **Continue** → **Activate domain**.
+3. *(tùy chọn)* Lặp lại cho `www.gametuoitho.space`.
+4. Chờ status **Active**.
+
+- [ ] **Xong khi**: mở `https://gametuoitho.space` → app load bình thường.
+
+---
+
+## Bước 9 — Test toàn bộ
+
+- [ ] `curl https://api.gametuoitho.space/api/health` → `{"ok":true}`
+- [ ] Mở `https://gametuoitho.space` → **đăng ký** tài khoản → **đăng nhập**.
+- [ ] Vào game cờ caro → bấm **Tìm trận** → mở tab thứ 2 (hoặc máy khác, đăng nhập tài khoản khác) → cũng bấm **Tìm trận** → **ghép pair thành công**.
+- [ ] Đánh 1 nước → đối thủ thấy nước đi xuất hiện **ngay** (realtime qua WebSocket). Mở DevTools → tab Network → filter `WS` → thấy `/api/match/.../ws` status **101**.
+- [ ] *(nếu có quyền admin)* Test AI: nhập tóm tắt giải đấu → parse roster → ra danh sách đội/cầu thủ.
+
+---
+
+## Troubleshooting
+
+| Triệu chứng | Nguyên nhân & cách sửa |
+|---|---|
+| DNS không Active sau 1h | Namecheap → kiểm 2 nameserver đã **Save**; tra NS thực tế tại `whatsmydns.net` (chọn NS, nhập `gametuoitho.space`). |
+| CORS error ở browser khi chạy local | Thiếu `worker/.dev.vars`. Chạy `cp worker/.dev.vars.example worker/.dev.vars`. *(Production không bị.)* |
+| Pages build fail `VITE_API_BASE undefined` | Environment variable sai tên/chưa set. Đảm bảo tên đúng `VITE_API_BASE`, value `https://api.gametuoitho.space`, scope **Production**. |
+| `/api/ai/parse-roster` trả 4xx | MiniMax-M3 có thể chặn `response_format`. Báo Claude gỡ field đó trong `worker/src/lib/ai.ts:31`. |
+| `wrangler deploy` fail nhắc `database_id` | Chưa thay placeholder trong `worker/wrangler.toml` (xem **Bước 3**). |
+| Matchmaking không ghép pair | Phải dùng **2 session khác** (2 tab ẩn danh, hoặc 2 trình duyệt) — cùng 1 localStorage coi là 1 user. |
+
+---
+
+## Giới hạn free tier (theo dõi ở Cloudflare → Analytics)
+
+- **Workers**: 100.000 request/ngày.
+- **Durable Objects**: 100.000 request + 13.000 GB-s/ngày (WebSocket idle ≈ 0).
+- **D1**: 500 MB storage, ~5M rows đọc + 100k rows ghi/ngày.
+- **Pages**: không giới hạn request.
+- **AI (MiniMax-M3)**: **có phí** theo token — hosting Cloudflare vẫn **$0**.
+
+> ⚠️ Đừng bao giờ migrate password hashing sang **bcrypt** — Workers free tier giới hạn **10ms CPU/request**, bcrypt sẽ bị kill (`Error 1102`). Code hiện dùng SHA-256, đã an toàn.
