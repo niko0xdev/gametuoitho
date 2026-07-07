@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Mail, Lock, User, Key, ArrowLeft,
   CheckCircle, AlertCircle, ShieldAlert, Sparkles, X, RefreshCw
@@ -38,6 +38,60 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Google Sign In (Identity Services). Lazily loaded only on the login view
+  // and only when a client id is configured via VITE_GOOGLE_CLIENT_ID.
+  const googleBtnRef = useRef<HTMLDivElement>(null);
+  const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? '';
+
+  const handleGoogleCredential = async (response: any) => {
+    const credential = response?.credential;
+    if (!credential) return;
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch('/api/auth/google-sso', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Đăng nhập Google thất bại');
+      triggerBeep(880, 'sine', 0.25);
+      onLoginSuccess(data.user);
+      onClose();
+    } catch (err: any) {
+      setErrorMsg(err.message);
+      triggerBeep(150, 'sawtooth', 0.2);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (mode !== 'login' || !googleClientId) return;
+    const w = window as any;
+    const render = () => {
+      if (!w.google?.accounts?.id || !googleBtnRef.current) return;
+      w.google.accounts.id.initialize({ client_id: googleClientId, callback: handleGoogleCredential });
+      w.google.accounts.id.renderButton(googleBtnRef.current, {
+        theme: 'outline', size: 'large', width: 360, text: 'continue_with', locale: 'vi', shape: 'pill',
+      });
+    };
+    if (w.google?.accounts?.id) { render(); return; }
+    if (!document.getElementById('google-gsi-script')) {
+      const s = document.createElement('script');
+      s.id = 'google-gsi-script';
+      s.src = 'https://accounts.google.com/gsi/client';
+      s.async = true;
+      s.defer = true;
+      s.onload = render;
+      document.head.appendChild(s);
+    } else {
+      const t = setTimeout(render, 300);
+      return () => clearTimeout(t);
+    }
+  }, [mode, googleClientId]);
 
   if (!isOpen) return null;
 
@@ -329,6 +383,17 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
                 >
                   {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'ĐĂNG NHẬP NGAY'}
                 </button>
+
+                {googleClientId && (
+                  <>
+                    <div className="flex items-center my-2">
+                      <div className="flex-1 border-t border-stone-800" />
+                      <span className="px-3 text-[9px] font-mono uppercase tracking-widest text-stone-500">Hoặc tiếp tục với Google</span>
+                      <div className="flex-1 border-t border-stone-800" />
+                    </div>
+                    <div ref={googleBtnRef} className="flex justify-center min-h-[42px]" />
+                  </>
+                )}
 
                 {/* Direct switch to register */}
                 <p className="text-center text-[11px] text-stone-400 mt-3">

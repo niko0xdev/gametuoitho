@@ -38,3 +38,7 @@ APP_URL = "https://gametuoitho.space"
 # `npx wrangler secret put OPENAI_API_KEY`).
 OPENAI_MODEL = "MiniMax-M3"
 OPENAI_BASE_URL = "https://api.minimax.io/v1"
+# Google OAuth Client ID (Google Cloud Console → APIs & Services → Credentials).
+# Set this + the frontend VITE_GOOGLE_CLIENT_ID to enable "Sign in with Google".
+# Public value (embedded in the client too) — not a secret.
+GOOGLE_CLIENT_ID = ""

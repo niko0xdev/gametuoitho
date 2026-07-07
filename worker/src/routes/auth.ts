@@ -5,6 +5,11 @@ import type { Bindings } from '../db';
 import { createDb } from '../db';
 import { usersTable, profilesTable } from '../schema';
 import { sha256Hex } from '../lib/password';
+import { jwtVerify, createRemoteJWKSet } from 'jose';
+
+// Google OIDC public keys (cached by jose). Used to verify ID tokens issued by
+// Google Sign In. Fetched from https://www.googleapis.com/oauth2/v3/certs.
+const GOOGLE_JWKS = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
 
 export const authRoute = new Hono<{ Bindings: Bindings }>();
 
@@ -72,6 +77,75 @@ authRoute.post('/login', async (c) => {
 
   const hash = await sha256Hex(password);
   if (user.passwordHash !== hash) return c.json({ error: 'Mật khẩu không chính xác!' }, 400);
+
+  return c.json({
+    success: true,
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      displayName: user.displayName,
+      avatar: user.avatar,
+      role: user.role,
+    },
+  });
+});
+
+authRoute.post('/google-sso', async (c) => {
+  const { credential } = await c.req.json();
+  if (!credential) return c.json({ error: 'Thiếu Google credential!' }, 400);
+  if (!c.env.GOOGLE_CLIENT_ID) {
+    return c.json({ error: 'Chưa cấu hình GOOGLE_CLIENT_ID trên Worker!' }, 500);
+  }
+
+  // Verify the Google ID token (signature via JWKS + iss/aud/exp claims).
+  let payload;
+  try {
+    const verified = await jwtVerify(credential, GOOGLE_JWKS, {
+      issuer: ['https://accounts.google.com', 'accounts.google.com'],
+      audience: c.env.GOOGLE_CLIENT_ID,
+    });
+    payload = verified.payload;
+  } catch {
+    return c.json({ error: 'Token Google không hợp lệ hoặc đã hết hạn!' }, 401);
+  }
+
+  const email = (payload.email as string | undefined)?.trim().toLowerCase();
+  if (!email) return c.json({ error: 'Token Google không chứa email!' }, 400);
+  if (!payload.email_verified) return c.json({ error: 'Email Google chưa được xác thực!' }, 400);
+
+  const displayName = (payload.name as string | undefined) || email.split('@')[0];
+  const avatar = (payload.picture as string | undefined) || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(email)}`;
+  const sub = (payload.sub as string | undefined) || email;
+
+  const db = createDb(c.env);
+  const rows = await db.select().from(usersTable).where(eq(usersTable.email, email)).all();
+  let user = rows[0];
+
+  if (!user) {
+    const userId = 'user_g_' + sub;
+    const tempUsername = ('g_' + sub).slice(0, 30);
+    await db.insert(usersTable).values({
+      id: userId,
+      username: tempUsername,
+      email,
+      passwordHash: '',
+      displayName,
+      avatar,
+      role: 'user',
+      isGoogleUser: 1,
+    });
+    await db.insert(profilesTable).values({
+      id: userId,
+      displayName,
+      avatar,
+      eloCaro: 1500, eloCoTuong: 1500, eloCoVua: 1500, eloOAnQuan: 1500,
+      eloCoCaNgua: 1500, eloDuoiHinhBatChu: 1500, eloNoiChu: 1500, eloDoanTu: 1500,
+      honorScore: 100,
+      badges: '[]',
+    });
+    user = { id: userId, username: tempUsername, email, displayName, avatar, role: 'user' } as typeof user;
+  }
 
   return c.json({
     success: true,

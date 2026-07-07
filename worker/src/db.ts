@@ -12,6 +12,7 @@ export type Bindings = {
   OPENAI_BASE_URL?: string;
   MATCH_DO: DurableObjectNamespace<MatchDO>;
   MATCHMAKING_DO: DurableObjectNamespace<MatchmakingDO>;
+  GOOGLE_CLIENT_ID?: string;
 };
 
 export type Db = ReturnType<typeof createDb>;
