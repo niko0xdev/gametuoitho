@@ -6,7 +6,7 @@ compatibility_date = "2026-07-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "gametuoitho-db"
-database_id = "REPLACE_AFTER_wrangler_d1_create"
+database_id = "a2f4770f-681a-4059-b0c0-69afdede5104"
 migrations_dir = "migrations"
 
 [[durable_objects.bindings]]
@@ -26,3 +26,7 @@ new_sqlite_classes = ["MatchDO", "MatchmakingDO"]
 [vars]
 CORS_ORIGIN = "https://gametuoitho.space"
 APP_URL = "https://gametuoitho.space"
+# AI provider config (non-secret). OPENAI_API_KEY stays a secret (set via
+# `npx wrangler secret put OPENAI_API_KEY`).
+OPENAI_MODEL = "MiniMax-M3"
+OPENAI_BASE_URL = "https://api.minimax.io/v1"
