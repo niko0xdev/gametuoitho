@@ -9,3 +9,11 @@ coverage/
 database.db
 database.json
 
+# Local dev (not in repo scope)
+bun.lock
+py-test/
+
+# Worker local state
+worker/.wrangler/
+worker/node_modules/
+
