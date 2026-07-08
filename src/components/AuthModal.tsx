@@ -96,7 +96,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   };
 
   useEffect(() => {
-    if (mode !== 'login' || !googleClientId) return;
+    if (!isOpen || mode !== 'login' || !googleClientId) return;
     const w = window as any;
     let cancelled = false;
     let rendered = false;
@@ -129,7 +129,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     const iv = setInterval(tryRender, 100);
     const stop = setTimeout(() => clearInterval(iv), 6000);
     return () => { cancelled = true; clearInterval(iv); clearTimeout(stop); };
-  }, [mode, googleClientId]);
+  }, [isOpen, mode, googleClientId]);
 
   useEffect(() => {
     if (mode !== 'register' || !turnstileSitekey) return;
