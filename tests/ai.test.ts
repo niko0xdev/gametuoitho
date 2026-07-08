@@ -8,6 +8,9 @@ before(() => {
   process.env.OPENAI_MODEL = 'gpt-4o-mini';
 });
 
+// AI routes are gated behind requireLoggedIn (x-user-id). user_a is a seeded account.
+const AUTH = { 'x-user-id': 'user_a' };
+
 function stubChatCompletion(response: any) {
   (globalThis as any).__chatCompletionOverride = async () => response;
 }
@@ -16,21 +19,25 @@ function clearStub() {
 }
 
 describe('POST /api/ai/parse-roster', () => {
+  it('401s without x-user-id', async () => {
+    const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'x' });
+    assert.equal(res.status, 401);
+  });
   it('400s without summary', async () => {
-    const res = await request(getApp()).post('/api/ai/parse-roster', {});
+    const res = await request(getApp()).post('/api/ai/parse-roster', {}, AUTH);
     assert.equal(res.status, 400);
   });
   it('500s without OPENAI_API_KEY', async () => {
     const saved = process.env.OPENAI_API_KEY;
     process.env.OPENAI_API_KEY = '';
-    const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'text' });
+    const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'text' }, AUTH);
     process.env.OPENAI_API_KEY = saved;
     assert.equal(res.status, 500);
   });
   it('500s without OPENAI_MODEL', async () => {
     const saved = process.env.OPENAI_MODEL;
     delete process.env.OPENAI_MODEL;
-    const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'text' });
+    const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'text' }, AUTH);
     process.env.OPENAI_MODEL = saved;
     assert.equal(res.status, 500);
   });
@@ -47,7 +54,7 @@ describe('POST /api/ai/parse-roster', () => {
       }]
     });
     try {
-      const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'some text' });
+      const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'some text' }, AUTH);
       assert.equal(res.status, 200);
       assert.equal(res.body.teams[0].name, 'T1');
     } finally { clearStub(); }
@@ -57,7 +64,7 @@ describe('POST /api/ai/parse-roster', () => {
       choices: [{ message: { content: JSON.stringify({ teams: [{ name: 'Fallback', players: [] }] }) } }]
     });
     try {
-      const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'more text' });
+      const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'more text' }, AUTH);
       assert.equal(res.status, 200);
       assert.equal(res.body.teams[0].name, 'Fallback');
     } finally { clearStub(); }
@@ -67,21 +74,21 @@ describe('POST /api/ai/parse-roster', () => {
       choices: [{ message: { content: 'not json' } }]
     });
     try {
-      const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'x' });
+      const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'x' }, AUTH);
       assert.equal(res.status, 500);
     } finally { clearStub(); }
   });
   it('500s when no tool_call and no content', async () => {
     stubChatCompletion({ choices: [{ message: {} }] });
     try {
-      const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'x' });
+      const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'x' }, AUTH);
       assert.equal(res.status, 500);
     } finally { clearStub(); }
   });
   it('500s when chat throws', async () => {
     (globalThis as any).__chatCompletionOverride = async () => { throw new Error('boom'); };
     try {
-      const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'x' });
+      const res = await request(getApp()).post('/api/ai/parse-roster', { summary: 'x' }, AUTH);
       assert.equal(res.status, 500);
       assert.ok(res.body.error.includes('boom'));
     } finally {
@@ -91,8 +98,12 @@ describe('POST /api/ai/parse-roster', () => {
 });
 
 describe('POST /api/ai/parse-players', () => {
+  it('401s without x-user-id', async () => {
+    const res = await request(getApp()).post('/api/ai/parse-players', { text: 'x' });
+    assert.equal(res.status, 401);
+  });
   it('400s without text', async () => {
-    const res = await request(getApp()).post('/api/ai/parse-players', {});
+    const res = await request(getApp()).post('/api/ai/parse-players', {}, AUTH);
     assert.equal(res.status, 400);
   });
   it('parses and dedupes names from tool_call', async () => {
@@ -108,7 +119,7 @@ describe('POST /api/ai/parse-players', () => {
       }]
     });
     try {
-      const res = await request(getApp()).post('/api/ai/parse-players', { text: 'list' });
+      const res = await request(getApp()).post('/api/ai/parse-players', { text: 'list' }, AUTH);
       assert.equal(res.status, 200);
       assert.deepEqual(res.body.names, ['Alice', 'Bob']);
     } finally { clearStub(); }
@@ -118,7 +129,7 @@ describe('POST /api/ai/parse-players', () => {
       choices: [{ message: { content: JSON.stringify({ names: ['X', 'Y'] }) } }]
     });
     try {
-      const res = await request(getApp()).post('/api/ai/parse-players', { text: 'x' });
+      const res = await request(getApp()).post('/api/ai/parse-players', { text: 'x' }, AUTH);
       assert.equal(res.status, 200);
       assert.deepEqual(res.body.names, ['X', 'Y']);
     } finally { clearStub(); }
@@ -126,14 +137,14 @@ describe('POST /api/ai/parse-players', () => {
   it('500s on invalid JSON content', async () => {
     stubChatCompletion({ choices: [{ message: { content: 'not json' } }] });
     try {
-      const res = await request(getApp()).post('/api/ai/parse-players', { text: 'x' });
+      const res = await request(getApp()).post('/api/ai/parse-players', { text: 'x' }, AUTH);
       assert.equal(res.status, 500);
     } finally { clearStub(); }
   });
   it('returns empty array when no content', async () => {
     stubChatCompletion({ choices: [{ message: { content: null } }] });
     try {
-      const res = await request(getApp()).post('/api/ai/parse-players', { text: 'x' });
+      const res = await request(getApp()).post('/api/ai/parse-players', { text: 'x' }, AUTH);
       assert.equal(res.status, 200);
       assert.deepEqual(res.body.names, []);
     } finally { clearStub(); }
@@ -141,14 +152,14 @@ describe('POST /api/ai/parse-players', () => {
   it('500s when OPENAI_MODEL missing', async () => {
     const savedModel = process.env.OPENAI_MODEL;
     delete process.env.OPENAI_MODEL;
-    const res = await request(getApp()).post('/api/ai/parse-players', { text: 'x' });
+    const res = await request(getApp()).post('/api/ai/parse-players', { text: 'x' }, AUTH);
     process.env.OPENAI_MODEL = savedModel;
     assert.equal(res.status, 500);
   });
   it('500s when chat throws', async () => {
     (globalThis as any).__chatCompletionOverride = async () => { throw new Error('players-boom'); };
     try {
-      const res = await request(getApp()).post('/api/ai/parse-players', { text: 'x' });
+      const res = await request(getApp()).post('/api/ai/parse-players', { text: 'x' }, AUTH);
       assert.equal(res.status, 500);
       assert.ok(res.body.error.includes('players-boom'));
     } finally {
@@ -158,8 +169,12 @@ describe('POST /api/ai/parse-players', () => {
 });
 
 describe('POST /api/ai/parse-events', () => {
+  it('401s without x-user-id', async () => {
+    const res = await request(getApp()).post('/api/ai/parse-events', { summary: 'x' });
+    assert.equal(res.status, 401);
+  });
   it('400s without summary', async () => {
-    const res = await request(getApp()).post('/api/ai/parse-events', {});
+    const res = await request(getApp()).post('/api/ai/parse-events', {}, AUTH);
     assert.equal(res.status, 400);
   });
   it('parses events with valid types and sides from tool_call', async () => {
@@ -183,7 +198,7 @@ describe('POST /api/ai/parse-events', () => {
       }]
     });
     try {
-      const res = await request(getApp()).post('/api/ai/parse-events', { summary: 's' });
+      const res = await request(getApp()).post('/api/ai/parse-events', { summary: 's' }, AUTH);
       assert.equal(res.status, 200);
       // 3 valid types (goal, yellow, red) + invalid filtered out = 4
       // 'unknown' side with playerName is KEPT (filter condition is `e.teamSide !== 'unknown' || e.playerName`)
@@ -202,7 +217,7 @@ describe('POST /api/ai/parse-events', () => {
       }]
     });
     try {
-      const res = await request(getApp()).post('/api/ai/parse-events', { summary: 's' });
+      const res = await request(getApp()).post('/api/ai/parse-events', { summary: 's' }, AUTH);
       assert.equal(res.status, 200);
       assert.deepEqual(res.body.events, []);
     } finally { clearStub(); }
@@ -212,7 +227,7 @@ describe('POST /api/ai/parse-events', () => {
       choices: [{ message: { content: JSON.stringify({ events: [{ type: 'goal', teamSide: 'home', playerName: 'Z' }] }) } }]
     });
     try {
-      const res = await request(getApp()).post('/api/ai/parse-events', { summary: 's' });
+      const res = await request(getApp()).post('/api/ai/parse-events', { summary: 's' }, AUTH);
       assert.equal(res.status, 200);
       assert.equal(res.body.events.length, 1);
       assert.equal(res.body.events[0].playerName, 'Z');
@@ -221,14 +236,14 @@ describe('POST /api/ai/parse-events', () => {
   it('500s on invalid content JSON', async () => {
     stubChatCompletion({ choices: [{ message: { content: 'bad' } }] });
     try {
-      const res = await request(getApp()).post('/api/ai/parse-events', { summary: 's' });
+      const res = await request(getApp()).post('/api/ai/parse-events', { summary: 's' }, AUTH);
       assert.equal(res.status, 500);
     } finally { clearStub(); }
   });
   it('500s when chat throws', async () => {
     (globalThis as any).__chatCompletionOverride = async () => { throw new Error('events-boom'); };
     try {
-      const res = await request(getApp()).post('/api/ai/parse-events', { summary: 's' });
+      const res = await request(getApp()).post('/api/ai/parse-events', { summary: 's' }, AUTH);
       assert.equal(res.status, 500);
       assert.ok(res.body.error.includes('events-boom'));
     } finally {
