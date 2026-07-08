@@ -369,6 +369,9 @@ export default function BiLacArena({
         setCurrentTournament(data.tournament);
         setAccessCodeInput('');
         playBeep(880, 'sine', 0.2);
+        // Refresh portal list so the just-accessed card flips isMember=true
+        // (powers the "Đang tham gia" badge on reload / when navigating back).
+        fetchTournaments();
       }
     } catch (err) {
       setError('Lỗi kết nối máy chủ!');
@@ -1123,23 +1126,15 @@ export default function BiLacArena({
           </div>
         )}
 
-        {/* 2 QUICK ACTION BUTTONS */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8" id="portal_quick_actions">
-          <button
-            id="btn_quick_join"
-            onClick={() => { setPreselectJoinTournamentId(''); setJoinModalOpen(true); }}
-            className="flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white font-bold py-4 rounded-2xl shadow-md cursor-pointer transition-colors"
-          >
-            <UserCheck className="w-5 h-5" />
-            🔑 Tham gia giải đấu bằng mã code
-          </button>
+        {/* 1 QUICK ACTION BUTTON — join-by-code is on each card and via modal */}
+        <div className="grid grid-cols-1 gap-4 mb-8" id="portal_quick_actions">
           <button
             id="btn_quick_create"
             onClick={() => setCreateModalOpen(true)}
             className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 rounded-2xl shadow-md cursor-pointer transition-colors"
           >
             <Plus className="w-5 h-5" />
-            ➕ Tạo giải đấu mới
+            Tạo giải đấu mới
           </button>
         </div>
 
