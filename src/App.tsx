@@ -427,7 +427,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/profile/${userId}/update`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
         body: JSON.stringify({ displayName, avatar })
       });
       if (res.ok) {
@@ -443,7 +443,8 @@ export default function App() {
     if (!userId) return;
     try {
       const res = await fetch(`/api/profile/${userId}/reset-elo`, {
-        method: 'POST'
+        method: 'POST',
+        headers: { 'x-user-id': userId }
       });
       if (res.ok) {
         const updated = await res.json();

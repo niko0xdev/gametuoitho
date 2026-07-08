@@ -35,13 +35,26 @@ describe('GET /api/leagues', () => {
 });
 
 describe('POST /api/leagues', () => {
-  it('400s on invalid body', async () => {
-    const res = await request(getApp()).post('/api/leagues', {});
+  before(() => {
+    db.saveUser({ id: 'lg_write', username: 'lgwrite', email: 'lgw@x.com', passwordHash: 'h', displayName: 'L', avatar: 'a', role: 'user' });
+    db.saveUser({ id: 'lg_nope', username: 'lgnope', email: 'lgn2@x.com', passwordHash: 'h', displayName: 'N', avatar: 'a', role: 'user' });
+    db.saveLeaguePermissions({ lg_write: true });
+  });
+  it('401s without userId', async () => {
+    const res = await request(getApp()).post('/api/leagues', { id: 'x', name: 'X' });
+    assert.equal(res.status, 401);
+  });
+  it('403s without permission', async () => {
+    const res = await request(getApp()).post('/api/leagues?userId=lg_nope', { id: 'x', name: 'X' });
+    assert.equal(res.status, 403);
+  });
+  it('400s on invalid body (permitted caller)', async () => {
+    const res = await request(getApp()).post('/api/leagues?userId=lg_write', {});
     assert.equal(res.status, 400);
   });
-  it('200s creating', async () => {
+  it('200s creating (permitted caller)', async () => {
     const id = uniq('lg');
-    const res = await request(getApp()).post('/api/leagues', {
+    const res = await request(getApp()).post('/api/leagues?userId=lg_write', {
       id, name: 'Test', sport: 'futsal', format: 'round_robin', status: 'ACTIVE',
       createdAt: new Date().toISOString(), teams: [], matches: []
     });
@@ -51,17 +64,21 @@ describe('POST /api/leagues', () => {
 });
 
 describe('PUT /api/leagues/:id', () => {
-  it('400s on invalid body', async () => {
-    const res = await request(getApp()).put('/api/leagues/anything', {});
+  it('403s without permission', async () => {
+    const res = await request(getApp()).put('/api/leagues/anything?userId=lg_nope', { id: 'a', name: 'A' });
+    assert.equal(res.status, 403);
+  });
+  it('400s on invalid body (permitted caller)', async () => {
+    const res = await request(getApp()).put('/api/leagues/anything?userId=lg_write', {});
     assert.equal(res.status, 400);
   });
-  it('200s updating', async () => {
+  it('200s updating (permitted caller)', async () => {
     const id = uniq('lgp');
-    await request(getApp()).post('/api/leagues', {
+    await request(getApp()).post('/api/leagues?userId=lg_write', {
       id, name: 'Old', sport: 'futsal', format: 'knockout', status: 'ACTIVE',
       createdAt: new Date().toISOString(), teams: [], matches: []
     });
-    const res = await request(getApp()).put(`/api/leagues/${id}`, {
+    const res = await request(getApp()).put(`/api/leagues/${id}?userId=lg_write`, {
       id, name: 'New', sport: 'futsal', format: 'knockout', status: 'ENDED',
       createdAt: new Date().toISOString(), teams: [], matches: []
     });
@@ -71,8 +88,12 @@ describe('PUT /api/leagues/:id', () => {
 });
 
 describe('DELETE /api/leagues/:id', () => {
-  it('200s always (idempotent)', async () => {
-    const res = await request(getApp()).delete('/api/leagues/__nope__');
+  it('403s without permission', async () => {
+    const res = await request(getApp()).delete('/api/leagues/__nope__?userId=lg_nope');
+    assert.equal(res.status, 403);
+  });
+  it('200s (idempotent) for permitted caller', async () => {
+    const res = await request(getApp()).delete('/api/leagues/__nope__?userId=lg_write');
     assert.equal(res.status, 200);
   });
 });

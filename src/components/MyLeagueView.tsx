@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { playRetroBeep } from './games/CaroBoard.tsx';
 import { UserProfile } from '../types.ts';
+import { knockoutWinner } from '../lib/knockout.ts';
 
 // TypeScript Interfaces
 export type SportType = 'futsal' | 'pes' | 'pingpong' | 'badminton';
@@ -242,6 +243,7 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
   const [teamPlayers, setTeamPlayers] = useState<string[][]>([]);
   const [selectedTacticalTeamId, setSelectedTacticalTeamId] = useState<string>('');
   const [formError, setFormError] = useState('');
+  const [syncError, setSyncError] = useState('');
 
   // AI Quick Import States
   const [aiRosterText, setAiRosterText] = useState('');
@@ -468,12 +470,23 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
     }
   }, [userId, hasPermission]);
 
+  // Close the edit-score modal on Escape.
+  useEffect(() => {
+    if (!editingMatch) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setEditingMatch(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editingMatch]);
+
   // Save changes helper syncing with server API contract
   const saveLeaguesToLocalStorage = async (updatedLeagues: MyLeague[]) => {
+    // Snapshot prior state so we can roll back the optimistic update on server failure.
+    const prevLeagues = leagues;
+
     // Keep local cache for offline resiliency
     setLeagues(updatedLeagues);
     localStorage.setItem('my_leagues_v1', JSON.stringify(updatedLeagues));
-    
+
     if (selectedLeague) {
       const freshSelected = updatedLeagues.find(l => l.id === selectedLeague.id);
       if (freshSelected) {
@@ -481,45 +494,64 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
       }
     }
 
+    const rollback = (why: string) => {
+      setLeagues(prevLeagues);
+      localStorage.setItem('my_leagues_v1', JSON.stringify(prevLeagues));
+      if (selectedLeague) {
+        setSelectedLeague(prevLeagues.find(l => l.id === selectedLeague.id) || null);
+      }
+      setSyncError(why);
+    };
+
     try {
-      if (updatedLeagues.length > leagues.length) {
+      if (updatedLeagues.length > prevLeagues.length) {
         // Created new league
         const newLeague = updatedLeagues[0];
-        await fetch('/api/leagues', {
+        const res = await fetch(`/api/leagues?userId=${encodeURIComponent(userId)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newLeague)
         });
-      } else if (updatedLeagues.length === leagues.length) {
+        if (!res.ok) { rollback('Lưu giải đấu thất bại — đã hoàn tác thay đổi. Hãy thử lại.'); return; }
+      } else if (updatedLeagues.length === prevLeagues.length) {
         // Updated league
         // We find the modified league from updatedLeagues compared with current leagues array
-        const changedLeague = updatedLeagues.find((ul, idx) => JSON.stringify(ul) !== JSON.stringify(leagues[idx]));
+        const changedLeague = updatedLeagues.find((ul, idx) => JSON.stringify(ul) !== JSON.stringify(prevLeagues[idx]));
         if (changedLeague) {
-          await fetch(`/api/leagues/${changedLeague.id}`, {
+          const res = await fetch(`/api/leagues/${changedLeague.id}?userId=${encodeURIComponent(userId)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(changedLeague)
           });
+          if (!res.ok) { rollback('Cập nhật giải đấu thất bại — đã hoàn tác thay đổi. Hãy thử lại.'); return; }
         }
-      } else if (updatedLeagues.length < leagues.length) {
+      } else if (updatedLeagues.length < prevLeagues.length) {
         // Deleted league
-        const deletedLeague = leagues.find(l => !updatedLeagues.some(ul => ul.id === l.id));
+        const deletedLeague = prevLeagues.find(l => !updatedLeagues.some(ul => ul.id === l.id));
         if (deletedLeague) {
-          await fetch(`/api/leagues/${deletedLeague.id}`, {
+          const res = await fetch(`/api/leagues/${deletedLeague.id}?userId=${encodeURIComponent(userId)}`, {
             method: 'DELETE'
           });
+          if (!res.ok) { rollback('Xoá giải đấu thất bại — đã hoàn tác thay đổi. Hãy thử lại.'); return; }
         }
       }
+      setSyncError('');
     } catch (err) {
       console.error('Error syncing league state to server:', err);
+      rollback('Mất kết nối máy chủ — đã hoàn tác thay đổi. Hãy thử lại.');
     }
   };
 
-  // Pre-fill default team names and initialize empty player list when team count or sport/format changes
+  // Resize name/roster arrays when team count changes. Preserve any names/rosters
+  // already present (typed by the user or filled by AI) and only default the new
+  // slots — so a sport change or AI import no longer wipes what was entered.
   useEffect(() => {
-    const defaults = Array.from({ length: numTeams }, (_, i) => `Đội tuyển ${i + 1}`);
-    setTeamNames(defaults);
-    setTeamPlayers(Array.from({ length: numTeams }, () => []));
+    setTeamNames(prev =>
+      Array.from({ length: numTeams }, (_, i) => prev[i] || `Đội tuyển ${i + 1}`)
+    );
+    setTeamPlayers(prev =>
+      Array.from({ length: numTeams }, (_, i) => prev[i] || [])
+    );
   }, [numTeams, newLeagueSport]);
 
   const handleTeamNameChange = (index: number, val: string) => {
@@ -1000,16 +1032,10 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
 
   const handleAiApplyEvents = () => {
     if (!editingMatch || !aiEventPreview || aiEventPreview.length === 0) return;
-    let homeDelta = 0;
-    let awayDelta = 0;
     const mapped: MatchEvent[] = aiEventPreview
       .filter(e => e.teamSide === 'home' || e.teamSide === 'away')
       .map(e => {
         const teamId = e.teamSide === 'home' ? editingMatch.home : editingMatch.away;
-        if (e.type === 'goal') {
-          if (e.teamSide === 'home') homeDelta++;
-          else awayDelta++;
-        }
         return {
           type: e.type,
           teamId,
@@ -1024,26 +1050,25 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
     }
 
     // Trộn với editingMatchEvents hiện có, tránh trùng (cùng type+teamId+playerName+minute).
-    setEditingMatchEvents(prev => {
-      const existing = new Set(prev.map(p => `${p.type}|${p.teamId}|${p.playerName}|${p.minute ?? ''}`));
-      const merged = [...prev];
-      for (const ev of mapped) {
-        const k = `${ev.type}|${ev.teamId}|${ev.playerName}|${ev.minute ?? ''}`;
-        if (!existing.has(k)) {
-          merged.push(ev);
-          existing.add(k);
-        }
+    const existing = new Set(editingMatchEvents.map(p => `${p.type}|${p.teamId}|${p.playerName}|${p.minute ?? ''}`));
+    const merged = [...editingMatchEvents];
+    for (const ev of mapped) {
+      const k = `${ev.type}|${ev.teamId}|${ev.playerName}|${ev.minute ?? ''}`;
+      if (!existing.has(k)) {
+        merged.push(ev);
+        existing.add(k);
       }
-      return merged.sort((a, b) => (a.minute || 0) - (b.minute || 0));
-    });
+    }
+    merged.sort((a, b) => (a.minute || 0) - (b.minute || 0));
+    setEditingMatchEvents(merged);
 
-    // Cộng dồn bàn thắng vào score nếu người dùng chưa tự nhập.
-    if (homeDelta > 0) {
-      setEditHomeScore(prev => String((parseInt(prev || '0') || 0) + homeDelta));
-    }
-    if (awayDelta > 0) {
-      setEditAwayScore(prev => String((parseInt(prev || '0') || 0) + awayDelta));
-    }
+    // Score = tổng bàn thắng suy ra từ TOÀN BỘ danh sách sự kiện đã trộn (idempotent).
+    // Dùng giá trị tuyệt đối thay vì cộng dồn lên score hiện tại để không bị đếm kép
+    // khi người dùng đã tự nhập tỉ số trước đó.
+    const homeGoals = merged.filter(e => e.type === 'goal' && e.teamId === editingMatch.home).length;
+    const awayGoals = merged.filter(e => e.type === 'goal' && e.teamId === editingMatch.away).length;
+    if (homeGoals > 0) setEditHomeScore(String(homeGoals));
+    if (awayGoals > 0) setEditAwayScore(String(awayGoals));
 
     setAiEventPreview(null);
     setAiSummaryText('');
@@ -1100,8 +1125,13 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
       // Find the match we just edited
       const match = updatedMatches.find(m => m.id === editingMatch.id)!;
       if (match.nextMatchId) {
-        const winnerId = hs > as ? match.home : match.away; // no draws allowed in bracket, if draw user must input winner score
-        
+        // Draws are not allowed to advance in a bracket — the user must enter a decisive score.
+        const winnerId = knockoutWinner(match.home, match.away, hs, as);
+        if (!winnerId) {
+          alert('Trận đấu hoà! Vui lòng nhập tỉ số phân thắng bại để đội thắng đi tiếp.');
+          return;
+        }
+
         // Push winner to the home or away slot of the next match
         nextLeague.matches = nextLeague.matches.map(nm => {
           if (nm.id === match.nextMatchId) {
@@ -1147,7 +1177,11 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
 
       // Progression inside the SF/Final stages of group+knockout
       if (match.stage !== 'Group Stage' && match.nextMatchId) {
-        const winnerId = hs > as ? match.home : match.away;
+        const winnerId = knockoutWinner(match.home, match.away, hs, as);
+        if (!winnerId) {
+          alert('Trận đấu hoà! Vui lòng nhập tỉ số phân thắng bại để đội thắng đi tiếp.');
+          return;
+        }
         nextLeague.matches = nextLeague.matches.map(nm => {
           if (nm.id === match.nextMatchId) {
             if (match.nextMatchPosition === 'home') {
@@ -1291,7 +1325,11 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
     if (selectedLeague.format === 'knockout') {
       const match = updatedMatches.find(m => m.id === editingMatch.id)!;
       if (match.nextMatchId) {
-        const winnerId = hs > as ? match.home : match.away;
+        const winnerId = knockoutWinner(match.home, match.away, hs, as);
+        if (!winnerId) {
+          alert('Trận đấu hoà! Vui lòng nhập tỉ số phân thắng bại để đội thắng đi tiếp.');
+          return;
+        }
         nextLeague.matches = nextLeague.matches.map(nm => {
           if (nm.id === match.nextMatchId) {
             if (match.nextMatchPosition === 'home') {
@@ -1332,7 +1370,11 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
       }
 
       if (match.stage !== 'Group Stage' && match.nextMatchId) {
-        const winnerId = hs > as ? match.home : match.away;
+        const winnerId = knockoutWinner(match.home, match.away, hs, as);
+        if (!winnerId) {
+          alert('Trận đấu hoà! Vui lòng nhập tỉ số phân thắng bại để đội thắng đi tiếp.');
+          return;
+        }
         nextLeague.matches = nextLeague.matches.map(nm => {
           if (nm.id === match.nextMatchId) {
             if (match.nextMatchPosition === 'home') {
@@ -1410,6 +1452,13 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       
+      {syncError && (
+        <div className="mb-4 bg-red-50 text-red-700 border border-red-200 p-3 rounded-xl text-xs font-semibold flex items-center justify-between gap-2">
+          <span>⚠️ {syncError}</span>
+          <button onClick={() => setSyncError('')} className="text-red-500 hover:text-red-700 font-bold">Đóng</button>
+        </div>
+      )}
+
       {/* 1. HEADER SECTION */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-4 border-b border-stone-200">
         <div>
@@ -1862,11 +1911,11 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
                         {selectedLeague.matches.filter(m => m.stage === 'Final').map(m => (
                           <div key={m.id} className="flex flex-col gap-2">
                             {renderKnockoutMatchCard(m)}
-                            {m.isPlayed && (
+                            {m.isPlayed && m.winner && m.winner !== 'DRAW' && (
                               <div className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-xl text-xs font-semibold text-center flex flex-col items-center gap-1 animate-scaleIn">
                                 <Trophy className="w-5 h-5 text-amber-500 fill-amber-200" />
                                 <span>Nhà vô địch giải đấu:</span>
-                                <span className="font-bold text-sm text-stone-800">{getTeamName(m.winner!, selectedLeague.teams)}</span>
+                                <span className="font-bold text-sm text-stone-800">{getTeamName(m.winner, selectedLeague.teams)}</span>
                               </div>
                             )}
                           </div>
@@ -1914,7 +1963,7 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
                   <Info className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
                   <div>
                     <b>Quy tắc xếp hạng:</b> Thắng +3 điểm, Hòa +1 điểm, Thua 0 điểm. 
-                    Chỉ số phụ ưu tiên lần lượt là: <b>Hiệu số bàn thắng thua (GD)</b> &rarr; <b>Tổng số bàn thắng (GF)</b> &rarr; <b>Kết quả đối đầu trực tiếp</b>.
+                    Chỉ số phụ ưu tiên lần lượt là: <b>Hiệu số bàn thắng thua (GD)</b> &rarr; <b>Tổng số bàn thắng (GF)</b>.
                   </div>
                 </div>
               </div>
@@ -2078,8 +2127,8 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
                                   <span className="text-[9px] font-black uppercase text-stone-400 tracking-wider">Danh sách cầu thủ ({team.players?.length || 0}):</span>
                                   {team.players && team.players.length > 0 ? (
                                     <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
-                                      {team.players.map(p => (
-                                        <span key={p} className="text-[9px] font-bold bg-white border border-stone-200/60 text-stone-700 px-1.5 py-0.5 rounded-sm">
+                                      {team.players.map((p, pIdx) => (
+                                        <span key={`${pIdx}_${p}`} className="text-[9px] font-bold bg-white border border-stone-200/60 text-stone-700 px-1.5 py-0.5 rounded-sm">
                                           {p}
                                         </span>
                                       ))}
@@ -2418,6 +2467,9 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
 
                       {/* iOS-Style Toggle Slider */}
                       <button
+                        role="switch"
+                        aria-checked={isAllowed}
+                        aria-label={`Cấp quyền quản lý giải cho ${acc.name || acc.id}`}
                         onClick={() => handleTogglePermission(acc.id)}
                         className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden
                           ${isAllowed ? 'bg-emerald-500' : 'bg-stone-300'}
@@ -2542,8 +2594,17 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
 
       {/* 4. MODAL: EDIT/UPDATE MATCH SCORE */}
       {editingMatch && selectedLeague && (
-        <div className="fixed inset-0 z-50 bg-stone-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className={`bg-white border border-stone-200 shadow-2xl rounded-2xl w-full p-6 animate-scaleIn transition-all ${selectedLeague.sport === 'futsal' ? 'max-w-lg' : 'max-w-md'}`}>
+        <div
+          className="fixed inset-0 z-50 bg-stone-900/40 backdrop-blur-xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Cập nhật kết quả thi đấu"
+          onClick={(e) => { if (e.target === e.currentTarget) setEditingMatch(null); }}
+        >
+          <div
+            className={`bg-white border border-stone-200 shadow-2xl rounded-2xl w-full p-6 animate-scaleIn transition-all ${selectedLeague.sport === 'futsal' ? 'max-w-lg' : 'max-w-md'}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex justify-between items-center border-b border-stone-100 pb-3 mb-4">
               <h3 className="text-sm font-black text-stone-800 uppercase tracking-wide">
                 Cập nhật kết quả thi đấu

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Swords, LogOut, Users, ShieldAlert, Wifi, WifiOff } from 'lucide-react';
 import { MatchState, UserProfile } from '../types.ts';
 import { GAMES } from '../gamesData.ts';
+import { gameDisplayName } from '../lib/gameDisplayName.ts';
 
 // Individual boards imports
 import CaroBoard, { playRetroBeep } from './games/CaroBoard.tsx';
@@ -179,7 +180,7 @@ export default function GameBoard({
           </div>
           <div>
             <h2 className="text-lg sm:text-xl font-serif font-bold text-stone-800">
-              Cờ {gameInfo?.name} Arena
+              {gameDisplayName(gameInfo)} Arena
             </h2>
             <div className="flex items-center gap-2 text-[10px] text-stone-400 font-mono">
               <span>Phòng: {matchId.substring(6, 12).toUpperCase()}</span>

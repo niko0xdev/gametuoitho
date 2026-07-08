@@ -6,7 +6,7 @@ import {
 import { playRetroBeep } from './games/CaroBoard.tsx';
 import { motion, AnimatePresence } from 'motion/react';
 import { UserProfile } from '../types.ts';
-import { validatePassword } from '../lib/passwordRules';
+import { validatePassword, PASSWORD_HINT } from '../lib/passwordRules';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -69,6 +69,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   // = widget hidden + BE skips verify, so dev/preview stays unblocked.
   const turnstileSitekey = (import.meta.env.VITE_TURNSTILE_SITEKEY as string | undefined) ?? '';
   const turnstileRef = useRef<HTMLDivElement>(null);
+  const turnstileWidgetIdRef = useRef<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
 
   const handleGoogleCredential = async (response: any) => {
@@ -136,7 +137,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     const w = window as any;
     const render = () => {
       if (!w.turnstile || !turnstileRef.current) return;
-      w.turnstile.render(turnstileRef.current, {
+      turnstileWidgetIdRef.current = w.turnstile.render(turnstileRef.current, {
         sitekey: turnstileSitekey,
         action: 'turnstile-spin-v1',
         callback: (t: string) => setTurnstileToken(t),
@@ -159,6 +160,29 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     }
   }, [mode, turnstileSitekey]);
 
+  // Reset the Turnstile widget + cached token so a consumed/expired token can't
+  // block a retry (siteverify rejects reused tokens as timeout-or-duplicate).
+  const resetTurnstile = () => {
+    const w = window as any;
+    if (w.turnstile && turnstileWidgetIdRef.current) {
+      try { w.turnstile.reset(turnstileWidgetIdRef.current); } catch { /* widget may be gone */ }
+    }
+    setTurnstileToken(null);
+  };
+
+  // Reset to a clean login form every time the modal opens, so stale mode,
+  // leftover fields, or a plaintext password from a previous session can't linger.
+  useEffect(() => {
+    if (!isOpen) return;
+    setMode('login');
+    setLoginUsername(''); setLoginPassword('');
+    setRegisterUsername(''); setRegisterEmail(''); setRegisterPassword('');
+    setRegisterConfirmPassword(''); setRegisterDisplayName('');
+    setResetEmail(''); setResetOtp(''); setResetNewPassword(''); setReceivedOtp(null);
+    setVerifyEmail(''); setVerifyOtp('');
+    setErrorMsg(null); setSuccessMsg(null);
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSwitchMode = (newMode: AuthMode) => {
@@ -166,7 +190,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     setMode(newMode);
     setErrorMsg(null);
     setSuccessMsg(null);
-    setTurnstileToken(null);
+    resetTurnstile();
   };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
@@ -251,6 +275,9 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     } catch (err: any) {
       setErrorMsg(err.message);
       triggerBeep(150, 'sawtooth', 0.2);
+      // Failed register consumed the Turnstile token — reset so the user can retry
+      // with a corrected username/password without reloading the page.
+      resetTurnstile();
     } finally {
       setLoading(false);
     }
@@ -278,6 +305,9 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
       }
       triggerBeep(660, 'triangle', 0.2);
       setSuccessMsg(data.message || 'Mã OTP đã được gửi về email!');
+      // Dev convenience: backend echoes the OTP as _debugOtp so the simulated
+      // mail inbox can display/fill it (production delivers via real email).
+      setReceivedOtp(data._debugOtp ?? null);
       setMode('enter_otp');
     } catch (err: any) {
       setErrorMsg(err.message);
@@ -291,6 +321,12 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     e.preventDefault();
     if (!resetOtp || !resetNewPassword) {
       setErrorMsg('Vui lòng nhập mã OTP và mật khẩu mới!');
+      triggerBeep(180, 'sawtooth', 0.15);
+      return;
+    }
+    const pwCheck = validatePassword(resetNewPassword);
+    if (!pwCheck.ok) {
+      setErrorMsg(pwCheck.error || 'Mật khẩu không đủ mạnh!');
       triggerBeep(180, 'sawtooth', 0.15);
       return;
     }
@@ -370,9 +406,20 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   };
 
   return (
-    <div className="fixed inset-0 bg-stone-950/85 backdrop-blur-md flex items-center justify-center p-4 z-[9999] overflow-y-auto animate-fadeIn">
+    <div
+      className="fixed inset-0 bg-stone-950/85 backdrop-blur-md flex items-center justify-center p-4 z-[9999] overflow-y-auto animate-fadeIn"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Đăng nhập hoặc đăng ký"
+      tabIndex={-1}
+      onClick={(e) => { if (e.target === e.currentTarget) { triggerBeep(300, 'sine', 0.05); onClose(); } }}
+      onKeyDown={(e) => { if (e.key === 'Escape') { triggerBeep(300, 'sine', 0.05); onClose(); } }}
+    >
       {/* Container */}
-      <div className="w-full max-w-md bg-stone-900 border-4 border-stone-800 rounded-3xl overflow-hidden shadow-2xl relative">
+      <div
+        className="w-full max-w-md bg-stone-900 border-4 border-stone-800 rounded-3xl overflow-hidden shadow-2xl relative"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Retro style top header accent */}
         <div className="bg-gradient-to-r from-orange-600 via-amber-500 to-yellow-400 h-2 w-full" />
         
@@ -712,6 +759,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
                       className="w-full bg-stone-950 border border-stone-800 rounded-xl py-2.5 pl-10 pr-4 text-xs text-stone-100 placeholder-stone-600 focus:outline-none focus:border-orange-500"
                     />
                   </div>
+                  <p className="text-[10px] text-stone-500 mt-1">{PASSWORD_HINT}</p>
                 </div>
 
                 <div className="flex gap-2">

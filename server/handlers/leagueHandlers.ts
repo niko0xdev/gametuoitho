@@ -1,5 +1,20 @@
 import type { Request, Response } from 'express';
 import { db } from '../db.ts';
+import { requireLoggedIn } from './_middleware.ts';
+
+// Mutating league routes require a permitted caller (mirrors handleListLeagues).
+// Reuse the canonical requireLoggedIn so identity extraction (header || body ||
+// query) and the user-existence check stay consistent with every other route.
+function requireLeaguePermission(req: Request, res: Response): boolean {
+  const uid = requireLoggedIn(req, res);
+  if (!uid) return false;
+  const perms = db.getLeaguePermissions();
+  if (perms[uid] !== true) {
+    res.status(403).json({ error: 'Quyền truy cập bị hạn chế' });
+    return false;
+  }
+  return true;
+}
 
 export function handleListLeagues(req: Request, res: Response) {
   const { userId } = req.query;
@@ -13,6 +28,7 @@ export function handleListLeagues(req: Request, res: Response) {
 }
 
 export function handleCreateLeague(req: Request, res: Response) {
+  if (!requireLeaguePermission(req, res)) return;
   const league = req.body;
   if (!league || !league.id || !league.name) {
     return res.status(400).json({ error: 'Dữ liệu giải đấu không hợp lệ!' });
@@ -22,6 +38,7 @@ export function handleCreateLeague(req: Request, res: Response) {
 }
 
 export function handlePutLeague(req: Request, res: Response) {
+  if (!requireLeaguePermission(req, res)) return;
   const league = req.body;
   if (!league || !league.id || !league.name) {
     return res.status(400).json({ error: 'Dữ liệu giải đấu không hợp lệ!' });
@@ -31,6 +48,7 @@ export function handlePutLeague(req: Request, res: Response) {
 }
 
 export function handleDeleteLeague(req: Request, res: Response) {
+  if (!requireLeaguePermission(req, res)) return;
   const { id } = req.params;
   db.deleteMyLeague(id);
   res.json({ success: true });

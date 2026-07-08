@@ -354,6 +354,8 @@ export default function BiLacArena({
     setCurrentTournament(null);
     setPlayers([]);
     setMatches([]);
+    setError(null);
+    setSuccessMsg(null);
     playBeep(220, 'sawtooth', 0.2);
   };
 
@@ -372,11 +374,13 @@ export default function BiLacArena({
   };
 
   // Access an existing tournament with code
-  const handleAccessTournament = async (e: React.FormEvent) => {
+  const handleAccessTournament = async (e: React.FormEvent, explicitId?: string) => {
     e.preventDefault();
     setError(null);
     setSuccessMsg(null);
-    if (!selectedTournamentId) {
+    // Prefer the freshly-selected id passed by the modal; fall back to state.
+    const targetId = explicitId || selectedTournamentId;
+    if (!targetId) {
       setError('Vui lòng chọn một giải đấu!');
       return;
     }
@@ -391,7 +395,7 @@ export default function BiLacArena({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tournamentId: selectedTournamentId,
+          tournamentId: targetId,
           code: accessCodeInput.trim()
         })
       });
@@ -819,15 +823,6 @@ export default function BiLacArena({
       score2 = Math.max(0, score2 + diff);
     }
 
-    if (diff > 0) {
-      playBeep(523, 'sine', 0.12);
-      const teamLabel = teamNum === 1 ? 'Đội Xanh' : 'Đội Đỏ';
-      speakText(`Vào! ${teamLabel} ghi bàn! Tỷ số hiện tại là Đội Xanh ${score1}, Đội Đỏ ${score2}.`);
-    } else {
-      playBeep(349, 'sine', 0.1);
-      speakText(`Hủy bàn thắng. Tỷ số quay lại Đội Xanh ${score1}, Đội Đỏ ${score2}.`);
-    }
-
     try {
       const res = await bilacFetch(`/api/bilac/matches/${matchId}/update`, {
         method: 'POST',
@@ -837,9 +832,22 @@ export default function BiLacArena({
       if (res.ok) {
         const updated = await res.json();
         setMatches(prev => prev.map(m => m.id === matchId ? updated : m));
+        // Chỉ phát âm thanh/lời nói sau khi server xác nhận — tránh báo "ghi bàn" falsely.
+        if (diff > 0) {
+          playBeep(523, 'sine', 0.12);
+          const teamLabel = teamNum === 1 ? 'Đội Xanh' : 'Đội Đỏ';
+          speakText(`Vào! ${teamLabel} ghi bàn! Tỷ số hiện tại là Đội Xanh ${updated.score1}, Đội Đỏ ${updated.score2}.`);
+        } else {
+          playBeep(349, 'sine', 0.1);
+          speakText(`Hủy bàn thắng. Tỷ số quay lại Đội Xanh ${updated.score1}, Đội Đỏ ${updated.score2}.`);
+        }
+      } else {
+        setError('Không ghi được bàn — mã giải đấu có thể đã đổi. Vui lòng vào lại giải đấu.');
+        playBeep(180, 'sawtooth', 0.2);
       }
     } catch (e) {
       console.error(e);
+      setError('Lỗi kết nối khi ghi bàn. Vui lòng thử lại.');
     }
   };
 
@@ -857,19 +865,20 @@ export default function BiLacArena({
         const updated = await res.json();
         setMatches(prev => prev.map(m => m.id === matchId ? updated : m));
         playBeep(1046, 'sine', 0.4);
-        setSuccessMsg(`Trận đấu đã kết thúc & tỷ số ${match.score1} - ${match.score2} đã được cộng vào bảng xếp hạng!`);
+        // Đọc tỷ số từ payload server vừa xác nhận (updated) thay vì closure `match` cũ.
+        setSuccessMsg(`Trận đấu đã kết thúc & tỷ số ${updated.score1} - ${updated.score2} đã được cộng vào bảng xếp hạng!`);
         setTimeout(() => setSuccessMsg(null), 4000);
 
-        // Announce result in Vietnamese
+        // Announce result in Vietnamese — đọc tỷ số từ payload server xác nhận (updated).
         const pNames1 = match.team1.map(pId => players.find(p => p.id === pId)?.name || 'Vô danh').join(', ');
         const pNames2 = match.team2.map(pId => players.find(p => p.id === pId)?.name || 'Vô danh').join(', ');
         let resultText = `Trận đấu bi lắc kịch tính đã kết thúc! `;
-        if (match.score1 > match.score2) {
-          resultText += `Chiến thắng chung cuộc thuộc về Đội Xanh gồm có ${pNames1} với tỷ số ${match.score1} ${match.score2}. Xin chúc mừng!`;
-        } else if (match.score2 > match.score1) {
-          resultText += `Chiến thắng chung cuộc thuộc về Đội Đỏ gồm có ${pNames2} với tỷ số ${match.score2} ${match.score1}. Xin chúc mừng!`;
+        if (updated.score1 > updated.score2) {
+          resultText += `Chiến thắng chung cuộc thuộc về Đội Xanh gồm có ${pNames1} với tỷ số ${updated.score1} ${updated.score2}. Xin chúc mừng!`;
+        } else if (updated.score2 > updated.score1) {
+          resultText += `Chiến thắng chung cuộc thuộc về Đội Đỏ gồm có ${pNames2} với tỷ số ${updated.score2} ${updated.score1}. Xin chúc mừng!`;
         } else {
-          resultText += `Kết quả chung cuộc, hai đội hòa nhau với tỷ số ${match.score1} đều.`;
+          resultText += `Kết quả chung cuộc, hai đội hòa nhau với tỷ số ${updated.score1} đều.`;
         }
         speakText(resultText);
       }
@@ -916,6 +925,7 @@ export default function BiLacArena({
   };
 
   const handleCancelMatch = async (matchId: string) => {
+    if (!window.confirm('Hủy bỏ trận đấu này? Điểm số hiện tại sẽ bị xoá và không thể khôi phục.')) return;
     try {
       const res = await bilacFetch(`/api/bilac/matches/${matchId}`, { method: 'DELETE' });
       if (res.ok) {
@@ -924,9 +934,14 @@ export default function BiLacArena({
         setSuccessMsg('Đã hủy bỏ trận đấu.');
         setTimeout(() => setSuccessMsg(null), 3000);
         speakText('Trận đấu đã bị hủy bỏ.');
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setError(d.error || 'Không huỷ được trận đấu. Vui lòng thử lại.');
+        playBeep(180, 'sawtooth', 0.2);
       }
     } catch (e) {
       console.error(e);
+      setError('Lỗi kết nối khi huỷ trận đấu.');
     }
   };
 
@@ -1076,11 +1091,11 @@ export default function BiLacArena({
       });
     });
 
-    // Compute gd as wins - losses
+    // Compute gd as real goal difference (scored − conceded), not wins − losses.
     players.forEach(p => {
       const stats = statsMap[p.id];
       if (stats) {
-        stats.gd = stats.wins - stats.losses;
+        stats.gd = stats.goalsScored - stats.goalsConceded;
       }
     });
 
@@ -1142,6 +1157,23 @@ export default function BiLacArena({
         ) : (
           <ViewOnlyTournamentView data={viewOnlyData} />
         )}
+
+        {/* Render the join modal here too so the "Tham gia" button isn't a no-op in view-only mode. */}
+        <AnimatePresence>
+          {joinModalOpen && (
+            <JoinTournamentModal
+              tournaments={allTournaments.length ? allTournaments : (viewOnlyData ? [viewOnlyData] : [])}
+              preselectedId={viewOnlyData?.id || preselectJoinTournamentId}
+              accessCodeInput={accessCodeInput}
+              setAccessCodeInput={setAccessCodeInput}
+              selectedTournamentId={selectedTournamentId}
+              setSelectedTournamentId={setSelectedTournamentId}
+              loading={loading}
+              onClose={() => setJoinModalOpen(false)}
+              onSubmit={(e, id) => { handleAccessTournament(e, id); setJoinModalOpen(false); }}
+            />
+          )}
+        </AnimatePresence>
       </div>
     );
   }
@@ -1310,6 +1342,9 @@ export default function BiLacArena({
             visibleTournaments.map((tour: any) => (
               <div
                 key={tour.id}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); (e.currentTarget as HTMLElement).click(); } }}
                 onClick={() => {
                   if (tour.isMember) {
                     handleQuickAccessTournament(tour);
@@ -1361,7 +1396,7 @@ export default function BiLacArena({
             setSelectedTournamentId={setSelectedTournamentId}
             loading={loading}
             onClose={() => setJoinModalOpen(false)}
-            onSubmit={(e) => { handleAccessTournament(e); setJoinModalOpen(false); }}
+            onSubmit={(e, id) => { handleAccessTournament(e, id); setJoinModalOpen(false); }}
           />
         )}
       </AnimatePresence>
@@ -1749,6 +1784,10 @@ export default function BiLacArena({
                     return (
                       <div
                         key={player.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={isSelected}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); (e.currentTarget as HTMLElement).click(); } }}
                         onClick={() => togglePlayerSelect(player.id)}
                         className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer select-none transition-all ${
                           isSelected 
@@ -2145,6 +2184,7 @@ export default function BiLacArena({
                   <div className="mt-4 pt-3 border-t border-stone-200/50 flex justify-end">
                     <button
                       onClick={async () => {
+                        if (!window.confirm('Xoá kết quả trận đấu này? Bảng xếp hạng sẽ được tính lại.')) return;
                         try {
                           const res = await bilacFetch(`/api/bilac/matches/${m.id}`, { method: 'DELETE' });
                           if (res.ok) {
@@ -2152,9 +2192,14 @@ export default function BiLacArena({
                             playBeep(150, 'sawtooth', 0.2);
                             setSuccessMsg('Đã xóa trận đấu thành công.');
                             setTimeout(() => setSuccessMsg(null), 3000);
+                          } else {
+                            const d = await res.json().catch(() => ({}));
+                            setError(d.error || 'Không xoá được kết quả. Có thể bạn cần là chủ giải đấu.');
+                            playBeep(180, 'sawtooth', 0.2);
                           }
                         } catch (e) {
                           console.error(e);
+                          setError('Lỗi kết nối khi xoá trận đấu.');
                         }
                       }}
                       className="text-stone-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer border border-transparent hover:border-red-100"
@@ -2446,17 +2491,6 @@ export default function BiLacArena({
         </div>
       )}
 
-      {/* Floating Button */}
-      <div className="fixed bottom-6 right-6 z-50">
-        <button
-          onClick={() => { playBeep(659, 'sine', 0.15); setIsDonateModalOpen(true); }}
-          className="w-12 h-12 rounded-full bg-gradient-to-r from-rose-500 to-orange-500 text-white flex items-center justify-center shadow-2xl hover:scale-110 active:scale-95 transition-all duration-300 relative cursor-pointer border border-rose-400/20"
-          title="Donate mua server"
-        >
-          <span className="absolute inset-0 rounded-full bg-rose-500/40 animate-ping pointer-events-none"></span>
-          <Heart className="w-5 h-5 fill-white text-white relative z-10 animate-pulse" />
-        </button>
-      </div>
     </div>
   );
 }
@@ -2551,7 +2585,7 @@ function JoinTournamentModal({
   setSelectedTournamentId: (v: string) => void;
   loading: boolean;
   onClose: () => void;
-  onSubmit: (e: React.FormEvent) => void;
+  onSubmit: (e: React.FormEvent, tournamentId: string) => void;
 }) {
   // Local select state: prefer preselect, else fallback to first tournament or current.
   const initialId = preselectedId || selectedTournamentId || (tournaments[0]?.id ?? '');
@@ -2559,7 +2593,9 @@ function JoinTournamentModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     setSelectedTournamentId(localId);
-    onSubmit(e);
+    // Pass the local id explicitly — the parent's selectedTournamentId is stale
+    // until re-render, so reading it in the handler would target the wrong tournament.
+    onSubmit(e, localId);
   };
 
   return (

@@ -68,7 +68,9 @@ export default function Header({
 
   const handleCycleAvatar = () => {
     if (!profile) return;
-    const currentSeed = profile.avatar ? (profile.avatar.split('seed=')[1] || 'retro') : 'retro';
+    // Chỉ xoay avatar pixel-art — không ghi đè ảnh thật (vd. ảnh Google SSO).
+    if (!profile.avatar || !profile.avatar.includes('dicebear.com')) return;
+    const currentSeed = profile.avatar.split('seed=')[1] || 'retro';
     const currentIndex = AVATAR_SEEDS.indexOf(currentSeed);
     const nextIndex = (currentIndex + 1) % AVATAR_SEEDS.length;
     const nextSeed = AVATAR_SEEDS[nextIndex];
