@@ -89,7 +89,7 @@ async function startServer() {
   app.get('/api/bilac/matches', checkBiLacTournamentAccess, handleGetBilacMatches);
   app.post('/api/bilac/matches', requireBiLacMember, handleCreateBilacMatch);
   app.post('/api/bilac/matches/:id/update', requireBiLacMember, handleUpdateBilacMatch);
-  app.delete('/api/bilac/matches/:id', requireBiLacMember, handleDeleteBilacMatch);
+  app.delete('/api/bilac/matches/:id', requireBiLacOwner, handleDeleteBilacMatch);
 
   // 7. SPORTS LEAGUES & PERMISSION CONTRACT
   app.get('/api/leagues', handleListLeagues);
