@@ -170,6 +170,19 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     setTurnstileToken(null);
   };
 
+  // Reset to a clean login form every time the modal opens, so stale mode,
+  // leftover fields, or a plaintext password from a previous session can't linger.
+  useEffect(() => {
+    if (!isOpen) return;
+    setMode('login');
+    setLoginUsername(''); setLoginPassword('');
+    setRegisterUsername(''); setRegisterEmail(''); setRegisterPassword('');
+    setRegisterConfirmPassword(''); setRegisterDisplayName('');
+    setResetEmail(''); setResetOtp(''); setResetNewPassword(''); setReceivedOtp(null);
+    setVerifyEmail(''); setVerifyOtp('');
+    setErrorMsg(null); setSuccessMsg(null);
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSwitchMode = (newMode: AuthMode) => {
@@ -384,9 +397,20 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   };
 
   return (
-    <div className="fixed inset-0 bg-stone-950/85 backdrop-blur-md flex items-center justify-center p-4 z-[9999] overflow-y-auto animate-fadeIn">
+    <div
+      className="fixed inset-0 bg-stone-950/85 backdrop-blur-md flex items-center justify-center p-4 z-[9999] overflow-y-auto animate-fadeIn"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Đăng nhập hoặc đăng ký"
+      tabIndex={-1}
+      onClick={(e) => { if (e.target === e.currentTarget) { triggerBeep(300, 'sine', 0.05); onClose(); } }}
+      onKeyDown={(e) => { if (e.key === 'Escape') { triggerBeep(300, 'sine', 0.05); onClose(); } }}
+    >
       {/* Container */}
-      <div className="w-full max-w-md bg-stone-900 border-4 border-stone-800 rounded-3xl overflow-hidden shadow-2xl relative">
+      <div
+        className="w-full max-w-md bg-stone-900 border-4 border-stone-800 rounded-3xl overflow-hidden shadow-2xl relative"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Retro style top header accent */}
         <div className="bg-gradient-to-r from-orange-600 via-amber-500 to-yellow-400 h-2 w-full" />
         
