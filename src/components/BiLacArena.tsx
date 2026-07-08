@@ -333,8 +333,12 @@ export default function BiLacArena({
           return;
         }
         setViewOnlyData(data);
-        // Auto-promote: nếu user đã là member, vào full mode.
+        // Auto-promote: nếu user đã là member, vào full mode của chính giải này.
+        // Phải set currentTournament trước khi navigate, nếu không member mode
+        // rơi vào portal list (xem BiLacArena.tsx#1181) — tức bị "đá ra" khỏi
+        // giải khi mở deep-link /bilac/{slug} của giải mình.
         if (data.isMember && onNavigate) {
+          setCurrentTournament({ id: data.id, name: data.name, description: data.description });
           onNavigate('bilac');
         }
       })
