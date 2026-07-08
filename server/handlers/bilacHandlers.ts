@@ -79,6 +79,58 @@ export function handleCreateBilacTournament(req: Request, res: Response) {
   res.json({ success: true, tournament });
 }
 
+// Public read-only endpoint keyed by slug. No login required. Mutations stay
+// gated by checkBiLacTournamentAccess + member check elsewhere.
+export function handleGetBilacTournamentBySlug(req: Request, res: Response) {
+  const { slug } = req.params;
+  if (!slug || !/^[0-9a-z]{8}$/.test(slug)) {
+    return res.status(400).json({ error: 'Slug không hợp lệ.' });
+  }
+  const tour = db.getBiLacTournamentBySlug(slug);
+  if (!tour) {
+    return res.status(404).json({ error: 'Giải đấu không tồn tại hoặc đã bị xoá.' });
+  }
+
+  const players = db
+    .getAllBiLacPlayers()
+    .filter((p: any) => p.tournamentId === tour.id)
+    .map((p: any) => ({ id: p.id, name: p.name, avatar: p.avatar }));
+
+  const matches = db
+    .getAllBiLacMatches()
+    .filter((m: any) => m.tournamentId === tour.id)
+    .map((m: any) => ({
+      id: m.id,
+      timestamp: m.timestamp,
+      team1: m.team1,
+      team2: m.team2,
+      score1: m.score1,
+      score2: m.score2,
+      status: m.status,
+    }));
+
+  const members = db.getBiLacTournamentMembers(tour.id);
+
+  // Optional isMember flag if the caller is logged in.
+  const uid = req.headers['x-user-id'];
+  let isMember = false;
+  if (typeof uid === 'string' && uid) {
+    isMember = members.some((m: any) => m.userId === uid);
+  }
+
+  res.json({
+    id: tour.id,
+    slug: tour.slug,
+    name: tour.name,
+    description: tour.description,
+    createdAt: tour.createdAt,
+    memberCount: members.length,
+    isMember,
+    players,
+    matches,
+  });
+}
+
 export function handleListBilacMembers(req: Request, res: Response) {
   const tournamentId = (req as any).tournamentId;
   const members = db.getBiLacTournamentMembers(tournamentId).map(m => ({

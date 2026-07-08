@@ -16,7 +16,7 @@ import { handleListTournaments, handleCreateTournament, handleJoinTournament, ha
 import { handleGetChallenge, handleSubmitChallenge } from './server/handlers/challengeHandlers.ts';
 import { handleGetReplaysByUser, handleGetReplay } from './server/handlers/replayHandlers.ts';
 import { checkBiLacTournamentAccess, requireBiLacMember, requireBiLacOwner } from './server/handlers/_middleware.ts';
-import { handleListBilacTournaments, handleAccessBilacTournament, handleCreateBilacTournament, handleListBilacMembers, handleInviteBilacMember, handleRemoveBilacMember, handleGetBilacPlayers, handleCreateBilacPlayer, handleDeleteBilacPlayer, handleGetBilacMatches, handleCreateBilacMatch, handleUpdateBilacMatch, handleDeleteBilacMatch } from './server/handlers/bilacHandlers.ts';
+import { handleListBilacTournaments, handleAccessBilacTournament, handleCreateBilacTournament, handleListBilacMembers, handleInviteBilacMember, handleRemoveBilacMember, handleGetBilacPlayers, handleCreateBilacPlayer, handleDeleteBilacPlayer, handleGetBilacMatches, handleCreateBilacMatch, handleUpdateBilacMatch, handleDeleteBilacMatch, handleGetBilacTournamentBySlug } from './server/handlers/bilacHandlers.ts';
 import { handleListLeagues, handleCreateLeague, handlePutLeague, handleDeleteLeague, handleGetLeaguePermissions, handleToggleLeaguePermission } from './server/handlers/leagueHandlers.ts';
 import { db } from './server/db.ts';
 import { handleParseRoster, handleParsePlayers, handleParseEvents } from './server/handlers/aiHandlers.ts';
@@ -77,6 +77,7 @@ async function startServer() {
 
   // 6. BI LAC - FOOSBALL TOURNAMENTS
   app.get('/api/bilac/tournaments', handleListBilacTournaments);
+  app.get('/api/bilac/tournaments/by-slug/:slug', handleGetBilacTournamentBySlug);
   app.post('/api/bilac/tournaments/access', handleAccessBilacTournament);
   app.post('/api/bilac/tournaments', handleCreateBilacTournament);
   app.get('/api/bilac/tournaments/members', checkBiLacTournamentAccess, handleListBilacMembers);
