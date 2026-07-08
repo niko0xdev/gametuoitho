@@ -19,7 +19,7 @@ describe('POST /api/auth/register', () => {
       passwordHash: 'h', displayName: 'X', avatar: 'a', role: 'user'
     });
     const res = await request(getApp()).post('/api/auth/register', {
-      username: 'nikodup', password: 'p', email: 'newreg1@x.com', displayName: 'Y'
+      username: 'nikodup', password: 'Str0ngpw1', email: 'newreg1@x.com', displayName: 'Y'
     });
     assert.equal(res.status, 400);
   });
@@ -29,7 +29,7 @@ describe('POST /api/auth/register', () => {
       passwordHash: 'h', displayName: 'X', avatar: 'a', role: 'user'
     });
     const res = await request(getApp()).post('/api/auth/register', {
-      username: 'newone1', password: 'p', email: 'shared@x.com', displayName: 'Y'
+      username: 'newone1', password: 'Str0ngpw1', email: 'shared@x.com', displayName: 'Y'
     });
     assert.equal(res.status, 400);
   });
@@ -37,13 +37,20 @@ describe('POST /api/auth/register', () => {
     const username = `reg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const email = `${username}@x.com`;
     const res = await request(getApp()).post('/api/auth/register', {
-      username, password: 'pw', email, displayName: 'NewReg'
+      username, password: 'Str0ngpw1', email, displayName: 'NewReg'
     });
     assert.equal(res.status, 200);
     assert.equal(res.body.success, true);
     assert.equal(res.body.user.username, username);
     assert.ok(res.body.user.id.startsWith('user_'));
     assert.ok(db.getUserByUsername(username));
+  });
+  it('400s on a weak password', async () => {
+    const username = `weak_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const res = await request(getApp()).post('/api/auth/register', {
+      username, password: 'a1', email: `${username}@x.com`, displayName: 'W'
+    });
+    assert.equal(res.status, 400);
   });
 });
 
@@ -242,10 +249,20 @@ describe('POST /api/auth/reset-password', () => {
     u.otpExpires = Date.now() + 100000;
     db.saveUser(u);
     const res = await request(getApp()).post('/api/auth/reset-password', {
-      email: 'otp@x.com', otp: '222222', newPassword: 'newpw'
+      email: 'otp@x.com', otp: '222222', newPassword: 'Str0ngpw1'
     });
     assert.equal(res.status, 200);
-    assert.equal(db.getUserByEmail('otp@x.com')!.passwordHash, hashPassword('newpw'));
+    assert.equal(db.getUserByEmail('otp@x.com')!.passwordHash, hashPassword('Str0ngpw1'));
+  });
+  it('400s on a weak new password', async () => {
+    const u = db.getUserByEmail('otp@x.com')!;
+    u.otp = '333333';
+    u.otpExpires = Date.now() + 100000;
+    db.saveUser(u);
+    const res = await request(getApp()).post('/api/auth/reset-password', {
+      email: 'otp@x.com', otp: '333333', newPassword: 'a1'
+    });
+    assert.equal(res.status, 400);
   });
 });
 
@@ -271,5 +288,47 @@ describe('POST /api/auth/quick-login', () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.role, 'user');
     assert.ok(db.getUser('u_qprof'));
+  });
+});
+
+describe('POST /api/auth/verify-email + resend-otp (Express/Worker parity)', () => {
+  it('200s on correct OTP after register; 400s on wrong OTP', async () => {
+    const username = `ve_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const email = `${username}@x.com`;
+    const reg = await request(getApp()).post('/api/auth/register', {
+      username, password: 'Str0ngpw1', email, displayName: 'VE'
+    });
+    assert.equal(reg.status, 200);
+    const otp = reg.body._debugOtp;
+    assert.ok(otp, 'register returns a dev OTP');
+
+    const wrong = await request(getApp()).post('/api/auth/verify-email', { email, otp: '000000' });
+    assert.equal(wrong.status, 400);
+
+    const ok = await request(getApp()).post('/api/auth/verify-email', { email, otp });
+    assert.equal(ok.status, 200);
+  });
+  it('resend-otp issues a fresh dev OTP', async () => {
+    const username = `re_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const email = `${username}@x.com`;
+    await request(getApp()).post('/api/auth/register', { username, password: 'Str0ngpw1', email, displayName: 'RE' });
+    const res = await request(getApp()).post('/api/auth/resend-otp', { email });
+    assert.equal(res.status, 200);
+    assert.ok(res.body._debugOtp);
+  });
+});
+
+describe('POST /api/auth/google-sso with {credential}', () => {
+  function makeCredential(payload: any) {
+    const b64 = (o: any) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    return `${b64({ alg: 'RS256' })}.${b64(payload)}.sig`;
+  }
+  it('decodes a Google credential and creates the user', async () => {
+    const email = `gc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}@x.com`;
+    const credential = makeCredential({ email, name: 'G Cred', picture: 'pic' });
+    const res = await request(getApp()).post('/api/auth/google-sso', { credential });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.user.email, email);
+    assert.equal(res.body.user.displayName, 'G Cred');
   });
 });

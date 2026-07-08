@@ -305,6 +305,9 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
       }
       triggerBeep(660, 'triangle', 0.2);
       setSuccessMsg(data.message || 'Mã OTP đã được gửi về email!');
+      // Dev convenience: backend echoes the OTP as _debugOtp so the simulated
+      // mail inbox can display/fill it (production delivers via real email).
+      setReceivedOtp(data._debugOtp ?? null);
       setMode('enter_otp');
     } catch (err: any) {
       setErrorMsg(err.message);

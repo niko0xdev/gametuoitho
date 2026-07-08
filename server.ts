@@ -9,7 +9,7 @@ dotenv.config({ path: '.env.local' });
 dotenv.config(); // fallback .env, không override giá trị đã set
 import { roomManager } from './server/roomManager.ts';
 import { tournamentManager } from './server/tournamentManager.ts';
-import { handleRegister, handleLogin, handleGoogleSso, handleForgotPassword, handleResetPassword, handleQuickLogin } from './server/handlers/authHandlers.ts';
+import { handleRegister, handleLogin, handleGoogleSso, handleForgotPassword, handleResetPassword, handleQuickLogin, handleVerifyEmail, handleResendOtp } from './server/handlers/authHandlers.ts';
 import { handleGetProfile, handleGetOnlineUsers, handleUpdateProfile, handleResetElo } from './server/handlers/profileHandlers.ts';
 import { handleLeaderboardGlobal, handleLeaderboardByGame } from './server/handlers/leaderboardHandlers.ts';
 import { handleListTournaments, handleCreateTournament, handleJoinTournament, handleGetTournamentByCode, handleGetTournament, handleStartTournament, handleLaunchTournamentMatch } from './server/handlers/tournamentHandlers.ts';
@@ -47,6 +47,8 @@ async function startServer() {
   app.post('/api/auth/google-sso', handleGoogleSso);
   app.post('/api/auth/forgot-password', handleForgotPassword);
   app.post('/api/auth/reset-password', handleResetPassword);
+  app.post('/api/auth/verify-email', handleVerifyEmail);
+  app.post('/api/auth/resend-otp', handleResendOtp);
   app.post('/api/auth/quick-login', handleQuickLogin);
 
   app.get('/api/profile/:userId', handleGetProfile);

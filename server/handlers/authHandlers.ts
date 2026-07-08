@@ -1,10 +1,15 @@
 import type { Request, Response } from 'express';
 import { db, hashPassword } from '../db.ts';
+import { validatePassword } from '../../src/lib/passwordRules.ts';
 
 export function handleRegister(req: Request, res: Response) {
   const { username, password, email, displayName } = req.body;
   if (!username || !password || !email || !displayName) {
     return res.status(400).json({ error: 'Vui lòng nhập đầy đủ thông tin đăng ký!' });
+  }
+  const pwCheck = validatePassword(password);
+  if (!pwCheck.ok) {
+    return res.status(400).json({ error: pwCheck.error || 'Mật khẩu không đủ mạnh!' });
   }
 
   const trimmedUsername = username.trim().toLowerCase();
@@ -22,6 +27,11 @@ export function handleRegister(req: Request, res: Response) {
   const passwordHash = hashPassword(password);
   const avatar = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(userId)}`;
 
+  // Worker parity: create the user with a pending email verification OTP. The OTP
+  // is echoed back as _debugOtp so the dev "Simulated Mail Inbox" can autofill it;
+  // production delivers via email and never echoes it.
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
   const userRecord = {
     id: userId,
     username: trimmedUsername,
@@ -29,7 +39,9 @@ export function handleRegister(req: Request, res: Response) {
     passwordHash,
     displayName: displayName.trim(),
     avatar,
-    role: 'user' as const
+    role: 'user' as const,
+    otp,
+    otpExpires: Date.now() + 5 * 60 * 1000
   };
 
   const profile = {
@@ -47,8 +59,13 @@ export function handleRegister(req: Request, res: Response) {
   db.saveUser(userRecord);
   db.saveProfile(profile);
 
+  console.log(`\n==================================================================`);
+  console.log(`🔑 [MÃ OTP XÁC THỰC EMAIL] Gửi tới ${trimmedEmail}: ${otp}`);
+  console.log(`==================================================================\n`);
+
   res.json({
     success: true,
+    _debugOtp: otp,
     user: {
       id: userId,
       displayName: profile.displayName,
@@ -61,6 +78,40 @@ export function handleRegister(req: Request, res: Response) {
       badges: profile.badges
     }
   });
+}
+
+export function handleVerifyEmail(req: Request, res: Response) {
+  const { email, otp } = req.body;
+  if (!email || !otp) {
+    return res.status(400).json({ error: 'Vui lòng nhập email và mã OTP!' });
+  }
+  const user = db.getUserByEmail(email.trim().toLowerCase());
+  if (!user) {
+    return res.status(400).json({ error: 'Không tìm thấy tài khoản!' });
+  }
+  if (!user.otp || user.otp !== String(otp).trim() || !user.otpExpires || Date.now() > user.otpExpires) {
+    return res.status(400).json({ error: 'Mã OTP không chính xác hoặc đã hết hạn!' });
+  }
+  user.otp = undefined;
+  user.otpExpires = undefined;
+  db.saveUser(user);
+  res.json({ success: true, message: 'Xác thực email thành công!' });
+}
+
+export function handleResendOtp(req: Request, res: Response) {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: 'Vui lòng cung cấp email!' });
+  }
+  const user = db.getUserByEmail(email.trim().toLowerCase());
+  if (!user) {
+    return res.status(400).json({ error: 'Không tìm thấy tài khoản!' });
+  }
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  user.otp = otp;
+  user.otpExpires = Date.now() + 5 * 60 * 1000;
+  db.saveUser(user);
+  res.json({ success: true, _debugOtp: otp, message: 'Đã gửi lại mã OTP.' });
 }
 
 export function handleLogin(req: Request, res: Response) {
@@ -113,9 +164,27 @@ export function handleLogin(req: Request, res: Response) {
 }
 
 export function handleGoogleSso(req: Request, res: Response) {
-  const { email, displayName, avatar } = req.body;
+  const { credential, email: bodyEmail, displayName, avatar: bodyAvatar } = req.body;
+
+  // Worker parity: the client posts { credential } (a Google ID JWT). The Worker
+  // cryptographically verifies it; in dev we only decode the payload to read the
+  // profile (offline, localhost-only). Fall back to a direct {email,...} body for
+  // back-compat with older callers/tests.
+  let email: string | undefined;
+  let name: string | undefined;
+  let picture: string | undefined;
+  if (credential) {
+    try {
+      const parts = String(credential).split('.');
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+      email = payload.email;
+      name = payload.name || payload.given_name;
+      picture = payload.picture;
+    } catch { /* malformed credential — fall through to back-compat */ }
+  }
+  email = email || bodyEmail;
   if (!email) {
-    return res.status(400).json({ error: 'Thiếu thông tin Google Account Email!' });
+    return res.status(400).json({ error: 'Thiếu thông tin Google Account (credential hoặc email)!' });
   }
 
   const trimmedEmail = email.trim().toLowerCase();
@@ -130,8 +199,8 @@ export function handleGoogleSso(req: Request, res: Response) {
       username: tempUsername,
       email: trimmedEmail,
       passwordHash: '',
-      displayName: displayName || trimmedEmail.split('@')[0],
-      avatar: avatar || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(userId)}`,
+      displayName: name || displayName || trimmedEmail.split('@')[0],
+      avatar: picture || bodyAvatar || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(userId)}`,
       role: 'user' as const,
       isGoogleUser: true
     };
@@ -217,6 +286,11 @@ export function handleResetPassword(req: Request, res: Response) {
 
   if (!user.otpExpires || Date.now() > user.otpExpires) {
     return res.status(400).json({ error: 'Mã OTP đã hết hạn (hiệu lực trong 5 phút)!' });
+  }
+
+  const pwCheck = validatePassword(newPassword);
+  if (!pwCheck.ok) {
+    return res.status(400).json({ error: pwCheck.error || 'Mật khẩu không đủ mạnh!' });
   }
 
   user.passwordHash = hashPassword(newPassword);
