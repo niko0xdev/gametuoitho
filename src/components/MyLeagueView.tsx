@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { playRetroBeep } from './games/CaroBoard.tsx';
 import { UserProfile } from '../types.ts';
+import { knockoutWinner } from '../lib/knockout.ts';
 
 // TypeScript Interfaces
 export type SportType = 'futsal' | 'pes' | 'pingpong' | 'badminton';
@@ -1100,8 +1101,13 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
       // Find the match we just edited
       const match = updatedMatches.find(m => m.id === editingMatch.id)!;
       if (match.nextMatchId) {
-        const winnerId = hs > as ? match.home : match.away; // no draws allowed in bracket, if draw user must input winner score
-        
+        // Draws are not allowed to advance in a bracket — the user must enter a decisive score.
+        const winnerId = knockoutWinner(match.home, match.away, hs, as);
+        if (!winnerId) {
+          alert('Trận đấu hoà! Vui lòng nhập tỉ số phân thắng bại để đội thắng đi tiếp.');
+          return;
+        }
+
         // Push winner to the home or away slot of the next match
         nextLeague.matches = nextLeague.matches.map(nm => {
           if (nm.id === match.nextMatchId) {
@@ -1147,7 +1153,11 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
 
       // Progression inside the SF/Final stages of group+knockout
       if (match.stage !== 'Group Stage' && match.nextMatchId) {
-        const winnerId = hs > as ? match.home : match.away;
+        const winnerId = knockoutWinner(match.home, match.away, hs, as);
+        if (!winnerId) {
+          alert('Trận đấu hoà! Vui lòng nhập tỉ số phân thắng bại để đội thắng đi tiếp.');
+          return;
+        }
         nextLeague.matches = nextLeague.matches.map(nm => {
           if (nm.id === match.nextMatchId) {
             if (match.nextMatchPosition === 'home') {
@@ -1291,7 +1301,11 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
     if (selectedLeague.format === 'knockout') {
       const match = updatedMatches.find(m => m.id === editingMatch.id)!;
       if (match.nextMatchId) {
-        const winnerId = hs > as ? match.home : match.away;
+        const winnerId = knockoutWinner(match.home, match.away, hs, as);
+        if (!winnerId) {
+          alert('Trận đấu hoà! Vui lòng nhập tỉ số phân thắng bại để đội thắng đi tiếp.');
+          return;
+        }
         nextLeague.matches = nextLeague.matches.map(nm => {
           if (nm.id === match.nextMatchId) {
             if (match.nextMatchPosition === 'home') {
@@ -1332,7 +1346,11 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
       }
 
       if (match.stage !== 'Group Stage' && match.nextMatchId) {
-        const winnerId = hs > as ? match.home : match.away;
+        const winnerId = knockoutWinner(match.home, match.away, hs, as);
+        if (!winnerId) {
+          alert('Trận đấu hoà! Vui lòng nhập tỉ số phân thắng bại để đội thắng đi tiếp.');
+          return;
+        }
         nextLeague.matches = nextLeague.matches.map(nm => {
           if (nm.id === match.nextMatchId) {
             if (match.nextMatchPosition === 'home') {
@@ -1862,11 +1880,11 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
                         {selectedLeague.matches.filter(m => m.stage === 'Final').map(m => (
                           <div key={m.id} className="flex flex-col gap-2">
                             {renderKnockoutMatchCard(m)}
-                            {m.isPlayed && (
+                            {m.isPlayed && m.winner && m.winner !== 'DRAW' && (
                               <div className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-xl text-xs font-semibold text-center flex flex-col items-center gap-1 animate-scaleIn">
                                 <Trophy className="w-5 h-5 text-amber-500 fill-amber-200" />
                                 <span>Nhà vô địch giải đấu:</span>
-                                <span className="font-bold text-sm text-stone-800">{getTeamName(m.winner!, selectedLeague.teams)}</span>
+                                <span className="font-bold text-sm text-stone-800">{getTeamName(m.winner, selectedLeague.teams)}</span>
                               </div>
                             )}
                           </div>
@@ -1914,7 +1932,7 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
                   <Info className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
                   <div>
                     <b>Quy tắc xếp hạng:</b> Thắng +3 điểm, Hòa +1 điểm, Thua 0 điểm. 
-                    Chỉ số phụ ưu tiên lần lượt là: <b>Hiệu số bàn thắng thua (GD)</b> &rarr; <b>Tổng số bàn thắng (GF)</b> &rarr; <b>Kết quả đối đầu trực tiếp</b>.
+                    Chỉ số phụ ưu tiên lần lượt là: <b>Hiệu số bàn thắng thua (GD)</b> &rarr; <b>Tổng số bàn thắng (GF)</b>.
                   </div>
                 </div>
               </div>
