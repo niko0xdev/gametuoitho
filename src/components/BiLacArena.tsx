@@ -50,9 +50,15 @@ const playBeep = (freq: number, type: OscillatorType = 'sine', duration = 0.1) =
 export default function BiLacArena({
   userProfile,
   onOpenAuthModal,
+  viewMode = 'member',
+  slug = null,
+  onNavigate,
 }: {
   userProfile?: UserProfile | null;
   onOpenAuthModal?: () => void;
+  viewMode?: 'member' | 'view-only';
+  slug?: string | null;
+  onNavigate?: (view: 'bilac', slug?: string) => void;
 } = {}) {
   const loggedInUserId = userProfile?.id ?? null;
   const [players, setPlayers] = useState<BiLacPlayer[]>([]);
@@ -62,6 +68,8 @@ export default function BiLacArena({
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [viewOnlyData, setViewOnlyData] = useState<any | null>(null);
+  const [viewOnlyError, setViewOnlyError] = useState<string | null>(null);
 
   // AI bulk-add players
   const [aiBulkText, setAiBulkText] = useState('');
@@ -292,6 +300,35 @@ export default function BiLacArena({
       fetchMembers();
     }
   }, [currentTournament, activeTab]);
+
+  // View-only mode: fetch public by-slug payload, no auth required.
+  useEffect(() => {
+    if (viewMode !== 'view-only' || !slug) return;
+    let cancelled = false;
+    setViewOnlyError(null);
+    setViewOnlyData(null);
+    const headers: Record<string, string> = {};
+    const cachedUserId = localStorage.getItem('auth_userId');
+    if (cachedUserId) headers['x-user-id'] = cachedUserId;
+    fetch(`/api/bilac/tournaments/by-slug/${slug}`, { headers })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!res.ok) {
+          setViewOnlyError(data.error || 'Không tải được giải đấu.');
+          return;
+        }
+        setViewOnlyData(data);
+        // Auto-promote: nếu user đã là member, vào full mode.
+        if (data.isMember && onNavigate) {
+          onNavigate('bilac');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setViewOnlyError('Lỗi kết nối máy chủ.');
+      });
+    return () => { cancelled = true; };
+  }, [viewMode, slug]);
 
   // Logout/switch tournament
   const handleLogoutTournament = () => {
@@ -1041,6 +1078,57 @@ export default function BiLacArena({
 
   const currentLeaderboard = calculateLeaderboards();
   const ongoingMatch = matches.find(m => m.status === 'PLAYING');
+
+  // VIEW-ONLY MODE: public /bilac/{slug} — skip login gate + member dashboard.
+  if (viewMode === 'view-only' && slug) {
+    return (
+      <div className="w-full max-w-4xl mx-auto px-4 py-12 animate-fade-in" id="bilac_viewonly_root">
+        <div className="text-center mb-8">
+          <div className="flex justify-center mb-4">
+            <span className="p-4 bg-orange-100 text-orange-600 rounded-2xl shadow-sm">
+              <Swords className="w-12 h-12" />
+            </span>
+          </div>
+          <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-stone-900 font-sans mb-2">
+            Đấu Trường Bi Lắc
+          </h1>
+        </div>
+        <div className="mb-4 p-4 bg-amber-50 border border-amber-300 rounded-xl flex flex-col sm:flex-row items-start sm:items-center gap-3">
+          <div className="flex-1">
+            <p className="font-bold text-amber-900 text-sm">Bạn đang xem với chế độ chỉ xem.</p>
+            <p className="text-xs text-amber-700 mt-1">Đăng nhập và nhập mã code để tham gia và ghi điểm.</p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={() => onOpenAuthModal?.()}
+              className="text-xs font-bold px-3 py-1.5 bg-white border border-amber-400 text-amber-800 rounded-lg hover:bg-amber-100 cursor-pointer"
+            >
+              Đăng nhập
+            </button>
+            <button
+              onClick={() => setJoinModalOpen(true)}
+              className="text-xs font-bold px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg cursor-pointer"
+            >
+              Tham gia
+            </button>
+          </div>
+        </div>
+        {viewOnlyError ? (
+          <div className="bg-white border border-dashed border-stone-300 rounded-2xl p-8 text-center">
+            <p className="text-stone-700 font-bold mb-4">{viewOnlyError}</p>
+            <div className="flex justify-center gap-3 flex-wrap">
+              <button onClick={() => onNavigate?.('bilac')} className="text-xs font-bold px-4 py-2 bg-stone-200 hover:bg-stone-300 rounded-lg cursor-pointer">Danh sách giải đấu</button>
+              <button onClick={() => { if (typeof window !== 'undefined') window.location.href = '/'; }} className="text-xs font-bold px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg cursor-pointer">Về trang chủ</button>
+            </div>
+          </div>
+        ) : !viewOnlyData ? (
+          <div className="text-center text-stone-500 py-12 text-sm">Đang tải giải đấu...</div>
+        ) : (
+          <ViewOnlyTournamentView data={viewOnlyData} />
+        )}
+      </div>
+    );
+  }
 
   if (!currentTournament) {
     if (!loggedInUserId) {
@@ -2313,6 +2401,52 @@ function PortalModalBackdrop({ onClose, children }: { onClose: () => void; child
         {children}
       </motion.div>
     </motion.div>
+  );
+}
+
+function ViewOnlyTournamentView({ data }: { data: any }) {
+  const sortedPlayers = [...(data.players || [])].sort((a, b) =>
+    String(a.name).localeCompare(String(b.name))
+  );
+  const finished = (data.matches || []).filter((m: any) => m.status === 'FINISHED');
+  return (
+    <div className="space-y-4">
+      <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm">
+        <h2 className="font-bold text-stone-900 text-lg">{data.name}</h2>
+        {data.description && <p className="text-sm text-stone-600 mt-1">{data.description}</p>}
+        <p className="text-xs text-stone-400 mt-2">{data.memberCount} thành viên</p>
+      </div>
+      <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm">
+        <h3 className="font-bold text-stone-900 text-sm mb-3">Người chơi ({sortedPlayers.length})</h3>
+        {sortedPlayers.length === 0 ? (
+          <p className="text-xs text-stone-500">Chưa có người chơi.</p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {sortedPlayers.map((p: any) => (
+              <div key={p.id} className="flex items-center gap-2 text-sm">
+                {p.avatar && <img src={p.avatar} alt="" className="w-6 h-6 rounded-full bg-stone-100" />}
+                <span className="truncate text-stone-800">{p.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm">
+        <h3 className="font-bold text-stone-900 text-sm mb-3">Trận đã đấu ({finished.length})</h3>
+        {finished.length === 0 ? (
+          <p className="text-xs text-stone-500">Chưa có trận nào hoàn thành.</p>
+        ) : (
+          <ul className="space-y-2">
+            {finished.map((m: any) => (
+              <li key={m.id} className="text-xs text-stone-700 flex justify-between font-mono">
+                <span>Trận #{String(m.id).slice(-4)}</span>
+                <span>{m.score1} – {m.score2}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }
 

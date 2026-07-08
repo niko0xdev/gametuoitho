@@ -14,30 +14,67 @@ import { playRetroBeep } from './components/games/CaroBoard.tsx';
 import AuthModal from './components/AuthModal.tsx';
 import { motion, AnimatePresence } from 'motion/react';
 
+type BiLacViewMode = 'member' | 'view-only';
+
+function parseBilacPath(pathname: string): {
+  activeView: 'catalog' | 'tournaments' | 'daily' | 'replays' | 'leaderboards' | 'bilac' | 'myleague';
+  viewMode: BiLacViewMode;
+  slug: string | null;
+} {
+  const m = pathname.match(/^\/bilac\/([0-9a-z]{8})$/);
+  if (m) return { activeView: 'bilac', viewMode: 'view-only', slug: m[1] };
+  if (pathname === '/bilac') return { activeView: 'bilac', viewMode: 'member', slug: null };
+  return { activeView: 'catalog', viewMode: 'member', slug: null };
+}
+
 export default function App() {
   const [userId, setUserId] = useState<string | null>(() => localStorage.getItem('auth_userId'));
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
-  // Initial view is read from the URL so deep-links like /bilac survive a refresh.
-  const [activeView, setActiveViewRaw] = useState<'catalog' | 'tournaments' | 'daily' | 'replays' | 'leaderboards' | 'bilac' | 'myleague'>(() => {
-    if (typeof window !== 'undefined' && window.location.pathname === '/bilac') return 'bilac';
-    return 'catalog';
-  });
+  // Initial view is read from the URL so deep-links like /bilac or /bilac/{slug} survive a refresh.
+  const [activeView, setActiveViewRaw] = useState<'catalog' | 'tournaments' | 'daily' | 'replays' | 'leaderboards' | 'bilac' | 'myleague'>(() =>
+    parseBilacPath(window.location.pathname).activeView
+  );
+  const [bilacViewMode, setBilacViewMode] = useState<BiLacViewMode>(() =>
+    parseBilacPath(window.location.pathname).viewMode
+  );
+  const [bilacSlug, setBilacSlug] = useState<string | null>(() =>
+    parseBilacPath(window.location.pathname).slug
+  );
 
   // Wrap setActiveView so the URL stays in sync. Other views collapse to "/".
-  const setActiveView = (view: typeof activeView) => {
+  const setActiveView = (view: typeof activeView, slug?: string) => {
     setActiveViewRaw(view);
-    const targetPath = view === 'bilac' ? '/bilac' : '/';
-    if (typeof window !== 'undefined' && window.location.pathname !== targetPath) {
-      window.history.pushState({}, '', targetPath);
+    if (view === 'bilac') {
+      if (slug) {
+        setBilacViewMode('view-only');
+        setBilacSlug(slug);
+        const targetPath = `/bilac/${slug}`;
+        if (window.location.pathname !== targetPath) {
+          window.history.pushState({}, '', targetPath);
+        }
+      } else {
+        setBilacViewMode('member');
+        setBilacSlug(null);
+        if (window.location.pathname !== '/bilac') {
+          window.history.pushState({}, '', '/bilac');
+        }
+      }
+    } else {
+      const targetPath = '/';
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState({}, '', targetPath);
+      }
     }
   };
 
   // Browser back/forward — reverse-map pathname → view.
   useEffect(() => {
     const onPopState = () => {
-      const next = window.location.pathname === '/bilac' ? 'bilac' : 'catalog';
-      setActiveViewRaw((prev) => (prev === next ? prev : next));
+      const parsed = parseBilacPath(window.location.pathname);
+      setActiveViewRaw((prev) => (prev === parsed.activeView ? prev : parsed.activeView));
+      setBilacViewMode(parsed.viewMode);
+      setBilacSlug(parsed.slug);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -569,7 +606,13 @@ export default function App() {
               <Leaderboards />
             )}
             {activeView === 'bilac' && (
-              <BiLacArena userProfile={profile} onOpenAuthModal={() => setIsAuthModalOpen(true)} />
+              <BiLacArena
+                userProfile={profile}
+                onOpenAuthModal={() => setIsAuthModalOpen(true)}
+                viewMode={bilacViewMode}
+                slug={bilacSlug}
+                onNavigate={(view, nextSlug) => setActiveView(view as any, nextSlug)}
+              />
             )}
           </main>
         </>
