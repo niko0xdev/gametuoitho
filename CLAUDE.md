@@ -80,6 +80,23 @@ Don't commit:
 - `dist/` build output.
 - Any real `.env.local` keys.
 
+## Shipping Discipline
+
+For **any** bug fix, feature add, or feature update: do not half-ship. Run the `ship` skill (`.claude/skills/ship/SKILL.md`) end-to-end:
+
+review-impl agent → PR → review-PR agent → fix if needed → merge → deploy → verify live → fetch local → cleanup.
+
+Gate the run with a `/goal` so the Stop hook forces the whole pipeline to finish without pausing:
+```
+/goal ship <branch>: review impl → PR → review PR → fix → merge → deploy → verify → fetch → cleanup
+```
+
+Non-negotiables:
+- **Merge without asking** — autonomous PRs (user preference).
+- **Frontend changes (`src/**`) are NOT live after merge.** Pages is Direct Upload — must `npm run build:fe` + `npx wrangler@3.114.17 pages deploy dist --project-name gametuoitho --branch main`. Merging a PR does nothing on `gametuoitho.space`. (See `deploy-frontend` skill.)
+- **Worker changes (`worker/**`)** → `deploy-worker` skill.
+- **Repo-only changes** (`CLAUDE.md`, `.claude/**`, docs) → no deploy, but still PR → merge → fetch.
+
 ## Known Gotchas
 
 - **Port collision**: If `tsx server.ts` was previously killed ungracefully, port 3000 may still be in `TIME_WAIT`. Run `lsof -ti:3000 | xargs -r kill -9` before `npm run dev`.
