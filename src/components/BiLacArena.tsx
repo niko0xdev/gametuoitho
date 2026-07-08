@@ -71,6 +71,7 @@ export default function BiLacArena({
   const [viewOnlyData, setViewOnlyData] = useState<any | null>(null);
   const [viewOnlyError, setViewOnlyError] = useState<string | null>(null);
   const [lastCreatedSlug, setLastCreatedSlug] = useState<string | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
 
   // AI bulk-add players
   const [aiBulkText, setAiBulkText] = useState('');
@@ -1395,12 +1396,31 @@ export default function BiLacArena({
             </span>
             <span>Giải đấu đang chơi: <strong className="font-bold">{currentTournament.name}</strong></span>
             {currentTournament.description && <span className="text-orange-600">({currentTournament.description})</span>}
-            <button 
+            <button
               onClick={handleLogoutTournament}
               className="ml-3 text-[10px] text-stone-500 hover:text-stone-900 underline font-semibold transition-colors cursor-pointer uppercase tracking-wider"
             >
               Đổi giải đấu ➔
             </button>
+            {(() => {
+              const slug = allTournaments.find((t: any) => t.id === currentTournament.id)?.slug || lastCreatedSlug;
+              if (!slug) return null;
+              const url = `${typeof window !== 'undefined' ? window.location.origin : ''}/bilac/${slug}`;
+              return (
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(url);
+                    playBeep(987, 'sine', 0.08);
+                    setShareCopied(true);
+                    setTimeout(() => setShareCopied(false), 2000);
+                  }}
+                  className="ml-1 text-[10px] text-emerald-700 hover:text-emerald-900 underline font-semibold transition-colors cursor-pointer uppercase tracking-wider flex items-center gap-1"
+                  title={url}
+                >
+                  {shareCopied ? '✓ Đã copy!' : '🔗 Sao chép link'}
+                </button>
+              );
+            })()}
           </div>
         </div>
 
@@ -1480,9 +1500,36 @@ export default function BiLacArena({
       )}
 
       {successMsg && (
-        <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl flex items-start gap-2.5 text-xs sm:text-sm" id="bilac_success_banner">
-          <Check className="w-5 h-5 shrink-0 text-emerald-500" />
-          <p className="font-semibold">{successMsg}</p>
+        <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl" id="bilac_success_banner">
+          <div className="flex items-start gap-2.5 text-xs sm:text-sm">
+            <Check className="w-5 h-5 shrink-0 text-emerald-500" />
+            <p className="font-semibold">{successMsg}</p>
+          </div>
+          {lastCreatedSlug && (
+            <div className="mt-3 pt-3 border-t border-emerald-200">
+              <p className="text-xs font-bold text-emerald-800 mb-1.5">🔗 Link chia sẻ (chế độ xem)</p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={`${typeof window !== 'undefined' ? window.location.origin : ''}/bilac/${lastCreatedSlug}`}
+                  className="flex-1 text-xs px-2 py-1.5 bg-white border border-emerald-300 rounded font-mono text-stone-700 truncate"
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                />
+                <button
+                  onClick={() => {
+                    const url = `${window.location.origin}/bilac/${lastCreatedSlug}`;
+                    navigator.clipboard.writeText(url);
+                    playBeep(987, 'sine', 0.08);
+                  }}
+                  className="text-xs font-bold px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded shrink-0 cursor-pointer"
+                >
+                  📋 Sao chép
+                </button>
+              </div>
+              <p className="text-[10px] text-emerald-700 mt-1.5">Bất kỳ ai có link đều xem được. Mã code vẫn cần để tham gia.</p>
+            </div>
+          )}
         </div>
       )}
 
