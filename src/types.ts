@@ -102,6 +102,7 @@ export interface BiLacMatch {
 
 export interface BiLacTournament {
   id: string;
+  slug?: string;
   name: string;
   code: string;
   description?: string;
