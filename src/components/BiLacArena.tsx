@@ -918,6 +918,7 @@ export default function BiLacArena({
   };
 
   const handleCancelMatch = async (matchId: string) => {
+    if (!window.confirm('Hủy bỏ trận đấu này? Điểm số hiện tại sẽ bị xoá và không thể khôi phục.')) return;
     try {
       const res = await bilacFetch(`/api/bilac/matches/${matchId}`, { method: 'DELETE' });
       if (res.ok) {
@@ -2147,6 +2148,7 @@ export default function BiLacArena({
                   <div className="mt-4 pt-3 border-t border-stone-200/50 flex justify-end">
                     <button
                       onClick={async () => {
+                        if (!window.confirm('Xoá kết quả trận đấu này? Bảng xếp hạng sẽ được tính lại.')) return;
                         try {
                           const res = await bilacFetch(`/api/bilac/matches/${m.id}`, { method: 'DELETE' });
                           if (res.ok) {
