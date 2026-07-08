@@ -470,6 +470,14 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
     }
   }, [userId, hasPermission]);
 
+  // Close the edit-score modal on Escape.
+  useEffect(() => {
+    if (!editingMatch) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setEditingMatch(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editingMatch]);
+
   // Save changes helper syncing with server API contract
   const saveLeaguesToLocalStorage = async (updatedLeagues: MyLeague[]) => {
     // Snapshot prior state so we can roll back the optimistic update on server failure.
@@ -2119,8 +2127,8 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
                                   <span className="text-[9px] font-black uppercase text-stone-400 tracking-wider">Danh sách cầu thủ ({team.players?.length || 0}):</span>
                                   {team.players && team.players.length > 0 ? (
                                     <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
-                                      {team.players.map(p => (
-                                        <span key={p} className="text-[9px] font-bold bg-white border border-stone-200/60 text-stone-700 px-1.5 py-0.5 rounded-sm">
+                                      {team.players.map((p, pIdx) => (
+                                        <span key={`${pIdx}_${p}`} className="text-[9px] font-bold bg-white border border-stone-200/60 text-stone-700 px-1.5 py-0.5 rounded-sm">
                                           {p}
                                         </span>
                                       ))}
@@ -2459,6 +2467,9 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
 
                       {/* iOS-Style Toggle Slider */}
                       <button
+                        role="switch"
+                        aria-checked={isAllowed}
+                        aria-label={`Cấp quyền quản lý giải cho ${acc.name || acc.id}`}
                         onClick={() => handleTogglePermission(acc.id)}
                         className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden
                           ${isAllowed ? 'bg-emerald-500' : 'bg-stone-300'}
@@ -2583,8 +2594,17 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
 
       {/* 4. MODAL: EDIT/UPDATE MATCH SCORE */}
       {editingMatch && selectedLeague && (
-        <div className="fixed inset-0 z-50 bg-stone-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className={`bg-white border border-stone-200 shadow-2xl rounded-2xl w-full p-6 animate-scaleIn transition-all ${selectedLeague.sport === 'futsal' ? 'max-w-lg' : 'max-w-md'}`}>
+        <div
+          className="fixed inset-0 z-50 bg-stone-900/40 backdrop-blur-xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Cập nhật kết quả thi đấu"
+          onClick={(e) => { if (e.target === e.currentTarget) setEditingMatch(null); }}
+        >
+          <div
+            className={`bg-white border border-stone-200 shadow-2xl rounded-2xl w-full p-6 animate-scaleIn transition-all ${selectedLeague.sport === 'futsal' ? 'max-w-lg' : 'max-w-md'}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex justify-between items-center border-b border-stone-100 pb-3 mb-4">
               <h3 className="text-sm font-black text-stone-800 uppercase tracking-wide">
                 Cập nhật kết quả thi đấu
