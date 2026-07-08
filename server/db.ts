@@ -161,6 +161,12 @@ class Database {
     } catch (err: any) {
       if (!/duplicate column name/i.test(String(err?.message))) throw err;
     }
+    try {
+      sqliteDb.exec(`ALTER TABLE bilac_tournaments ADD COLUMN slug TEXT;`);
+    } catch (err: any) {
+      if (!/duplicate column name/i.test(String(err?.message))) throw err;
+    }
+    sqliteDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bilac_tournaments_slug ON bilac_tournaments(slug) WHERE slug IS NOT NULL;`);
     sqliteDb.exec(`
 
       CREATE TABLE IF NOT EXISTS bilac_tournament_members (
