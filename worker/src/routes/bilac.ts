@@ -82,6 +82,7 @@ bilacRoute.get('/tournaments', requireLoggedIn(), async (c) => {
 
   return c.json(tournaments.map((t: any) => ({
     id: t.id,
+    slug: t.slug ?? undefined,
     name: t.name,
     description: t.description,
     createdAt: t.createdAt,
@@ -108,7 +109,23 @@ bilacRoute.post('/tournaments', requireLoggedIn(), async (c) => {
   if (!code || !code.trim()) return c.json({ error: 'Mã truy cập giải đấu không được để trống!' }, 400);
   const id = 'tour-' + Date.now();
   const db = createDb(c.env);
-  await db.insert(bilacTournamentsTable).values({ id, name: name.trim(), code: code.trim(), description: description?.trim() ?? null, createdAt: Date.now() } as any);
+  // 8-char base36 slug for the public /bilac/{slug} view-only URL.
+  const generateSlug = () => {
+    const alphabet = '0123456789abcdefghijklmnopqrstuvwxyz';
+    const buf = new Uint8Array(8);
+    crypto.getRandomValues(buf);
+    let out = '';
+    for (let i = 0; i < 8; i++) out += alphabet[buf[i] % alphabet.length];
+    return out;
+  };
+  let slug = generateSlug();
+  for (let i = 0; i < 5; i++) {
+    const existing = await db.select().from(bilacTournamentsTable).where(eq(bilacTournamentsTable.slug, slug)).all();
+    if (!existing[0]) break;
+    if (i === 4) return c.json({ error: 'Không thể tạo slug, thử lại.' }, 500);
+    slug = generateSlug();
+  }
+  await db.insert(bilacTournamentsTable).values({ id, slug, name: name.trim(), code: code.trim(), description: description?.trim() ?? null, createdAt: Date.now() } as any);
   // Auto-add creator as tournament owner.
   const creatorRows = await db.select().from(usersTable).where(eq(usersTable.id, creatorId)).all();
   const creator = creatorRows[0];
@@ -123,7 +140,63 @@ bilacRoute.post('/tournaments', requireLoggedIn(), async (c) => {
       joinedAt: Date.now(),
     } as any);
   }
-  return c.json({ success: true, tournament: { id, name: name.trim(), code: code.trim(), description: description?.trim() ?? '', createdAt: Date.now() } });
+  return c.json({ success: true, tournament: { id, slug, name: name.trim(), code: code.trim(), description: description?.trim() ?? '', createdAt: Date.now() } });
+});
+
+// Public read-only endpoint keyed by slug. No login required.
+bilacRoute.get('/tournaments/by-slug/:slug', async (c) => {
+  const slug = c.req.param('slug');
+  if (!slug || !/^[0-9a-z]{8}$/.test(slug)) {
+    return c.json({ error: 'Slug không hợp lệ.' }, 400);
+  }
+  const db = createDb(c.env);
+  const rows = await db.select().from(bilacTournamentsTable).where(eq(bilacTournamentsTable.slug, slug)).all();
+  const tour = rows[0] as any;
+  if (!tour) return c.json({ error: 'Giải đấu không tồn tại hoặc đã bị xoá.' }, 404);
+
+  const players = (await db.select().from(bilacPlayersTable).where(eq(bilacPlayersTable.tournamentId, tour.id)).all())
+    .map((p: any) => ({ id: p.id, name: p.name, avatar: p.avatar }));
+
+  const matches = (await db.select().from(bilacMatchesTable).where(eq(bilacMatchesTable.tournamentId, tour.id)).all())
+    .map((m: any) => ({
+      id: m.id,
+      timestamp: m.timestamp,
+      team1: m.team1,
+      team2: m.team2,
+      score1: m.score1,
+      score2: m.score2,
+      status: m.status,
+    }));
+
+  // Check isMember if x-user-id is present and the worker tracks members.
+  const uid = c.req.header('x-user-id');
+  let isMember = false;
+  if (typeof uid === 'string' && uid) {
+    const memberRows = await db
+      .select()
+      .from(bilacTournamentMembersTable)
+      .where(eq(bilacTournamentMembersTable.tournamentId, tour.id))
+      .all();
+    isMember = memberRows.some((m: any) => m.userId === uid);
+  }
+
+  const memberCount = (await db
+    .select()
+    .from(bilacTournamentMembersTable)
+    .where(eq(bilacTournamentMembersTable.tournamentId, tour.id))
+    .all()).length;
+
+  return c.json({
+    id: tour.id,
+    slug: tour.slug,
+    name: tour.name,
+    description: tour.description,
+    createdAt: tour.createdAt,
+    memberCount,
+    isMember,
+    players,
+    matches,
+  });
 });
 
 bilacRoute.get('/tournaments/members', checkAccess, async (c: any) => {

@@ -101,6 +101,7 @@ export const bilacMatchesTable = sqliteTable('bilac_matches', {
 
 export const bilacTournamentsTable = sqliteTable('bilac_tournaments', {
   id: text('id').primaryKey(),
+  slug: text('slug'),
   name: text('name').notNull(),
   code: text('code').notNull(),
   description: text('description'),
