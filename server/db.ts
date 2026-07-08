@@ -1015,6 +1015,39 @@ class Database {
     }));
   }
 
+  // Return ALL Bi Lắc tournaments enriched with memberCount + caller's isMember
+  // flag. Does NOT expose `code` (sensitive — caller must POST /access to join).
+  // Powers both "Tất cả giải" and "Giải tham gia" tabs from a single fetch.
+  getAllBiLacTournamentsWithMembership(userId: string): Array<{
+    id: string; name: string; description?: string; createdAt: number;
+    memberCount: number; isMember: boolean;
+  }> {
+    const tournaments = drizzleDb.select().from(bilacTournamentsTable).all();
+    const memberRows = drizzleDb
+      .select({
+        tournamentId: bilacTournamentMembersTable.tournamentId,
+        userId: bilacTournamentMembersTable.userId,
+      })
+      .from(bilacTournamentMembersTable)
+      .all();
+
+    const counts = new Map<string, number>();
+    const mySet = new Set<string>();
+    for (const m of memberRows) {
+      counts.set(m.tournamentId, (counts.get(m.tournamentId) ?? 0) + 1);
+      if (m.userId === userId) mySet.add(m.tournamentId);
+    }
+
+    return tournaments.map(t => ({
+      id: t.id,
+      name: t.name,
+      description: t.description || undefined,
+      createdAt: t.createdAt,
+      memberCount: counts.get(t.id) ?? 0,
+      isMember: mySet.has(t.id),
+    }));
+  }
+
   deleteBiLacTournament(id: string): void {
     drizzleDb.delete(bilacTournamentsTable).where(eq(bilacTournamentsTable.id, id)).run();
   }

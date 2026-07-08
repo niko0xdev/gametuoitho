@@ -68,19 +68,28 @@ describe('GET /api/bilac/tournaments', () => {
     const res = await request(getApp()).get('/api/bilac/tournaments');
     assert.equal(res.status, 401);
   });
-  it('returns only tournaments user is member of', async () => {
+  it('returns all tournaments with isMember + memberCount and NO code leak', async () => {
     const uid = uniq('memlist');
     const { id } = await setupTournament(uid);
     const res = await request(getApp()).get('/api/bilac/tournaments', undefined, { 'x-user-id': uid });
     assert.equal(res.status, 200);
-    assert.ok(res.body.some((t: any) => t.id === id));
+    const me = res.body.find((t: any) => t.id === id);
+    assert.ok(me, "user's tournament is in the list");
+    assert.equal(me.isMember, true);
+    assert.equal(me.memberCount, 1);
+    assert.equal(me.code, undefined, 'access code must never be exposed');
   });
-  it('returns [] for user with no memberships', async () => {
-    const uid = uniq('memless');
-    await makeUser(uid, uid);
-    const res = await request(getApp()).get('/api/bilac/tournaments', undefined, { 'x-user-id': uid });
+  it('marks non-member tournaments with isMember=false', async () => {
+    const owner = uniq('owner');
+    const { id } = await setupTournament(owner);
+    const other = uniq('other');
+    await makeUser(other, other);
+    const res = await request(getApp()).get('/api/bilac/tournaments', undefined, { 'x-user-id': other });
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body, []);
+    const t = res.body.find((x: any) => x.id === id);
+    assert.ok(t);
+    assert.equal(t.isMember, false);
+    assert.equal(t.memberCount, 1);
   });
 });
 

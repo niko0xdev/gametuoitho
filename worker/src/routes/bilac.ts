@@ -64,10 +64,30 @@ const requireOwner = async (c: any, next: any) => {
   await next();
 };
 
-bilacRoute.get('/tournaments', async (c) => {
+bilacRoute.get('/tournaments', requireLoggedIn(), async (c) => {
   const db = createDb(c.env);
-  const all = await db.select().from(bilacTournamentsTable).all();
-  return c.json(all.map((t: any) => ({ id: t.id, name: t.name, description: t.description, createdAt: t.createdAt })));
+  const userId = c.get('userId') as string;
+  const tournaments = await db.select().from(bilacTournamentsTable).all();
+  const memberRows = await db.select({
+    tournamentId: bilacTournamentMembersTable.tournamentId,
+    userId: bilacTournamentMembersTable.userId,
+  }).from(bilacTournamentMembersTable).all();
+
+  const counts = new Map<string, number>();
+  const mySet = new Set<string>();
+  for (const m of memberRows) {
+    counts.set(m.tournamentId, (counts.get(m.tournamentId) ?? 0) + 1);
+    if (m.userId === userId) mySet.add(m.tournamentId);
+  }
+
+  return c.json(tournaments.map((t: any) => ({
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    createdAt: t.createdAt,
+    memberCount: counts.get(t.id) ?? 0,
+    isMember: mySet.has(t.id),
+  })));
 });
 
 bilacRoute.post('/tournaments/access', async (c) => {
