@@ -45,6 +45,18 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Audio feedback helper. Defined before any handler/effect that references
+  // it — earlier it sat below handleGoogleCredential, and the GIS callback
+  // closed over it via TDZ ("Cannot access 'ue' before initialization" when
+  // the Google button was clicked).
+  const triggerBeep = (freq: number, type: 'sine' | 'triangle' | 'square' | 'sawtooth' = 'sine', duration = 0.08) => {
+    try {
+      playRetroBeep(freq, type, duration);
+    } catch (e) {
+      // Ignored if sound system not fully ready
+    }
+  };
+
   // Google Sign In (Identity Services). Lazily loaded only on the login view.
   // Client ID is public (embedded in the client bundle by design); committed as
   // the default so the button renders with zero config. VITE_GOOGLE_CLIENT_ID
@@ -148,14 +160,6 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   }, [mode, turnstileSitekey]);
 
   if (!isOpen) return null;
-
-  const triggerBeep = (freq: number, type: 'sine' | 'triangle' | 'square' | 'sawtooth' = 'sine', duration = 0.08) => {
-    try {
-      playRetroBeep(freq, type, duration);
-    } catch (e) {
-      // Ignored if sound system not fully ready
-    }
-  };
 
   const handleSwitchMode = (newMode: AuthMode) => {
     triggerBeep(400, 'sine', 0.05);
