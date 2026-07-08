@@ -161,6 +161,12 @@ class Database {
     } catch (err: any) {
       if (!/duplicate column name/i.test(String(err?.message))) throw err;
     }
+    try {
+      sqliteDb.exec(`ALTER TABLE bilac_tournaments ADD COLUMN slug TEXT;`);
+    } catch (err: any) {
+      if (!/duplicate column name/i.test(String(err?.message))) throw err;
+    }
+    sqliteDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bilac_tournaments_slug ON bilac_tournaments(slug) WHERE slug IS NOT NULL;`);
     sqliteDb.exec(`
 
       CREATE TABLE IF NOT EXISTS bilac_tournament_members (
@@ -959,6 +965,7 @@ class Database {
     if (!row) return undefined;
     return {
       id: row.id,
+      slug: row.slug ?? undefined,
       name: row.name,
       code: row.code,
       description: row.description || undefined,
@@ -966,10 +973,75 @@ class Database {
     };
   }
 
+  getBiLacTournamentBySlug(slug: string): BiLacTournament | undefined {
+    const row = drizzleDb
+      .select()
+      .from(bilacTournamentsTable)
+      .where(eq(bilacTournamentsTable.slug, slug))
+      .get();
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      slug: row.slug ?? undefined,
+      name: row.name,
+      code: row.code,
+      description: row.description || undefined,
+      createdAt: row.createdAt
+    };
+  }
+
+  generateBilacTournamentSlug(length = 8): string {
+    const alphabet = '0123456789abcdefghijklmnopqrstuvwxyz';
+    const buf = new Uint8Array(length);
+    crypto.getRandomValues(buf);
+    let out = '';
+    for (let i = 0; i < length; i++) {
+      out += alphabet[buf[i] % alphabet.length];
+    }
+    return out;
+  }
+
+  backfillMissingBilacSlugs(): number {
+    const rows = drizzleDb
+      .select({ id: bilacTournamentsTable.id })
+      .from(bilacTournamentsTable)
+      .all();
+    let updated = 0;
+    for (const r of rows) {
+      const existing = drizzleDb
+        .select({ slug: bilacTournamentsTable.slug })
+        .from(bilacTournamentsTable)
+        .where(eq(bilacTournamentsTable.id, r.id))
+        .get();
+      if (existing?.slug) continue;
+      let attempts = 0;
+      let candidate = '';
+      while (attempts < 5) {
+        candidate = this.generateBilacTournamentSlug();
+        const collision = drizzleDb
+          .select({ id: bilacTournamentsTable.id })
+          .from(bilacTournamentsTable)
+          .where(eq(bilacTournamentsTable.slug, candidate))
+          .get();
+        if (!collision) break;
+        attempts++;
+      }
+      if (attempts >= 5) continue; // skip on collision storm — log later
+      drizzleDb
+        .update(bilacTournamentsTable)
+        .set({ slug: candidate })
+        .where(eq(bilacTournamentsTable.id, r.id))
+        .run();
+      updated++;
+    }
+    return updated;
+  }
+
   saveBiLacTournament(tournament: BiLacTournament): void {
     drizzleDb.insert(bilacTournamentsTable)
       .values({
         id: tournament.id,
+        slug: tournament.slug ?? null,
         name: tournament.name,
         code: tournament.code,
         description: tournament.description || null,
@@ -978,6 +1050,7 @@ class Database {
       .onConflictDoUpdate({
         target: bilacTournamentsTable.id,
         set: {
+          slug: tournament.slug ?? null,
           name: tournament.name,
           code: tournament.code,
           description: tournament.description || null,
@@ -991,6 +1064,7 @@ class Database {
     const rows = drizzleDb.select().from(bilacTournamentsTable).all();
     return rows.map(row => ({
       id: row.id,
+      slug: row.slug ?? undefined,
       name: row.name,
       code: row.code,
       description: row.description || undefined,
