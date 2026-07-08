@@ -140,15 +140,21 @@ export default function BiLacArena({
   // Custom fetch function with tournament credentials + current user id in headers.
   // Always attaches x-user-id when logged in (covers /api/bilac/* AND other backend routes
   // that need to identify the caller).
+  //
+  // Race-condition fix: on first render after deeplink/refresh, `userProfile` is still
+  // null (App.tsx's `fetchProfile` resolves async). The userId IS already in
+  // localStorage.auth_userId (single source of truth — see src/lib/api.ts#3-6).
+  // Fall back to it so we don't 401 on the very first fetch.
   const bilacFetch = async (url: string, options: RequestInit = {}) => {
     const tid = currentTournament?.id || localStorage.getItem('bilac_tournament') || '';
     const code = localStorage.getItem('bilac_tournament_code') || '';
+    const effectiveUserId = loggedInUserId || localStorage.getItem('auth_userId') || '';
     const headers: Record<string, string> = {
       ...((options.headers as Record<string, string>) || {}),
       'x-tournament-id': tid,
       'x-tournament-code': code,
     };
-    if (loggedInUserId) headers['x-user-id'] = loggedInUserId;
+    if (effectiveUserId) headers['x-user-id'] = effectiveUserId;
     return fetch(url, { ...options, headers });
   };
 
