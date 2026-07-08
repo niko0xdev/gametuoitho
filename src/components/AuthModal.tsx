@@ -86,27 +86,37 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   useEffect(() => {
     if (mode !== 'login' || !googleClientId) return;
     const w = window as any;
-    const render = () => {
+    let cancelled = false;
+    let rendered = false;
+    // Poll until BOTH the GIS library AND the ref are ready, then render once.
+    // The previous one-shot onload bailed silently if either wasn't ready at
+    // the exact fire time, leaving the button container empty (no error).
+    const tryRender = () => {
+      if (cancelled || rendered) return;
       if (!w.google?.accounts?.id || !googleBtnRef.current) return;
-      w.google.accounts.id.initialize({ client_id: googleClientId, callback: handleGoogleCredential });
-      w.google.accounts.id.renderButton(googleBtnRef.current, {
-        theme: 'outline', size: 'large', width: 360, text: 'continue_with', locale: 'vi', shape: 'pill',
-      });
+      try {
+        w.google.accounts.id.initialize({ client_id: googleClientId, callback: handleGoogleCredential });
+        w.google.accounts.id.renderButton(googleBtnRef.current, {
+          theme: 'outline', size: 'large', width: 360, text: 'continue_with', locale: 'vi', shape: 'pill',
+        });
+        rendered = true;
+      } catch (err) {
+        console.error('[GIS] render failed:', err);
+      }
     };
-    if (w.google?.accounts?.id) { render(); return; }
     if (!document.getElementById('google-gsi-script')) {
       const s = document.createElement('script');
       s.id = 'google-gsi-script';
       s.src = 'https://accounts.google.com/gsi/client';
       s.async = true;
       s.defer = true;
-      s.onload = render;
       s.onerror = () => console.error('[GIS] Google Identity script failed to load');
       document.head.appendChild(s);
-    } else {
-      const t = setTimeout(render, 300);
-      return () => clearTimeout(t);
     }
+    tryRender();
+    const iv = setInterval(tryRender, 100);
+    const stop = setTimeout(() => clearInterval(iv), 6000);
+    return () => { cancelled = true; clearInterval(iv); clearTimeout(stop); };
   }, [mode, googleClientId]);
 
   useEffect(() => {
