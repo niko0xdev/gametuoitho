@@ -26,6 +26,7 @@ export default function ReplayView({ userId }: ReplayViewProps) {
   const [speed, setSpeed] = useState(1500); // ms per autoplay tick
 
   const fetchHistory = async () => {
+    if (!userId) { setHistory([]); return; }
     setLoading(true);
     try {
       const res = await fetch(`/api/replays/${userId}`);

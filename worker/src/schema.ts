@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, primaryKey } from 'drizzle-orm/sqlite-core';
 
 export const usersTable = sqliteTable('users', {
   id: text('id').primaryKey(),
@@ -69,12 +69,15 @@ export const tournamentsTable = sqliteTable('tournaments', {
 
 export const dailyChallengesTable = sqliteTable('daily_challenges', {
   id: text('id').notNull(),
-  date: text('date').primaryKey(),
+  date: text('date').notNull(),
   gameId: text('game_id').notNull(),
   seed: text('seed').notNull(),
   prompt: text('prompt').notNull(),
   topScores: text('top_scores').notNull(),
-});
+}, (table) => ({
+  // One challenge per (date, game) — not one per date across all games.
+  pk: primaryKey({ columns: [table.date, table.gameId] }),
+}));
 
 export const bilacPlayersTable = sqliteTable('bilac_players', {
   id: text('id').primaryKey(),
