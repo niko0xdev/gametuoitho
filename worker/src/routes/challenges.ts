@@ -14,7 +14,11 @@ challengesRoute.get('/:gameId/:date', async (c) => {
   const rows = await db.select().from(dailyChallengesTable)
     .where(and(eq(dailyChallengesTable.gameId, gameId), eq(dailyChallengesTable.date, date)))
     .all();
-  if (rows[0]) return c.json(rows[0]);
+  if (rows[0]) {
+    // topScores is stored as a JSON string; the FE expects an array.
+    const ch = rows[0] as any;
+    return c.json({ ...ch, topScores: JSON.parse(ch.topScores || '[]') });
+  }
 
   const puzzle = {
     id: 'dc_' + Date.now(),
@@ -24,7 +28,7 @@ challengesRoute.get('/:gameId/:date', async (c) => {
     topScores: '[]',
   };
   await db.insert(dailyChallengesTable).values(puzzle as any);
-  return c.json(puzzle);
+  return c.json({ ...puzzle, topScores: [] });
 });
 
 challengesRoute.post('/:gameId/:date/submit', requireLoggedIn(), async (c) => {
