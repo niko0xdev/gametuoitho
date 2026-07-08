@@ -516,11 +516,16 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
     }
   };
 
-  // Pre-fill default team names and initialize empty player list when team count or sport/format changes
+  // Resize name/roster arrays when team count changes. Preserve any names/rosters
+  // already present (typed by the user or filled by AI) and only default the new
+  // slots — so a sport change or AI import no longer wipes what was entered.
   useEffect(() => {
-    const defaults = Array.from({ length: numTeams }, (_, i) => `Đội tuyển ${i + 1}`);
-    setTeamNames(defaults);
-    setTeamPlayers(Array.from({ length: numTeams }, () => []));
+    setTeamNames(prev =>
+      Array.from({ length: numTeams }, (_, i) => prev[i] || `Đội tuyển ${i + 1}`)
+    );
+    setTeamPlayers(prev =>
+      Array.from({ length: numTeams }, (_, i) => prev[i] || [])
+    );
   }, [numTeams, newLeagueSport]);
 
   const handleTeamNameChange = (index: number, val: string) => {
@@ -1001,16 +1006,10 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
 
   const handleAiApplyEvents = () => {
     if (!editingMatch || !aiEventPreview || aiEventPreview.length === 0) return;
-    let homeDelta = 0;
-    let awayDelta = 0;
     const mapped: MatchEvent[] = aiEventPreview
       .filter(e => e.teamSide === 'home' || e.teamSide === 'away')
       .map(e => {
         const teamId = e.teamSide === 'home' ? editingMatch.home : editingMatch.away;
-        if (e.type === 'goal') {
-          if (e.teamSide === 'home') homeDelta++;
-          else awayDelta++;
-        }
         return {
           type: e.type,
           teamId,
@@ -1025,26 +1024,25 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
     }
 
     // Trộn với editingMatchEvents hiện có, tránh trùng (cùng type+teamId+playerName+minute).
-    setEditingMatchEvents(prev => {
-      const existing = new Set(prev.map(p => `${p.type}|${p.teamId}|${p.playerName}|${p.minute ?? ''}`));
-      const merged = [...prev];
-      for (const ev of mapped) {
-        const k = `${ev.type}|${ev.teamId}|${ev.playerName}|${ev.minute ?? ''}`;
-        if (!existing.has(k)) {
-          merged.push(ev);
-          existing.add(k);
-        }
+    const existing = new Set(editingMatchEvents.map(p => `${p.type}|${p.teamId}|${p.playerName}|${p.minute ?? ''}`));
+    const merged = [...editingMatchEvents];
+    for (const ev of mapped) {
+      const k = `${ev.type}|${ev.teamId}|${ev.playerName}|${ev.minute ?? ''}`;
+      if (!existing.has(k)) {
+        merged.push(ev);
+        existing.add(k);
       }
-      return merged.sort((a, b) => (a.minute || 0) - (b.minute || 0));
-    });
+    }
+    merged.sort((a, b) => (a.minute || 0) - (b.minute || 0));
+    setEditingMatchEvents(merged);
 
-    // Cộng dồn bàn thắng vào score nếu người dùng chưa tự nhập.
-    if (homeDelta > 0) {
-      setEditHomeScore(prev => String((parseInt(prev || '0') || 0) + homeDelta));
-    }
-    if (awayDelta > 0) {
-      setEditAwayScore(prev => String((parseInt(prev || '0') || 0) + awayDelta));
-    }
+    // Score = tổng bàn thắng suy ra từ TOÀN BỘ danh sách sự kiện đã trộn (idempotent).
+    // Dùng giá trị tuyệt đối thay vì cộng dồn lên score hiện tại để không bị đếm kép
+    // khi người dùng đã tự nhập tỉ số trước đó.
+    const homeGoals = merged.filter(e => e.type === 'goal' && e.teamId === editingMatch.home).length;
+    const awayGoals = merged.filter(e => e.type === 'goal' && e.teamId === editingMatch.away).length;
+    if (homeGoals > 0) setEditHomeScore(String(homeGoals));
+    if (awayGoals > 0) setEditAwayScore(String(awayGoals));
 
     setAiEventPreview(null);
     setAiSummaryText('');
