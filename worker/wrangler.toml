@@ -25,9 +25,17 @@ class_name = "MatchDO"
 name = "MATCHMAKING_DO"
 class_name = "MatchmakingDO"
 
+[[durable_objects.bindings]]
+name = "GAMESERVER_DO"
+class_name = "GameServerDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["MatchDO", "MatchmakingDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["GameServerDO"]
 
 # Production values — `wrangler deploy` ships these. Local `wrangler dev`
 # overrides them via worker/.dev.vars (copy from worker/.dev.vars.example).

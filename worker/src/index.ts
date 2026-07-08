@@ -17,6 +17,7 @@ import { matchRoute } from './routes/match';
 // Durable Object classes must be exported from the Worker entrypoint.
 export { MatchDO } from './do/match';
 export { MatchmakingDO } from './do/matchmaking';
+export { GameServerDO } from './do/gameserver';
 
 const app = new Hono<{ Bindings: Bindings }>();
 app.use('*', cors());
@@ -33,6 +34,27 @@ app.route('/api/ai', aiRoute);
 app.route('/api', leaguesRoute);
 app.route('/api', matchmakingRoute);
 app.route('/api', matchRoute);
+
+// Legacy WS game/lobby protocol -> GameServerDO (single global instance).
+app.get('/api/ws', async (c) => {
+  const id = c.env.GAMESERVER_DO.idFromName('global');
+  return c.env.GAMESERVER_DO.get(id).fetch(c.req.raw);
+});
+
+// Who's online (lobby invite UI polls this).
+app.get('/api/online-users', async (c) => {
+  const stub = c.env.GAMESERVER_DO.get(c.env.GAMESERVER_DO.idFromName('global'));
+  const ids = await stub.getOnlineUsers();
+  const exclude = c.req.query('exclude');
+  const filtered = exclude ? ids.filter((u: string) => u !== exclude) : ids;
+  if (filtered.length === 0) return c.json([]);
+  const placeholders = filtered.map(() => '?').join(',');
+  const rows = await c.env.DB.prepare(
+    `SELECT id, displayName, avatar FROM users WHERE id IN (${placeholders})`,
+  ).bind(...filtered).all();
+  return c.json(rows.results);
+});
+
 app.get('/', (c) => c.text('gametuoitho API'));
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 app.onError((err, c) => {
