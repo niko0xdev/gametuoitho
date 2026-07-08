@@ -372,11 +372,13 @@ export default function BiLacArena({
   };
 
   // Access an existing tournament with code
-  const handleAccessTournament = async (e: React.FormEvent) => {
+  const handleAccessTournament = async (e: React.FormEvent, explicitId?: string) => {
     e.preventDefault();
     setError(null);
     setSuccessMsg(null);
-    if (!selectedTournamentId) {
+    // Prefer the freshly-selected id passed by the modal; fall back to state.
+    const targetId = explicitId || selectedTournamentId;
+    if (!targetId) {
       setError('Vui lòng chọn một giải đấu!');
       return;
     }
@@ -391,7 +393,7 @@ export default function BiLacArena({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tournamentId: selectedTournamentId,
+          tournamentId: targetId,
           code: accessCodeInput.trim()
         })
       });
@@ -1361,7 +1363,7 @@ export default function BiLacArena({
             setSelectedTournamentId={setSelectedTournamentId}
             loading={loading}
             onClose={() => setJoinModalOpen(false)}
-            onSubmit={(e) => { handleAccessTournament(e); setJoinModalOpen(false); }}
+            onSubmit={(e, id) => { handleAccessTournament(e, id); setJoinModalOpen(false); }}
           />
         )}
       </AnimatePresence>
@@ -2551,7 +2553,7 @@ function JoinTournamentModal({
   setSelectedTournamentId: (v: string) => void;
   loading: boolean;
   onClose: () => void;
-  onSubmit: (e: React.FormEvent) => void;
+  onSubmit: (e: React.FormEvent, tournamentId: string) => void;
 }) {
   // Local select state: prefer preselect, else fallback to first tournament or current.
   const initialId = preselectedId || selectedTournamentId || (tournaments[0]?.id ?? '');
@@ -2559,7 +2561,9 @@ function JoinTournamentModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     setSelectedTournamentId(localId);
-    onSubmit(e);
+    // Pass the local id explicitly — the parent's selectedTournamentId is stale
+    // until re-render, so reading it in the handler would target the wrong tournament.
+    onSubmit(e, localId);
   };
 
   return (
