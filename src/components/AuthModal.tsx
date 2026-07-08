@@ -45,10 +45,13 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Google Sign In (Identity Services). Lazily loaded only on the login view
-  // and only when a client id is configured via VITE_GOOGLE_CLIENT_ID.
+  // Google Sign In (Identity Services). Lazily loaded only on the login view.
+  // Client ID is public (embedded in the client bundle by design); committed as
+  // the default so the button renders with zero config. VITE_GOOGLE_CLIENT_ID
+  // still overrides it (e.g. a different OAuth client per environment).
   const googleBtnRef = useRef<HTMLDivElement>(null);
-  const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? '';
+  const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)
+    ?? '1037610366569-vfi2uh8sfhqd9qlfj4orgjobutfj044c.apps.googleusercontent.com';
 
   // Cloudflare Turnstile on the register form (anti bot-signup). Empty sitekey
   // = widget hidden + BE skips verify, so dev/preview stays unblocked.
