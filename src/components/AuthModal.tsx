@@ -6,7 +6,7 @@ import {
 import { playRetroBeep } from './games/CaroBoard.tsx';
 import { motion, AnimatePresence } from 'motion/react';
 import { UserProfile } from '../types.ts';
-import { validatePassword } from '../lib/passwordRules';
+import { validatePassword, PASSWORD_HINT } from '../lib/passwordRules';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -318,6 +318,12 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     e.preventDefault();
     if (!resetOtp || !resetNewPassword) {
       setErrorMsg('Vui lòng nhập mã OTP và mật khẩu mới!');
+      triggerBeep(180, 'sawtooth', 0.15);
+      return;
+    }
+    const pwCheck = validatePassword(resetNewPassword);
+    if (!pwCheck.ok) {
+      setErrorMsg(pwCheck.error || 'Mật khẩu không đủ mạnh!');
       triggerBeep(180, 'sawtooth', 0.15);
       return;
     }
@@ -750,6 +756,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
                       className="w-full bg-stone-950 border border-stone-800 rounded-xl py-2.5 pl-10 pr-4 text-xs text-stone-100 placeholder-stone-600 focus:outline-none focus:border-orange-500"
                     />
                   </div>
+                  <p className="text-[10px] text-stone-500 mt-1">{PASSWORD_HINT}</p>
                 </div>
 
                 <div className="flex gap-2">
