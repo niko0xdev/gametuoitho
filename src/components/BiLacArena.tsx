@@ -869,16 +869,16 @@ export default function BiLacArena({
         setSuccessMsg(`Trận đấu đã kết thúc & tỷ số ${updated.score1} - ${updated.score2} đã được cộng vào bảng xếp hạng!`);
         setTimeout(() => setSuccessMsg(null), 4000);
 
-        // Announce result in Vietnamese
+        // Announce result in Vietnamese — đọc tỷ số từ payload server xác nhận (updated).
         const pNames1 = match.team1.map(pId => players.find(p => p.id === pId)?.name || 'Vô danh').join(', ');
         const pNames2 = match.team2.map(pId => players.find(p => p.id === pId)?.name || 'Vô danh').join(', ');
         let resultText = `Trận đấu bi lắc kịch tính đã kết thúc! `;
-        if (match.score1 > match.score2) {
-          resultText += `Chiến thắng chung cuộc thuộc về Đội Xanh gồm có ${pNames1} với tỷ số ${match.score1} ${match.score2}. Xin chúc mừng!`;
-        } else if (match.score2 > match.score1) {
-          resultText += `Chiến thắng chung cuộc thuộc về Đội Đỏ gồm có ${pNames2} với tỷ số ${match.score2} ${match.score1}. Xin chúc mừng!`;
+        if (updated.score1 > updated.score2) {
+          resultText += `Chiến thắng chung cuộc thuộc về Đội Xanh gồm có ${pNames1} với tỷ số ${updated.score1} ${updated.score2}. Xin chúc mừng!`;
+        } else if (updated.score2 > updated.score1) {
+          resultText += `Chiến thắng chung cuộc thuộc về Đội Đỏ gồm có ${pNames2} với tỷ số ${updated.score2} ${updated.score1}. Xin chúc mừng!`;
         } else {
-          resultText += `Kết quả chung cuộc, hai đội hòa nhau với tỷ số ${match.score1} đều.`;
+          resultText += `Kết quả chung cuộc, hai đội hòa nhau với tỷ số ${updated.score1} đều.`;
         }
         speakText(resultText);
       }
@@ -934,9 +934,14 @@ export default function BiLacArena({
         setSuccessMsg('Đã hủy bỏ trận đấu.');
         setTimeout(() => setSuccessMsg(null), 3000);
         speakText('Trận đấu đã bị hủy bỏ.');
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setError(d.error || 'Không huỷ được trận đấu. Vui lòng thử lại.');
+        playBeep(180, 'sawtooth', 0.2);
       }
     } catch (e) {
       console.error(e);
+      setError('Lỗi kết nối khi huỷ trận đấu.');
     }
   };
 
@@ -2187,9 +2192,14 @@ export default function BiLacArena({
                             playBeep(150, 'sawtooth', 0.2);
                             setSuccessMsg('Đã xóa trận đấu thành công.');
                             setTimeout(() => setSuccessMsg(null), 3000);
+                          } else {
+                            const d = await res.json().catch(() => ({}));
+                            setError(d.error || 'Không xoá được kết quả. Có thể bạn cần là chủ giải đấu.');
+                            playBeep(180, 'sawtooth', 0.2);
                           }
                         } catch (e) {
                           console.error(e);
+                          setError('Lỗi kết nối khi xoá trận đấu.');
                         }
                       }}
                       className="text-stone-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer border border-transparent hover:border-red-100"

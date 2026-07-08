@@ -307,6 +307,8 @@ describe('POST /api/auth/verify-email + resend-otp (Express/Worker parity)', () 
 
     const ok = await request(getApp()).post('/api/auth/verify-email', { email, otp });
     assert.equal(ok.status, 200);
+    assert.ok(ok.body.user, 'verify-email returns the user so the FE can auto-login');
+    assert.equal(ok.body.user.email, email);
   });
   it('resend-otp issues a fresh dev OTP', async () => {
     const username = `re_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;

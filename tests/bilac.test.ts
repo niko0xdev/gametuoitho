@@ -617,4 +617,22 @@ describe('DELETE /api/bilac/matches/:id', () => {
     });
     assert.equal(res.status, 200);
   });
+  it('200s for non-owner member cancelling (deleting) a PLAYING match', async () => {
+    const owner = uniq('delOwn3');
+    const member = uniq('delMem3');
+    await makeUser(member, member);
+    const { id, code } = await setupTournament(owner);
+    db.saveBiLacTournamentMember({
+      id: `mem-${id}-${member}`, tournamentId: id, userId: member,
+      username: member, displayName: member, role: 'member', joinedAt: Date.now()
+    });
+    db.saveBiLacMatch({
+      id: 'del_play', timestamp: Date.now(), weekLabel: 'w', tournamentId: id,
+      team1: ['x'], team2: ['y'], score1: 0, score2: 0, status: 'PLAYING'
+    });
+    const res = await request(getApp()).delete('/api/bilac/matches/del_play', undefined, {
+      'x-user-id': member, 'x-tournament-id': id, 'x-tournament-code': code
+    });
+    assert.equal(res.status, 200);
+  });
 });

@@ -2,6 +2,11 @@ import type { Request, Response } from 'express';
 import { db, hashPassword } from '../db.ts';
 import { validatePassword } from '../../src/lib/passwordRules.ts';
 
+// Dev-only conveniences (OTP echo for the simulated inbox, unverified Google JWT
+// decode) must never leak from a production process. The Worker is the production
+// authority; Express is legacy dev/offline per CLAUDE.md.
+const isDev = process.env.NODE_ENV !== 'production';
+
 export function handleRegister(req: Request, res: Response) {
   const { username, password, email, displayName } = req.body;
   if (!username || !password || !email || !displayName) {
@@ -65,7 +70,7 @@ export function handleRegister(req: Request, res: Response) {
 
   res.json({
     success: true,
-    _debugOtp: otp,
+    _debugOtp: isDev ? otp : undefined,
     user: {
       id: userId,
       displayName: profile.displayName,
@@ -86,16 +91,33 @@ export function handleVerifyEmail(req: Request, res: Response) {
     return res.status(400).json({ error: 'Vui lòng nhập email và mã OTP!' });
   }
   const user = db.getUserByEmail(email.trim().toLowerCase());
+  // Generic error to avoid revealing whether the email is registered.
+  const GENERIC = 'Mã OTP không chính xác hoặc đã hết hạn!';
   if (!user) {
-    return res.status(400).json({ error: 'Không tìm thấy tài khoản!' });
+    return res.status(400).json({ error: GENERIC });
   }
   if (!user.otp || user.otp !== String(otp).trim() || !user.otpExpires || Date.now() > user.otpExpires) {
-    return res.status(400).json({ error: 'Mã OTP không chính xác hoặc đã hết hạn!' });
+    return res.status(400).json({ error: GENERIC });
   }
   user.otp = undefined;
   user.otpExpires = undefined;
   db.saveUser(user);
-  res.json({ success: true, message: 'Xác thực email thành công!' });
+  const profile = db.getProfile(user.id);
+  res.json({
+    success: true,
+    message: 'Xác thực email thành công!',
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      displayName: user.displayName,
+      avatar: user.avatar,
+      role: user.role,
+      elo: profile?.elo ?? { caro: 1500, co_tuong: 1500, co_vua: 1500, o_an_quan: 1500, co_ca_ngua: 1500, duoi_hinh_bat_chu: 1500, noi_chu: 1500, doan_tu: 1500 },
+      honorScore: profile?.honorScore ?? 100,
+      badges: profile?.badges ?? []
+    }
+  });
 }
 
 export function handleResendOtp(req: Request, res: Response) {
@@ -111,7 +133,7 @@ export function handleResendOtp(req: Request, res: Response) {
   user.otp = otp;
   user.otpExpires = Date.now() + 5 * 60 * 1000;
   db.saveUser(user);
-  res.json({ success: true, _debugOtp: otp, message: 'Đã gửi lại mã OTP.' });
+  res.json({ success: true, _debugOtp: isDev ? otp : undefined, message: 'Đã gửi lại mã OTP.' });
 }
 
 export function handleLogin(req: Request, res: Response) {
@@ -173,7 +195,9 @@ export function handleGoogleSso(req: Request, res: Response) {
   let email: string | undefined;
   let name: string | undefined;
   let picture: string | undefined;
-  if (credential) {
+  if (credential && isDev) {
+    // Dev-only: decode the JWT payload WITHOUT cryptographic verification (the Worker
+    // verifies for real in production). Never trust this path outside localhost.
     try {
       const parts = String(credential).split('.');
       const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
@@ -265,7 +289,7 @@ export function handleForgotPassword(req: Request, res: Response) {
   res.json({
     success: true,
     message: 'Mã xác thực OTP đã được gửi về email của bạn (vui lòng kiểm tra console log server hoặc sử dụng mã phía dưới)!',
-    _debugOtp: otp
+    _debugOtp: isDev ? otp : undefined
   });
 }
 

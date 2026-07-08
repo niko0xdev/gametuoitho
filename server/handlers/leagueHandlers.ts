@@ -1,15 +1,15 @@
 import type { Request, Response } from 'express';
 import { db } from '../db.ts';
+import { requireLoggedIn } from './_middleware.ts';
 
 // Mutating league routes require a permitted caller (mirrors handleListLeagues).
+// Reuse the canonical requireLoggedIn so identity extraction (header || body ||
+// query) and the user-existence check stay consistent with every other route.
 function requireLeaguePermission(req: Request, res: Response): boolean {
-  const userId = (req.query.userId as string) || (req.headers['x-user-id'] as string) || req.body?.userId;
-  if (!userId) {
-    res.status(401).json({ error: 'Vui lòng đăng nhập để tiếp tục!' });
-    return false;
-  }
+  const uid = requireLoggedIn(req, res);
+  if (!uid) return false;
   const perms = db.getLeaguePermissions();
-  if (perms[userId] !== true) {
+  if (perms[uid] !== true) {
     res.status(403).json({ error: 'Quyền truy cập bị hạn chế' });
     return false;
   }
