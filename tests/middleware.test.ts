@@ -27,10 +27,10 @@ describe('getRequestUserId', () => {
     assert.equal(getRequestUserId({ headers: { 'x-user-id': '' }, body: {}, query: {} }), null);
     assert.equal(getRequestUserId({ headers: { 'x-user-id': 123 }, body: {}, query: {} }), null);
   });
-  it('reads from header, body, query', () => {
+  it('reads from header only (body/query ignored — blocks impersonation)', () => {
     assert.equal(getRequestUserId({ headers: { 'x-user-id': 'a' }, body: {}, query: {} }), 'a');
-    assert.equal(getRequestUserId({ headers: {}, body: { userId: 'b' }, query: {} }), 'b');
-    assert.equal(getRequestUserId({ headers: {}, body: {}, query: { userId: 'c' } }), 'c');
+    assert.equal(getRequestUserId({ headers: {}, body: { userId: 'b' }, query: {} }), null);
+    assert.equal(getRequestUserId({ headers: {}, body: {}, query: { userId: 'c' } }), null);
   });
   it('trims whitespace', () => {
     assert.equal(getRequestUserId({ headers: { 'x-user-id': '  d  ' }, body: {}, query: {} }), 'd');

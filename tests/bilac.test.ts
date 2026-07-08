@@ -636,3 +636,96 @@ describe('DELETE /api/bilac/matches/:id', () => {
     assert.equal(res.status, 200);
   });
 });
+
+describe('PUT /api/bilac/tournaments', () => {
+  it('401s without x-user-id', async () => {
+    const { id, code } = await setupTournament(uniq('put_owner0'));
+    const res = await request(getApp()).put('/api/bilac/tournaments', { name: 'X' }, { 'x-tournament-id': id, 'x-tournament-code': code });
+    assert.equal(res.status, 401);
+  });
+  it('400s when name empty', async () => {
+    const owner = uniq('put_owner1');
+    const { id, code } = await setupTournament(owner);
+    const res = await request(getApp()).put('/api/bilac/tournaments', { name: '' }, { 'x-user-id': owner, 'x-tournament-id': id, 'x-tournament-code': code });
+    assert.equal(res.status, 400);
+  });
+  it('owner renames + preserves description when omitted', async () => {
+    const owner = uniq('put_owner2');
+    const { id, code } = await setupTournament(owner);
+    const res = await request(getApp()).put('/api/bilac/tournaments', { name: 'Renamed Cup' }, { 'x-user-id': owner, 'x-tournament-id': id, 'x-tournament-code': code });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.tournament.name, 'Renamed Cup');
+    const tour = db.getBiLacTournament(id);
+    assert.equal(tour.name, 'Renamed Cup');
+    assert.equal(tour.description, 'd'); // preserved from setupTournament
+  });
+  it('403s for non-owner', async () => {
+    const owner = uniq('put_owner3');
+    const { id, code } = await setupTournament(owner);
+    const other = uniq('put_other3');
+    await makeUser(other, other);
+    const res = await request(getApp()).put('/api/bilac/tournaments', { name: 'HACK' }, { 'x-user-id': other, 'x-tournament-id': id, 'x-tournament-code': code });
+    assert.equal(res.status, 403);
+  });
+});
+
+describe('DELETE /api/bilac/tournaments/:id', () => {
+  it('403s for non-owner', async () => {
+    const owner = uniq('del_owner1');
+    const { id, code } = await setupTournament(owner);
+    const other = uniq('del_other1');
+    await makeUser(other, other);
+    const res = await request(getApp()).delete(`/api/bilac/tournaments/${id}`, undefined, { 'x-user-id': other, 'x-tournament-id': id, 'x-tournament-code': code });
+    assert.equal(res.status, 403);
+    assert.ok(db.getBiLacTournament(id)); // still exists
+  });
+  it('owner cascade-deletes tournament + players', async () => {
+    const owner = uniq('del_owner2');
+    const { id, code } = await setupTournament(owner);
+    const p = await request(getApp()).post('/api/bilac/players', { name: 'Plink' }, { 'x-user-id': owner, 'x-tournament-id': id, 'x-tournament-code': code });
+    assert.equal(p.status, 200);
+    const res = await request(getApp()).delete(`/api/bilac/tournaments/${id}`, undefined, { 'x-user-id': owner, 'x-tournament-id': id, 'x-tournament-code': code });
+    assert.equal(res.status, 200);
+    assert.ok(!db.getBiLacTournament(id));
+    const remaining = db.getAllBiLacPlayers().filter((x: any) => x.tournamentId === id);
+    assert.equal(remaining.length, 0);
+  });
+});
+
+describe('PUT /api/bilac/players/:id', () => {
+  async function makePlayer(owner: string, tid: string, code: string, name: string) {
+    const p = await request(getApp()).post('/api/bilac/players', { name }, { 'x-user-id': owner, 'x-tournament-id': tid, 'x-tournament-code': code });
+    return p.body.id;
+  }
+  it('401s without x-user-id', async () => {
+    const owner = uniq('plr_owner0');
+    const { id, code } = await setupTournament(owner);
+    const pid = await makePlayer(owner, id, code, 'A');
+    const res = await request(getApp()).put(`/api/bilac/players/${pid}`, { name: 'B' }, { 'x-tournament-id': id, 'x-tournament-code': code });
+    assert.equal(res.status, 401);
+  });
+  it('renames a player (regenerates avatar)', async () => {
+    const owner = uniq('plr_owner1');
+    const { id, code } = await setupTournament(owner);
+    const pid = await makePlayer(owner, id, code, 'Ace');
+    const res = await request(getApp()).put(`/api/bilac/players/${pid}`, { name: 'KingAce' }, { 'x-user-id': owner, 'x-tournament-id': id, 'x-tournament-code': code });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.name, 'KingAce');
+    assert.ok(res.body.avatar.includes('KingAce'));
+  });
+  it('400s on empty name', async () => {
+    const owner = uniq('plr_owner2');
+    const { id, code } = await setupTournament(owner);
+    const pid = await makePlayer(owner, id, code, 'A');
+    const res = await request(getApp()).put(`/api/bilac/players/${pid}`, { name: '' }, { 'x-user-id': owner, 'x-tournament-id': id, 'x-tournament-code': code });
+    assert.equal(res.status, 400);
+  });
+  it('400s on duplicate name', async () => {
+    const owner = uniq('plr_owner3');
+    const { id, code } = await setupTournament(owner);
+    await makePlayer(owner, id, code, 'Dup');
+    const pid2 = await makePlayer(owner, id, code, 'Other');
+    const res = await request(getApp()).put(`/api/bilac/players/${pid2}`, { name: 'Dup' }, { 'x-user-id': owner, 'x-tournament-id': id, 'x-tournament-code': code });
+    assert.equal(res.status, 400);
+  });
+});

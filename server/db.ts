@@ -1093,7 +1093,7 @@ class Database {
   // flag. Does NOT expose `code` (sensitive — caller must POST /access to join).
   // Powers both "Tất cả giải" and "Giải tham gia" tabs from a single fetch.
   getAllBiLacTournamentsWithMembership(userId: string): Array<{
-    id: string; name: string; description?: string; createdAt: number;
+    id: string; slug?: string; name: string; description?: string; createdAt: number;
     memberCount: number; isMember: boolean;
   }> {
     const tournaments = drizzleDb.select().from(bilacTournamentsTable).all();
@@ -1114,6 +1114,7 @@ class Database {
 
     return tournaments.map(t => ({
       id: t.id,
+      slug: t.slug ?? undefined,
       name: t.name,
       description: t.description || undefined,
       createdAt: t.createdAt,

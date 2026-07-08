@@ -3,7 +3,9 @@ import type { Request, Response, NextFunction } from 'express';
 import { db } from '../db.ts';
 
 export function getRequestUserId(req: any): string | null {
-  const uid = req.headers['x-user-id'] || req.body?.userId || req.query?.userId;
+  // Header-only — never trust body/query for identity (impersonation risk).
+  // Mirrors worker/src/lib/auth.ts. requireLoggedIn still validates the user exists.
+  const uid = req.headers['x-user-id'];
   return typeof uid === 'string' && uid.trim() ? uid.trim() : null;
 }
 

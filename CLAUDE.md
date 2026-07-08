@@ -61,12 +61,14 @@
 - [x] AI bulk-add players into Bi Lắc tournament (`/api/ai/parse-players`).
 - [x] AI summary → events prefill in futsal MyLeague matches (`/api/ai/parse-events`). **Does NOT auto-save**; user reviews then clicks Save.
 - [x] Bi Lắc permission gate: require login; mutations require tournament membership. Auto-join owner on create.
+- [x] Bi Lắc invite members by `username` (owner-only) + remove members.
+- [x] Bi Lắc manager CRUD: edit tournament (name/description), delete tournament (cascade), rename player. FINISHED-match deletion owner-only. Both backends.
+- [x] All `/api/ai/*` routes gated behind `requireLoggedIn` (worker + express parity); worker `/parse-events` ported.
 
 ### Planned
-- [ ] Bi Lắc invite members by `username`.
 - [ ] Replace SHA-256 password hashing with bcrypt + per-user salt.
 - [ ] Move `database.db` to a configurable path (`DB_FILE` env).
-- [ ] Migration to vitest for backend tests (currently smoke via curl).
+- [ ] Migrate server test suite from `node:test` to vitest (worker already on vitest).
 
 ## Code Quality Gates
 
