@@ -310,8 +310,10 @@ export default function BiLacArena({
     setViewOnlyError(null);
     setViewOnlyData(null);
     const headers: Record<string, string> = {};
-    const cachedUserId = localStorage.getItem('auth_userId');
-    if (cachedUserId) headers['x-user-id'] = cachedUserId;
+    // Prefer the live prop (re-triggers on login); fall back to cached id so
+    // the very first render (profile still loading) still sends the header.
+    const uid = loggedInUserId || localStorage.getItem('auth_userId');
+    if (uid) headers['x-user-id'] = uid;
     fetch(`/api/bilac/tournaments/by-slug/${slug}`, { headers })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
@@ -330,7 +332,10 @@ export default function BiLacArena({
         if (!cancelled) setViewOnlyError('Lỗi kết nối máy chủ.');
       });
     return () => { cancelled = true; };
-  }, [viewMode, slug]);
+    // Re-run when the user logs in (loggedInUserId flips null → id) so the
+    // header is sent and isMember is re-evaluated.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, slug, loggedInUserId]);
 
   // Logout/switch tournament
   const handleLogoutTournament = () => {
