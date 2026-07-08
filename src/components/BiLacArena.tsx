@@ -1126,19 +1126,7 @@ export default function BiLacArena({
           </div>
         )}
 
-        {/* 1 QUICK ACTION BUTTON — join-by-code is on each card and via modal */}
-        <div className="grid grid-cols-1 gap-4 mb-8" id="portal_quick_actions">
-          <button
-            id="btn_quick_create"
-            onClick={() => setCreateModalOpen(true)}
-            className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 rounded-2xl shadow-md cursor-pointer transition-colors"
-          >
-            <Plus className="w-5 h-5" />
-            Tạo giải đấu mới
-          </button>
-        </div>
-
-        {/* TAB FILTER */}
+        {/* TAB FILTER + CREATE BUTTON (small, on the same row) */}
         <div className="flex items-center justify-between gap-3 mb-4">
           <div className="inline-flex bg-stone-200/60 p-1 rounded-xl" role="tablist">
             <button
@@ -1168,6 +1156,15 @@ export default function BiLacArena({
               Giải tham gia ({allTournaments.filter((t: any) => t.isMember).length})
             </button>
           </div>
+          <button
+            id="btn_quick_create"
+            onClick={() => setCreateModalOpen(true)}
+            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm cursor-pointer transition-colors shrink-0"
+            aria-label="Tạo giải đấu mới"
+          >
+            <Plus className="w-4 h-4" />
+            Tạo giải đấu mới
+          </button>
         </div>
 
         {/* TOURNAMENT CARD GRID */}
