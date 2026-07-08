@@ -57,6 +57,13 @@ OPENAI_BASE_URL = "https://api.minimax.io/v1"
 # Set this + the frontend VITE_GOOGLE_CLIENT_ID to enable "Sign in with Google".
 # Public value (embedded in the client too) — not a secret.
 GOOGLE_CLIENT_ID = "1037610366569-vfi2uh8sfhqd9qlfj4orgjobutfj044c.apps.googleusercontent.com"
-# Brevo transactional email (sender). BREVO_API_KEY stays a Worker secret.
-BREVO_SENDER_EMAIL = ""
-BREVO_SENDER_NAME = "Game Tuổi Thơ"
+# Resend transactional email (sender domain gametuoitho.space must be verified
+# in Resend). RESEND_API_KEY stays a Worker secret.
+MAIL_FROM_EMAIL = "no-reply@gametuoitho.space"
+MAIL_FROM_NAME = "Game Tuổi Thơ"
+# Max OTP emails/day across all auth endpoints (under Resend's 100/day free tier).
+OTP_DAILY_CAP = "80"
+
+# Prune unverified accounts (>24h) every 6h — anti D1 bloat from signup spam.
+[triggers]
+crons = ["13 */6 * * *"]

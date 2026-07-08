@@ -1,31 +1,35 @@
 // worker/src/lib/email.ts
 import type { Bindings } from '../db';
 
-// Send an OTP via Brevo transactional email. Falls back to a console log when
-// BREVO_API_KEY is unset (local dev / not-yet-configured) so the auth flows
-// still work end-to-end without a Brevo account.
+// Send an OTP via Resend transactional email. Falls back to a console log when
+// RESEND_API_KEY is unset (local dev) so the auth flows still work e2e without
+// a Resend account. Production requires MAIL_FROM_EMAIL's domain be verified
+// inside Resend (gametuoitho.space → Resend → Domains).
 export async function sendOtpEmail(
   env: Bindings,
   toEmail: string,
   displayName: string,
   otp: string,
 ): Promise<boolean> {
-  const apiKey = env.BREVO_API_KEY;
+  const apiKey = env.RESEND_API_KEY;
   if (!apiKey) {
-    console.log(`[dev OTP — Brevo not configured] ${toEmail}: ${otp}`);
+    console.log(`[dev OTP — Resend not configured] ${toEmail}: ${otp}`);
     return true;
   }
-  const senderEmail = env.BREVO_SENDER_EMAIL || 'no-reply@gametuoitho.space';
-  const senderName = env.BREVO_SENDER_NAME || 'Game Tuổi Thơ';
+  const senderEmail = env.MAIL_FROM_EMAIL || 'no-reply@gametuoitho.space';
+  const senderName = env.MAIL_FROM_NAME || 'Game Tuổi Thơ';
   try {
-    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { 'api-key': apiKey, 'Content-Type': 'application/json', accept: 'application/json' },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
-        sender: { email: senderEmail, name: senderName },
-        to: [{ email: toEmail, name: displayName }],
+        from: `${senderName} <${senderEmail}>`,
+        to: [toEmail],
         subject: `Mã xác thực Game Tuổi Thơ: ${otp}`,
-        htmlContent:
+        html:
           `<html><body style="font-family:system-ui,sans-serif;color:#1c1917">` +
           `<h2>Mã xác thực của bạn</h2>` +
           `<p>Xin chào <b>${displayName}</b>,</p>` +
@@ -35,9 +39,14 @@ export async function sendOtpEmail(
           `</body></html>`,
       }),
     });
-    return res.ok;
+    if (!res.ok) {
+      const body = await res.text();
+      console.error(`Resend send failed (${res.status}):`, body);
+      return false;
+    }
+    return true;
   } catch (err) {
-    console.error('Brevo send failed:', err);
+    console.error('Resend send failed:', err);
     return false;
   }
 }

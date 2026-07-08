@@ -16,9 +16,11 @@ export type Bindings = {
   GAMESERVER_DO: DurableObjectNamespace<GameServerDO>;
   GOOGLE_CLIENT_ID?: string;
   RATE_LIMITER: RateLimit;
-  BREVO_API_KEY?: string;
-  BREVO_SENDER_EMAIL?: string;
-  BREVO_SENDER_NAME?: string;
+  RESEND_API_KEY?: string;
+  MAIL_FROM_EMAIL?: string;
+  MAIL_FROM_NAME?: string;
+  OTP_DAILY_CAP?: string;
+  TURNSTILE_SECRET?: string;
 };
 
 export type Db = ReturnType<typeof createDb>;
