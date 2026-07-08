@@ -63,4 +63,22 @@ app.onError((err, c) => {
   console.error(`[${requestId}] Worker error:`, err);
   return c.json({ error: 'Internal error', requestId }, 500);
 });
-export default { fetch: app.fetch };
+// Cron: prune unverified accounts older than 24h — anti D1 bloat from signup
+// spam that cleared the rate limit but never verified. Runs every 6h (see
+// wrangler.toml [triggers]).
+async function pruneUnverified(env: Bindings) {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  await env.DB.prepare(
+    'DELETE FROM profiles WHERE id IN (SELECT id FROM users WHERE email_verified = 0 AND created_at < ?1)',
+  ).bind(cutoff).run();
+  await env.DB.prepare(
+    'DELETE FROM users WHERE email_verified = 0 AND created_at < ?1',
+  ).bind(cutoff).run();
+}
+
+export default {
+  fetch: app.fetch,
+  scheduled: async (_event: ScheduledEvent, env: Bindings, ctx: ExecutionContext) => {
+    ctx.waitUntil(pruneUnverified(env));
+  },
+};

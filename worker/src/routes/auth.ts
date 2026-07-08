@@ -30,9 +30,57 @@ const userPublic = (u: any) => ({
   displayName: u.displayName, avatar: u.avatar, role: u.role,
 });
 
+// Atomically bump today's OTP-send counter; returns the new count. Combined
+// with OTP_DAILY_CAP this bounds total daily Resend usage regardless of how
+// many IPs an attacker rotates past the per-IP rate limit.
+async function bumpDailyOtp(env: Bindings): Promise<number> {
+  const today = new Date().toISOString().slice(0, 10);
+  const row = await env.DB.prepare(
+    `INSERT INTO daily_counters (date, otp_sends) VALUES (?1, 1)
+     ON CONFLICT(date) DO UPDATE SET otp_sends = otp_sends + 1
+     RETURNING otp_sends`,
+  ).bind(today).first<{ otp_sends: number }>();
+  return row?.otp_sends ?? 1;
+}
+
+// Returns a 429 Response when the daily OTP cap is exceeded, else null.
+async function guardOtpCap(c: any): Promise<Response | null> {
+  const cap = Number(c.env.OTP_DAILY_CAP ?? 80);
+  if ((await bumpDailyOtp(c.env)) > cap) {
+    return c.json({ error: 'Hệ thống đã gửi quá nhiều mã OTP hôm nay. Vui lòng thử lại sau.' }, 429);
+  }
+  return null;
+}
+
+// Verify a Cloudflare Turnstile token server-side. Returns true (allow) when
+// TURNSTILE_SECRET is unset so local dev/preview isn't blocked; prod sets the
+// secret + sitekey to enforce.
+async function verifyTurnstile(c: any, token: string | undefined): Promise<boolean> {
+  const secret = c.env.TURNSTILE_SECRET;
+  if (!secret) return true;
+  if (!token) return false;
+  const form = new URLSearchParams();
+  form.append('secret', secret);
+  form.append('response', token);
+  const ip = c.req.header('cf-connecting-ip');
+  if (ip) form.append('remoteip', ip);
+  try {
+    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      body: form,
+    });
+    const data = await res.json<{ success: boolean }>();
+    return data.success === true;
+  } catch {
+    return false;
+  }
+}
+
 // Issue an OTP (hashed at rest), persist it, and email it. Used by register,
 // resend-otp, and forgot-password.
-async function issueOtp(c: any, user: any): Promise<void> {
+async function issueOtp(c: any, user: any): Promise<Response | null> {
+  const cap = await guardOtpCap(c);
+  if (cap) return cap;
   const otp = generateOtp();
   const otpHash = await sha256Hex(otp);
   const db = createDb(c.env);
@@ -43,17 +91,21 @@ async function issueOtp(c: any, user: any): Promise<void> {
     lastOtpAt: Date.now(),
   } as any).where(eq(usersTable.id, user.id));
   await sendOtpEmail(c.env, user.email, user.displayName, otp);
+  return null;
 }
 
 authRoute.post('/register', async (c) => {
   const rl = await ipRateLimit(c, 'register');
   if (rl) return rl;
-  const { username, password, email, displayName } = await c.req.json();
+  const { username, password, email, displayName, turnstileToken } = await c.req.json();
   if (!username || !password || !email || !displayName) {
     return c.json({ error: 'Vui lòng nhập đầy đủ thông tin đăng ký!' }, 400);
   }
   const pwCheck = validatePassword(password);
   if (!pwCheck.ok) return c.json({ error: pwCheck.error! }, 400);
+  if (!(await verifyTurnstile(c, turnstileToken))) {
+    return c.json({ error: 'Xác thực chống bot thất bại. Vui lòng làm mới và thử lại.' }, 400);
+  }
 
   const tu = username.trim().toLowerCase();
   const te = email.trim().toLowerCase();
@@ -63,6 +115,9 @@ authRoute.post('/register', async (c) => {
   if (existing.length) return c.json({ error: 'Tên tài khoản này đã tồn tại!' }, 400);
   const byEmail = await db.select().from(usersTable).where(eq(usersTable.email, te)).all();
   if (byEmail.length) return c.json({ error: 'Email này đã được đăng ký!' }, 400);
+
+  const cap = await guardOtpCap(c);
+  if (cap) return cap;
 
   const userId = 'user_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
   const passwordHash = await sha256Hex(password);
@@ -74,7 +129,7 @@ authRoute.post('/register', async (c) => {
     id: userId, username: tu, email: te, passwordHash,
     displayName: displayName.trim(), avatar, role: 'user',
     otp: otpHash, otpExpires: Date.now() + OTP_TTL_MS,
-    otpAttempts: 0, lastOtpAt: Date.now(), emailVerified: 0,
+    otpAttempts: 0, lastOtpAt: Date.now(), emailVerified: 0, createdAt: Date.now(),
   } as any);
   await db.insert(profilesTable).values({
     id: userId, displayName: displayName.trim(), avatar,
@@ -118,18 +173,23 @@ authRoute.post('/resend-otp', async (c) => {
   if (user.lastOtpAt && Date.now() - user.lastOtpAt < OTP_RESEND_MIN_MS) {
     return c.json({ error: 'Vui lòng đợi 60 giây trước khi yêu cầu mã mới.' }, 429);
   }
-  await issueOtp(c, user);
+  const otpErr = await issueOtp(c, user);
+  if (otpErr) return otpErr;
   return c.json({ success: true, message: 'Đã gửi mã OTP mới về email.' });
 });
 
 authRoute.post('/login', async (c) => {
   const { username, password } = await c.req.json();
   if (!username || !password) {
-    return c.json({ error: 'Vui lòng điền đầy đủ tên tài khoản và mật khẩu!' }, 400);
+    return c.json({ error: 'Vui lòng điền đầy đủ email/tên đăng nhập và mật khẩu!' }, 400);
   }
   const db = createDb(c.env);
-  const rows = await db.select().from(usersTable).where(eq(usersTable.username, username)).all();
-  const user = rows[0];
+  // Login accepts either email or username (backward-compatible with existing
+  // accounts that log in by handle).
+  const input = String(username).trim().toLowerCase();
+  const byEmail = await db.select().from(usersTable).where(eq(usersTable.email, input)).all();
+  const byUsername = await db.select().from(usersTable).where(eq(usersTable.username, input)).all();
+  const user = byEmail[0] ?? byUsername[0];
   if (!user) return c.json({ error: 'Tài khoản không tồn tại!' }, 400);
   if (user.isGoogleUser) return c.json({ error: 'Tài khoản này đăng nhập bằng Google SSO!' }, 400);
 
@@ -221,7 +281,8 @@ authRoute.post('/forgot-password', async (c) => {
   if (user.lastOtpAt && Date.now() - user.lastOtpAt < OTP_RESEND_MIN_MS) {
     return c.json({ error: 'Vui lòng đợi 60 giây trước khi yêu cầu mã mới.' }, 429);
   }
-  await issueOtp(c, user);
+  const otpErr = await issueOtp(c, user);
+  if (otpErr) return otpErr;
   return c.json({ success: true, message: 'Mã OTP đã được gửi về email của bạn.' });
 });
 
@@ -252,6 +313,8 @@ authRoute.post('/reset-password', async (c) => {
 });
 
 authRoute.post('/quick-login', async (c) => {
+  const rl = await ipRateLimit(c, 'quicklogin');
+  if (rl) return rl;
   const { userId, displayName } = await c.req.json();
   if (!userId) return c.json({ error: 'Thiếu mã định danh người dùng (userId)!' }, 400);
   const db = createDb(c.env);
@@ -261,15 +324,8 @@ authRoute.post('/quick-login', async (c) => {
   let profile = profileRows[0];
   let user = userRows[0];
 
-  if (profile && !user) {
-    const passwordHash = await sha256Hex('password123');
-    user = {
-      id: userId, username: userId, email: `${userId}@gametuoitho.space`,
-      passwordHash, displayName: profile.displayName, avatar: profile.avatar,
-      role: userId === 'user_a' ? 'admin' : 'user',
-    } as typeof user;
-    await db.insert(usersTable).values(user as any);
-  }
+  // (Removed password123 users-row auto-create — was an account-minting hole.
+  //  quick-login now only bootstraps/returns a profile, never a login row.)
 
   if (!profile) {
     profile = {

@@ -14,6 +14,12 @@ export const usersTable = sqliteTable('users', {
   lastOtpAt: integer('last_otp_at').default(0),
   isGoogleUser: integer('is_google_user'),
   emailVerified: integer('email_verified').default(0),
+  createdAt: integer('created_at').notNull().default(0),
+});
+
+export const dailyCountersTable = sqliteTable('daily_counters', {
+  date: text('date').primaryKey(),
+  otpSends: integer('otp_sends').notNull().default(0),
 });
 
 export const profilesTable = sqliteTable('profiles', {

@@ -27,6 +27,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   const [registerUsername, setRegisterUsername] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
+  const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
   const [registerDisplayName, setRegisterDisplayName] = useState('');
   
   // Forgot Password / OTP fields
@@ -48,6 +49,12 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   // and only when a client id is configured via VITE_GOOGLE_CLIENT_ID.
   const googleBtnRef = useRef<HTMLDivElement>(null);
   const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? '';
+
+  // Cloudflare Turnstile on the register form (anti bot-signup). Empty sitekey
+  // = widget hidden + BE skips verify, so dev/preview stays unblocked.
+  const turnstileSitekey = (import.meta.env.VITE_TURNSTILE_SITEKEY as string | undefined) ?? '';
+  const turnstileRef = useRef<HTMLDivElement>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
 
   const handleGoogleCredential = async (response: any) => {
     const credential = response?.credential;
@@ -98,6 +105,34 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     }
   }, [mode, googleClientId]);
 
+  useEffect(() => {
+    if (mode !== 'register' || !turnstileSitekey) return;
+    const w = window as any;
+    const render = () => {
+      if (!w.turnstile || !turnstileRef.current) return;
+      w.turnstile.render(turnstileRef.current, {
+        sitekey: turnstileSitekey,
+        action: 'turnstile-spin-v1',
+        callback: (t: string) => setTurnstileToken(t),
+        'expired-callback': () => setTurnstileToken(null),
+        'error-callback': () => setTurnstileToken(null),
+      });
+    };
+    if (w.turnstile) { render(); return; }
+    if (!document.getElementById('cf-turnstile-script')) {
+      const s = document.createElement('script');
+      s.id = 'cf-turnstile-script';
+      s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+      s.async = true;
+      s.defer = true;
+      s.onload = render;
+      document.head.appendChild(s);
+    } else {
+      const t = setTimeout(render, 300);
+      return () => clearTimeout(t);
+    }
+  }, [mode, turnstileSitekey]);
+
   if (!isOpen) return null;
 
   const triggerBeep = (freq: number, type: 'sine' | 'triangle' | 'square' | 'sawtooth' = 'sine', duration = 0.08) => {
@@ -113,6 +148,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     setMode(newMode);
     setErrorMsg(null);
     setSuccessMsg(null);
+    setTurnstileToken(null);
   };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
@@ -159,6 +195,16 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
       triggerBeep(180, 'sawtooth', 0.15);
       return;
     }
+    if (registerPassword !== registerConfirmPassword) {
+      setErrorMsg('Mật khẩu nhập lại không khớp!');
+      triggerBeep(180, 'sawtooth', 0.15);
+      return;
+    }
+    if (turnstileSitekey && !turnstileToken) {
+      setErrorMsg('Vui lòng hoàn tất xác thực chống bot (Turnstile)!');
+      triggerBeep(180, 'sawtooth', 0.15);
+      return;
+    }
 
     setLoading(true);
     setErrorMsg(null);
@@ -170,7 +216,8 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
           username: registerUsername,
           password: registerPassword,
           email: registerEmail,
-          displayName: registerDisplayName
+          displayName: registerDisplayName,
+          turnstileToken: turnstileToken || undefined
         })
       });
       const data = await res.json();
@@ -393,12 +440,12 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
                 className="flex flex-col gap-4"
               >
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-extrabold uppercase tracking-wider text-stone-400">Tên tài khoản</label>
+                  <label className="text-[10px] font-extrabold uppercase tracking-wider text-stone-400">Email hoặc Tên Đăng Nhập</label>
                   <div className="relative">
                     <User className="absolute left-3 top-3 w-4 h-4 text-stone-500" />
-                    <input 
-                      type="text" 
-                      placeholder="Nhập tên tài khoản..."
+                    <input
+                      type="text"
+                      placeholder="Nhập email hoặc tên đăng nhập..."
                       value={loginUsername}
                       onChange={(e) => setLoginUsername(e.target.value)}
                       className="w-full bg-stone-950 border border-stone-800 rounded-xl py-2.5 pl-10 pr-4 text-xs text-stone-100 placeholder-stone-600 focus:outline-none focus:border-orange-500"
@@ -526,6 +573,26 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
                     />
                   </div>
                 </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-extrabold uppercase tracking-wider text-stone-400">Nhập Lại Mật Khẩu</label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-2.5 w-4 h-4 text-stone-500" />
+                    <input
+                      type="password"
+                      placeholder="Nhập lại mật khẩu..."
+                      value={registerConfirmPassword}
+                      onChange={(e) => setRegisterConfirmPassword(e.target.value)}
+                      className="w-full bg-stone-950 border border-stone-800 rounded-xl py-2 pl-10 pr-4 text-xs text-stone-100 placeholder-stone-600 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+                </div>
+
+                {turnstileSitekey && (
+                  <div className="flex justify-center min-h-[65px]">
+                    <div ref={turnstileRef} />
+                  </div>
+                )}
 
                 <button
                   type="submit"
