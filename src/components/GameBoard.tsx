@@ -39,7 +39,7 @@ export default function GameBoard({
   useEffect(() => {
     // Dynamic self-referential WebSocket URL
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
+    const wsUrl = `${protocol}//${window.location.host}/api/ws`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 

@@ -2,6 +2,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from './schema';
 import type { MatchDO } from './do/match';
 import type { MatchmakingDO } from './do/matchmaking';
+import type { GameServerDO } from './do/gameserver';
 
 export type Bindings = {
   DB: D1Database;
@@ -12,6 +13,7 @@ export type Bindings = {
   OPENAI_BASE_URL?: string;
   MATCH_DO: DurableObjectNamespace<MatchDO>;
   MATCHMAKING_DO: DurableObjectNamespace<MatchmakingDO>;
+  GAMESERVER_DO: DurableObjectNamespace<GameServerDO>;
   GOOGLE_CLIENT_ID?: string;
 };
 

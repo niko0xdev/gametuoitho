@@ -199,7 +199,7 @@ export default function App() {
     if (!userId) return;
     // Re-establish socket whenever userId changes
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
+    const wsUrl = `${protocol}//${window.location.host}/api/ws`;
     const ws = new WebSocket(wsUrl);
     lobbyWsRef.current = ws;
 
