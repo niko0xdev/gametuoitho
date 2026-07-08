@@ -18,7 +18,30 @@ export default function App() {
   const [userId, setUserId] = useState<string | null>(() => localStorage.getItem('auth_userId'));
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
-  const [activeView, setActiveView] = useState<'catalog' | 'tournaments' | 'daily' | 'replays' | 'leaderboards' | 'bilac' | 'myleague'>('catalog');
+  // Initial view is read from the URL so deep-links like /bilac survive a refresh.
+  const [activeView, setActiveViewRaw] = useState<'catalog' | 'tournaments' | 'daily' | 'replays' | 'leaderboards' | 'bilac' | 'myleague'>(() => {
+    if (typeof window !== 'undefined' && window.location.pathname === '/bilac') return 'bilac';
+    return 'catalog';
+  });
+
+  // Wrap setActiveView so the URL stays in sync. Other views collapse to "/".
+  const setActiveView = (view: typeof activeView) => {
+    setActiveViewRaw(view);
+    const targetPath = view === 'bilac' ? '/bilac' : '/';
+    if (typeof window !== 'undefined' && window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+  };
+
+  // Browser back/forward — reverse-map pathname → view.
+  useEffect(() => {
+    const onPopState = () => {
+      const next = window.location.pathname === '/bilac' ? 'bilac' : 'catalog';
+      setActiveViewRaw((prev) => (prev === next ? prev : next));
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   const handleLoginSuccess = (userProfile: UserProfile) => {
     const previousUserId = localStorage.getItem('auth_userId');

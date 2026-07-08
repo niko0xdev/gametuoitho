@@ -5,13 +5,7 @@ import { requireLoggedIn } from './_middleware.ts';
 export function handleListBilacTournaments(req: Request, res: Response) {
   const uid = requireLoggedIn(req, res);
   if (!uid) return;
-  const tours = db.getBiLacTournamentsForUser(uid).map(t => ({
-    id: t.id,
-    name: t.name,
-    description: t.description,
-    createdAt: t.createdAt
-  }));
-  res.json(tours);
+  res.json(db.getAllBiLacTournamentsWithMembership(uid));
 }
 
 export function handleAccessBilacTournament(req: Request, res: Response) {

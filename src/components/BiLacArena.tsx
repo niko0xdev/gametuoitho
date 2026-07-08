@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Users, 
-  UserPlus, 
-  Swords, 
-  Trophy, 
-  Calendar, 
+import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import {
+  Users,
+  UserPlus,
+  Swords,
+  Trophy,
+  Calendar,
   History,
   Plus,
   Minus,
@@ -111,6 +112,30 @@ export default function BiLacArena({
   const [members, setMembers] = useState<Array<{ userId: string; username: string; displayName: string; role: 'owner' | 'member'; joinedAt: number }>>([]);
   const [inviteUsername, setInviteUsername] = useState<string>('');
   const [myMemberRole, setMyMemberRole] = useState<'owner' | 'member' | null>(null);
+
+  // Portal tabs: 'all' = default; 'joined' = chỉ giải user là thành viên.
+  const [portalTab, setPortalTab] = useState<'all' | 'joined'>('all');
+  // Modal state — 2 quick-action buttons (Tạo / Tham gia) open these.
+  const [joinModalOpen, setJoinModalOpen] = useState<boolean>(false);
+  const [createModalOpen, setCreateModalOpen] = useState<boolean>(false);
+  // When a tournament card is clicked, preselect it in the Join modal.
+  const [preselectJoinTournamentId, setPreselectJoinTournamentId] = useState<string>('');
+
+  // List shape from /api/bilac/tournaments. Includes memberCount + isMember.
+  type PortalTournament = {
+    id: string; name: string; description?: string; createdAt: number;
+    memberCount: number; isMember: boolean;
+  };
+
+  // Sort + filter the portal grid. Members first (across both tabs), then createdAt desc.
+  const visibleTournaments = useMemo<PortalTournament[]>(() => {
+    const filtered = portalTab === 'joined'
+      ? allTournaments.filter((t: any) => t.isMember)
+      : allTournaments;
+    return [...filtered].sort((a: any, b: any) =>
+      Number(b.isMember) - Number(a.isMember) || b.createdAt - a.createdAt
+    );
+  }, [allTournaments, portalTab]);
 
   // Custom fetch function with tournament credentials + current user id in headers.
   // Always attaches x-user-id when logged in (covers /api/bilac/* AND other backend routes
@@ -472,6 +497,7 @@ export default function BiLacArena({
         setNewTournamentCode('');
         setNewTournamentDesc('');
         setIsCreatingTournament(false);
+        setCreateModalOpen(false);
         playBeep(880, 'sine', 0.25);
       }
     } catch (err) {
@@ -1038,6 +1064,7 @@ export default function BiLacArena({
       );
     }
     return (
+    <>
       <div className="w-full max-w-4xl mx-auto px-4 py-12 animate-fade-in" id="bilac_portal_root">
         <div className="text-center mb-10">
           <div className="flex justify-center mb-4">
@@ -1049,7 +1076,7 @@ export default function BiLacArena({
             Đấu Trường Bi Lắc
           </h1>
           <p className="text-stone-500 max-w-xl mx-auto text-sm sm:text-base">
-            Chào mừng bạn đến với Đấu Trường Bi Lắc! Đây là hệ thống quản lý giải đấu bảo mật. Vui lòng chọn giải đấu và nhập mã code truy cập để tham gia, hoặc tạo giải đấu mới cho văn phòng của bạn.
+            Chào mừng bạn đến với Đấu Trường Bi Lắc! Khám phá các giải đấu đang diễn ra, tham gia bằng mã code, hoặc tạo giải mới cho văn phòng của bạn.
           </p>
         </div>
 
@@ -1090,179 +1117,144 @@ export default function BiLacArena({
           </div>
         )}
 
-        {/* MY TOURNAMENTS SECTION */}
-        {myTournaments.length > 0 && (
-          <div className="mb-10 bg-orange-50/40 border border-orange-100 p-6 rounded-2xl shadow-xs" id="my_tournaments_section">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="p-1.5 bg-orange-100 text-orange-600 rounded-lg animate-bounce">
-                <Trophy className="w-5 h-5" />
-              </span>
-              <h2 className="text-lg font-bold text-stone-900 font-sans">Các Giải Đấu Bạn Đang Tham Gia</h2>
-            </div>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {myTournaments.map((tour) => (
-                <div
-                  key={tour.id}
-                  onClick={() => handleQuickAccessTournament(tour)}
-                  className="bg-white p-4 rounded-xl border border-stone-200 hover:border-orange-500 hover:shadow-md transition-all cursor-pointer flex justify-between items-start group relative"
-                  id={`my_tour_${tour.id}`}
-                >
-                  <div className="pr-8">
-                    <h3 className="font-bold text-stone-900 group-hover:text-orange-600 transition-colors flex items-center gap-1.5 text-sm sm:text-base">
-                      {tour.name}
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    </h3>
-                    {tour.description && (
-                      <p className="text-xs text-stone-500 mt-1 line-clamp-1">{tour.description}</p>
-                    )}
-                    <div className="flex items-center gap-2 mt-3 text-[10px] text-stone-400 font-mono">
-                      <span>Mã: ****</span>
-                      <span>•</span>
-                      <span>Hoạt động: {formatDate(tour.lastAccessed || Date.now())}</span>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-1 absolute top-3 right-3">
-                    <button
-                      onClick={(e) => handleRemoveFromMyTournaments(tour.id, e)}
-                      className="p-1 text-stone-400 hover:text-red-500 hover:bg-stone-50 rounded transition-colors"
-                      title="Xóa khỏi danh sách lưu"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* 2 QUICK ACTION BUTTONS */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8" id="portal_quick_actions">
+          <button
+            id="btn_quick_join"
+            onClick={() => { setPreselectJoinTournamentId(''); setJoinModalOpen(true); }}
+            className="flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white font-bold py-4 rounded-2xl shadow-md cursor-pointer transition-colors"
+          >
+            <UserCheck className="w-5 h-5" />
+            🔑 Tham gia giải đấu bằng mã code
+          </button>
+          <button
+            id="btn_quick_create"
+            onClick={() => setCreateModalOpen(true)}
+            className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 rounded-2xl shadow-md cursor-pointer transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            ➕ Tạo giải đấu mới
+          </button>
+        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* JOIN TOURNAMENT */}
-          <div className="bg-white p-6 sm:p-8 rounded-2xl border border-stone-200 shadow-sm flex flex-col justify-between" id="portal_join_card">
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-                  <Trophy className="w-5 h-5" />
-                </span>
-                <h2 className="text-xl font-bold text-stone-900">Vào Giải Đấu Sẵn Có</h2>
-              </div>
-              <p className="text-stone-500 text-sm mb-6">
-                Chọn giải đấu từ danh sách và nhập mã code truy cập do ban tổ chức hoặc đồng nghiệp cung cấp.
-              </p>
-
-              <form onSubmit={handleAccessTournament} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2">Chọn Giải Đấu</label>
-                  {allTournaments.length === 0 ? (
-                    <div className="text-sm text-stone-400 py-2 italic">Không có giải đấu nào. Hãy khởi tạo một giải mới!</div>
-                  ) : (
-                    <select
-                      id="select_tournament"
-                      value={selectedTournamentId}
-                      onChange={(e) => setSelectedTournamentId(e.target.value)}
-                      className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-stone-800 font-medium"
-                    >
-                      {allTournaments.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2">Mã Code Truy Cập</label>
-                  <input
-                    id="input_access_code"
-                    type="password"
-                    placeholder="Ví dụ: 1234..."
-                    value={accessCodeInput}
-                    onChange={(e) => setAccessCodeInput(e.target.value)}
-                    className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-stone-800 placeholder-stone-400 font-mono tracking-widest text-center"
-                  />
-                </div>
-
-                <button
-                  id="btn_join_tournament"
-                  type="submit"
-                  disabled={loading || allTournaments.length === 0}
-                  className="w-full py-3 px-4 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-semibold cursor-pointer shadow-sm transition-colors flex justify-center items-center gap-2 disabled:bg-stone-200 disabled:text-stone-400 disabled:cursor-not-allowed mt-6"
-                >
-                  <UserCheck className="w-5 h-5" />
-                  Tham Gia
-                </button>
-              </form>
-            </div>
-          </div>
-
-          {/* CREATE TOURNAMENT */}
-          <div className="bg-white p-6 sm:p-8 rounded-2xl border border-stone-200 shadow-sm flex flex-col justify-between" id="portal_create_card">
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
-                  <Plus className="w-5 h-5" />
-                </span>
-                <h2 className="text-xl font-bold text-stone-900">Tạo Giải Đấu Mới</h2>
-              </div>
-              <p className="text-stone-500 text-sm mb-6">
-                Tạo một giải đấu riêng tư mới và chia sẻ mã code truy cập với các đồng nghiệp để cùng thi đấu.
-              </p>
-
-              <form onSubmit={handleCreateTournament} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2">Tên Giải Đấu</label>
-                  <input
-                    id="input_new_tour_name"
-                    type="text"
-                    placeholder="Ví dụ: Giải Bi Lắc Văn Phòng Q3..."
-                    value={newTournamentName}
-                    onChange={(e) => setNewTournamentName(e.target.value)}
-                    className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-stone-800"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2">Mã Code Bảo Mật</label>
-                  <input
-                    id="input_new_tour_code"
-                    type="text"
-                    placeholder="Ví dụ: 9999..."
-                    value={newTournamentCode}
-                    onChange={(e) => setNewTournamentCode(e.target.value)}
-                    className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-stone-800 font-mono tracking-widest text-center"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2">Mô Tả Ngắn</label>
-                  <input
-                    id="input_new_tour_desc"
-                    type="text"
-                    placeholder="Ví dụ: Khối kỹ thuật và vận hành..."
-                    value={newTournamentDesc}
-                    onChange={(e) => setNewTournamentDesc(e.target.value)}
-                    className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-stone-800"
-                  />
-                </div>
-
-                <button
-                  id="btn_create_tournament"
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold cursor-pointer shadow-sm transition-colors flex justify-center items-center gap-2 mt-6 disabled:bg-stone-200"
-                >
-                  <Plus className="w-5 h-5" />
-                  Khởi Tạo & Tham Gia
-                </button>
-              </form>
-            </div>
+        {/* TAB FILTER */}
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div className="inline-flex bg-stone-200/60 p-1 rounded-xl" role="tablist">
+            <button
+              id="tab_all_tournaments"
+              onClick={() => setPortalTab('all')}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors cursor-pointer ${
+                portalTab === 'all'
+                  ? 'bg-white text-stone-900 shadow-sm'
+                  : 'text-stone-500 hover:text-stone-700'
+              }`}
+              role="tab"
+              aria-selected={portalTab === 'all'}
+            >
+              Tất cả giải ({allTournaments.length})
+            </button>
+            <button
+              id="tab_my_tournaments"
+              onClick={() => setPortalTab('joined')}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors cursor-pointer ${
+                portalTab === 'joined'
+                  ? 'bg-white text-stone-900 shadow-sm'
+                  : 'text-stone-500 hover:text-stone-700'
+              }`}
+              role="tab"
+              aria-selected={portalTab === 'joined'}
+            >
+              Giải tham gia ({allTournaments.filter((t: any) => t.isMember).length})
+            </button>
           </div>
         </div>
+
+        {/* TOURNAMENT CARD GRID */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" id="tournaments_grid">
+          {visibleTournaments.length === 0 ? (
+            <div className="col-span-full bg-white border border-dashed border-stone-300 rounded-2xl p-8 text-center text-stone-500 text-sm">
+              {portalTab === 'joined'
+                ? 'Bạn chưa tham gia giải đấu nào. Hãy tạo mới hoặc tham gia bằng mã code.'
+                : 'Chưa có giải đấu nào. Hãy là người đầu tiên tạo một giải!'}
+            </div>
+          ) : (
+            visibleTournaments.map((tour: any) => (
+              <div
+                key={tour.id}
+                onClick={() => {
+                  if (tour.isMember) {
+                    handleQuickAccessTournament(tour);
+                  } else {
+                    setPreselectJoinTournamentId(tour.id);
+                    setSelectedTournamentId(tour.id);
+                    setJoinModalOpen(true);
+                  }
+                }}
+                className={`relative bg-white p-5 rounded-2xl border shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col gap-2 ${
+                  tour.isMember ? 'border-orange-300 ring-1 ring-orange-200' : 'border-stone-200 hover:border-orange-400'
+                }`}
+                id={`portal_tour_${tour.id}`}
+              >
+                {tour.isMember && (
+                  <span
+                    id={`portal_tour_${tour.id}_member_badge`}
+                    className="absolute top-3 right-3 inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-bold uppercase tracking-wider"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Đang tham gia
+                  </span>
+                )}
+                <h3 className="font-bold text-stone-900 text-base pr-24 truncate">{tour.name}</h3>
+                {tour.description && (
+                  <p className="text-xs text-stone-500 line-clamp-2">{tour.description}</p>
+                )}
+                <div className="flex items-center gap-2 mt-auto pt-2 text-[10px] text-stone-400 font-mono">
+                  <Users className="w-3 h-3" />
+                  <span>{tour.memberCount} thành viên</span>
+                  <span>•</span>
+                  <span>Tạo: {formatDate(tour.createdAt)}</span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
-    );
+
+      {/* JOIN MODAL */}
+      <AnimatePresence>
+        {joinModalOpen && (
+          <JoinTournamentModal
+            tournaments={allTournaments}
+            preselectedId={preselectJoinTournamentId}
+            accessCodeInput={accessCodeInput}
+            setAccessCodeInput={setAccessCodeInput}
+            selectedTournamentId={selectedTournamentId}
+            setSelectedTournamentId={setSelectedTournamentId}
+            loading={loading}
+            onClose={() => setJoinModalOpen(false)}
+            onSubmit={(e) => { handleAccessTournament(e); setJoinModalOpen(false); }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* CREATE MODAL */}
+      <AnimatePresence>
+        {createModalOpen && (
+          <CreateTournamentModal
+            name={newTournamentName}
+            setName={setNewTournamentName}
+            code={newTournamentCode}
+            setCode={setNewTournamentCode}
+            desc={newTournamentDesc}
+            setDesc={setNewTournamentDesc}
+            loading={loading}
+            onClose={() => setCreateModalOpen(false)}
+            onSubmit={(e) => { handleCreateTournament(e); }}
+          />
+        )}
+      </AnimatePresence>
+    </>
+  );
   }
 
   return (
@@ -2291,5 +2283,189 @@ export default function BiLacArena({
         </button>
       </div>
     </div>
+  );
+}
+
+// ---------- Modals (inline; no new files — YAGNI) ----------
+
+function PortalModalBackdrop({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  // Esc to close + click-outside dismiss.
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      onClick={onClose}
+      className="fixed inset-0 z-40 bg-stone-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 16, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 16, scale: 0.97 }}
+        transition={{ duration: 0.18 }}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+      >
+        {children}
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function JoinTournamentModal({
+  tournaments, preselectedId, accessCodeInput, setAccessCodeInput,
+  selectedTournamentId, setSelectedTournamentId, loading, onClose, onSubmit,
+}: {
+  tournaments: any[];
+  preselectedId: string;
+  accessCodeInput: string;
+  setAccessCodeInput: (v: string) => void;
+  selectedTournamentId: string;
+  setSelectedTournamentId: (v: string) => void;
+  loading: boolean;
+  onClose: () => void;
+  onSubmit: (e: React.FormEvent) => void;
+}) {
+  // Local select state: prefer preselect, else fallback to first tournament or current.
+  const initialId = preselectedId || selectedTournamentId || (tournaments[0]?.id ?? '');
+  const [localId, setLocalId] = React.useState<string>(initialId);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    setSelectedTournamentId(localId);
+    onSubmit(e);
+  };
+
+  return (
+    <PortalModalBackdrop onClose={onClose}>
+      <div className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-extrabold text-stone-900 flex items-center gap-2">
+            <Trophy className="w-5 h-5 text-orange-500" /> Tham gia giải đấu
+          </h3>
+          <button onClick={onClose} className="p-1 hover:bg-stone-100 rounded-lg cursor-pointer" aria-label="Đóng">
+            <X className="w-5 h-5 text-stone-500" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2">Chọn giải đấu</label>
+            {tournaments.length === 0 ? (
+              <div className="text-sm text-stone-400 py-2 italic">Chưa có giải đấu nào.</div>
+            ) : (
+              <select
+                id="select_tournament"
+                value={localId}
+                onChange={(e) => setLocalId(e.target.value)}
+                className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-stone-800 font-medium"
+              >
+                {tournaments.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2">Mã code truy cập</label>
+            <input
+              id="input_access_code"
+              type="password"
+              placeholder="Nhập mã code..."
+              value={accessCodeInput}
+              onChange={(e) => setAccessCodeInput(e.target.value)}
+              autoFocus
+              className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-stone-800 placeholder-stone-400 font-mono tracking-widest text-center"
+            />
+          </div>
+          <button
+            id="btn_join_tournament"
+            type="submit"
+            disabled={loading || tournaments.length === 0 || !accessCodeInput.trim()}
+            className="w-full py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-bold cursor-pointer transition-colors flex justify-center items-center gap-2 disabled:bg-stone-200 disabled:text-stone-400 disabled:cursor-not-allowed"
+          >
+            <UserCheck className="w-5 h-5" />
+            Tham gia
+          </button>
+        </form>
+      </div>
+    </PortalModalBackdrop>
+  );
+}
+
+function CreateTournamentModal({
+  name, setName, code, setCode, desc, setDesc, loading, onClose, onSubmit,
+}: {
+  name: string; setName: (v: string) => void;
+  code: string; setCode: (v: string) => void;
+  desc: string; setDesc: (v: string) => void;
+  loading: boolean; onClose: () => void;
+  onSubmit: (e: React.FormEvent) => void;
+}) {
+  const handleSubmit = (e: React.FormEvent) => {
+    onSubmit(e);
+  };
+  return (
+    <PortalModalBackdrop onClose={onClose}>
+      <div className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-extrabold text-stone-900 flex items-center gap-2">
+            <Plus className="w-5 h-5 text-emerald-500" /> Tạo giải đấu mới
+          </h3>
+          <button onClick={onClose} className="p-1 hover:bg-stone-100 rounded-lg cursor-pointer" aria-label="Đóng">
+            <X className="w-5 h-5 text-stone-500" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2">Tên giải đấu</label>
+            <input
+              id="input_new_tour_name"
+              type="text"
+              placeholder="Ví dụ: Giải Bi Lắc Văn Phòng Q3..."
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+              className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-stone-800"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2">Mã code bảo mật</label>
+            <input
+              id="input_new_tour_code"
+              type="text"
+              placeholder="Ví dụ: 9999..."
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-stone-800 font-mono tracking-widest text-center"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2">Mô tả ngắn</label>
+            <input
+              id="input_new_tour_desc"
+              type="text"
+              placeholder="Ví dụ: Khối kỹ thuật và vận hành..."
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-stone-800"
+            />
+          </div>
+          <button
+            id="btn_create_tournament"
+            type="submit"
+            disabled={loading || !name.trim() || !code.trim()}
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold cursor-pointer transition-colors flex justify-center items-center gap-2 disabled:bg-stone-200 disabled:text-stone-400 disabled:cursor-not-allowed"
+          >
+            <Plus className="w-5 h-5" />
+            Khởi tạo & tham gia
+          </button>
+        </form>
+      </div>
+    </PortalModalBackdrop>
   );
 }
