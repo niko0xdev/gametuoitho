@@ -84,6 +84,39 @@ export function handleCreateBilacTournament(req: Request, res: Response) {
   res.json({ success: true, tournament });
 }
 
+// Owner-only: rename a tournament and/or update its description. Code + slug
+// + createdAt are preserved. Mounted with requireBiLacOwner.
+export function handleUpdateBilacTournament(req: Request, res: Response) {
+  const tournamentId = (req as any).tournamentId;
+  const { name, description } = req.body;
+  if (!name || String(name).trim() === '') {
+    return res.status(400).json({ error: 'Tên giải đấu không được để trống!' });
+  }
+  const tour = db.getBiLacTournament(tournamentId);
+  if (!tour) {
+    return res.status(404).json({ error: 'Không tìm thấy giải đấu!' });
+  }
+  const updated = {
+    ...tour,
+    name: String(name).trim(),
+    description: description != null ? String(description).trim() : tour.description,
+  };
+  db.saveBiLacTournament(updated);
+  res.json({ success: true, tournament: { id: updated.id, slug: updated.slug, name: updated.name, description: updated.description || '', code: updated.code, createdAt: updated.createdAt } });
+}
+
+// Owner-only: cascade-delete the tournament and everything under it. Mounted
+// with requireBiLacOwner (validates code + ownership via x-tournament-id header).
+export function handleDeleteBilacTournament(req: Request, res: Response) {
+  const tournamentId = (req as any).tournamentId;
+  const tour = db.getBiLacTournament(tournamentId);
+  if (!tour) {
+    return res.status(404).json({ error: 'Không tìm thấy giải đấu!' });
+  }
+  db.deleteBiLacTournamentCascade(tournamentId);
+  res.json({ success: true });
+}
+
 // Public read-only endpoint keyed by slug. No login required. Mutations stay
 // gated by checkBiLacTournamentAccess + member check elsewhere.
 export function handleGetBilacTournamentBySlug(req: Request, res: Response) {
@@ -211,6 +244,29 @@ export function handleCreateBilacPlayer(req: Request, res: Response) {
   const player = { id, name: nameTrimmed, avatar, tournamentId };
   db.saveBiLacPlayer(player);
   res.json(player);
+}
+
+// Rename a player (regenerates the dicebear avatar from the new name). Any
+// member may edit. Mounted with requireBiLacMember.
+export function handleUpdateBilacPlayer(req: Request, res: Response) {
+  const playerId = req.params.id;
+  const tournamentId = (req as any).tournamentId;
+  const { name } = req.body;
+  if (!name || String(name).trim() === '') {
+    return res.status(400).json({ error: 'Tên người chơi không được để trống!' });
+  }
+  const nameTrimmed = String(name).trim();
+  const existing = db.getAllBiLacPlayers().find(p => p.id === playerId && p.tournamentId === tournamentId);
+  if (!existing) {
+    return res.status(404).json({ error: 'Không tìm thấy người chơi trong giải đấu này!' });
+  }
+  const dup = db.getAllBiLacPlayers().find(p => p.tournamentId === tournamentId && p.id !== playerId && p.name.toLowerCase() === nameTrimmed.toLowerCase());
+  if (dup) {
+    return res.status(400).json({ error: 'Tên người chơi đã tồn tại trong giải đấu này!' });
+  }
+  const updated = { ...existing, name: nameTrimmed, avatar: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(nameTrimmed)}` };
+  db.saveBiLacPlayer(updated);
+  res.json(updated);
 }
 
 export function handleDeleteBilacPlayer(req: Request, res: Response) {
