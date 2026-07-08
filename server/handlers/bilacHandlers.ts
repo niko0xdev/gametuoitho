@@ -12,20 +12,25 @@ export function handleAccessBilacTournament(req: Request, res: Response) {
   const uid = requireLoggedIn(req, res);
   if (!uid) return;
   const { tournamentId, code } = req.body;
-  if (!tournamentId || !code) {
-    return res.status(400).json({ error: 'Thiếu mã giải đấu hoặc mã code truy cập!' });
+  if (!tournamentId) {
+    return res.status(400).json({ error: 'Thiếu mã giải đấu!' });
   }
   const tour = db.getBiLacTournament(tournamentId);
   if (!tour) {
     return res.status(404).json({ error: 'Không tìm thấy giải đấu!' });
   }
+  // Members enter without the code (logout may have cleared their cached code).
+  // Return the code so the client can cache it for the gated routes' header check.
+  if (db.isBiLacTournamentMember(tournamentId, uid)) {
+    return res.json({ success: true, tournament: { id: tour.id, name: tour.name, description: tour.description }, code: tour.code });
+  }
+  if (!code) {
+    return res.status(400).json({ error: 'Thiếu mã code truy cập!' });
+  }
   if (tour.code !== code) {
     return res.status(403).json({ error: 'Mã truy cập không chính xác!' });
   }
-  if (!db.isBiLacTournamentMember(tournamentId, uid)) {
-    return res.status(403).json({ error: 'Bạn chưa được mời vào giải đấu này. Vui lòng liên hệ chủ giải để được thêm vào!' });
-  }
-  res.json({ success: true, tournament: { id: tour.id, name: tour.name, description: tour.description } });
+  res.status(403).json({ error: 'Bạn chưa được mời vào giải đấu này. Vui lòng liên hệ chủ giải để được thêm vào!' });
 }
 
 export function handleCreateBilacTournament(req: Request, res: Response) {

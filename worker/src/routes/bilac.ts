@@ -96,10 +96,24 @@ bilacRoute.post('/tournaments/access', async (c) => {
   if (!tournamentId) return c.json({ error: 'Thiếu mã giải đấu!' }, 400);
   const db = createDb(c.env);
   const rows = await db.select().from(bilacTournamentsTable).where(eq(bilacTournamentsTable.id, tournamentId)).all();
-  const tour = rows[0];
+  const tour = rows[0] as any;
   if (!tour) return c.json({ error: 'Không tìm thấy giải đấu!' }, 404);
-  if ((tour as any).code !== code) return c.json({ error: 'Mã truy cập không chính xác!' }, 403);
-  return c.json({ success: true, tournament: { id: tour.id, name: (tour as any).name, description: (tour as any).description } });
+
+  // A logged-in member enters without the code. Logout clears the client's
+  // cached code, so requiring it here would lock members out of their own
+  // tournaments. Membership is the authority; return the code so the client
+  // can cache it for the x-tournament-code header the gated routes still need.
+  const uid = c.req.header('x-user-id');
+  let isMember = false;
+  if (uid) {
+    const memberRows = await db.select().from(bilacTournamentMembersTable)
+      .where(eq(bilacTournamentMembersTable.tournamentId, tournamentId)).all();
+    isMember = memberRows.some((m: any) => m.userId === uid);
+  }
+  if (isMember || tour.code === code) {
+    return c.json({ success: true, tournament: { id: tour.id, name: tour.name, description: tour.description }, code: tour.code });
+  }
+  return c.json({ error: 'Mã truy cập không chính xác!' }, 403);
 });
 
 bilacRoute.post('/tournaments', requireLoggedIn(), async (c) => {

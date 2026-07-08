@@ -452,32 +452,30 @@ export default function BiLacArena({
     setError(null);
     setSuccessMsg(null);
     setLoading(true);
-    // Cache không lưu code nữa — nếu tour trong cache chưa có code, lấy code đã lưu riêng
-    // cho tour này (nếu có) hoặc yêu cầu nhập lại.
-    const code = tour.code || localStorage.getItem(`bilac_tournament_code_${tour.id}`) || '';
-    if (!code) {
-      setLoading(false);
-      setError('Vui lòng nhập mã code truy cập ở form bên dưới để vào giải đấu này.');
-      setSelectedTournamentId(tour.id);
-      return;
-    }
+    // Prefer the per-tournament cached code. If missing (logout clears it —
+    // see App.tsx), still call /access: the backend admits a verified member
+    // and returns the code so we can re-cache it. tour.code is never present
+    // here (the portal list never exposes it — see db.ts#getAllBiLacTournamentsWithMembership).
+    const cachedCode = tour.code || localStorage.getItem(`bilac_tournament_code_${tour.id}`) || '';
     try {
       const res = await bilacFetch('/api/bilac/tournaments/access', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tournamentId: tour.id,
-          code
-        })
+        body: JSON.stringify(cachedCode
+          ? { tournamentId: tour.id, code: cachedCode }
+          : { tournamentId: tour.id })
       });
       const data = await res.json();
       if (!res.ok) {
+        // Not a member / tournament gone — fall back to the access-code form.
         setError(data.error || `Không thể truy cập giải đấu "${tour.name}". Có thể mã truy cập đã bị đổi hoặc giải đấu không còn tồn tại!`);
+        setSelectedTournamentId(tour.id);
         playBeep(180, 'sawtooth', 0.3);
       } else {
+        const admittedCode = data.code || cachedCode;
         localStorage.setItem('bilac_tournament', JSON.stringify(data.tournament));
-        localStorage.setItem('bilac_tournament_code', code);
-        localStorage.setItem(`bilac_tournament_code_${tour.id}`, code);
+        localStorage.setItem('bilac_tournament_code', admittedCode);
+        localStorage.setItem(`bilac_tournament_code_${tour.id}`, admittedCode);
 
         // Update timestamp — KHÔNG lưu access code vào cache để tránh rò rỉ qua localStorage.
         const { code: _omit, ...tourNoCode } = tour;
