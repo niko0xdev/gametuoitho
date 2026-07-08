@@ -354,6 +354,8 @@ export default function BiLacArena({
     setCurrentTournament(null);
     setPlayers([]);
     setMatches([]);
+    setError(null);
+    setSuccessMsg(null);
     playBeep(220, 'sawtooth', 0.2);
   };
 
@@ -863,7 +865,8 @@ export default function BiLacArena({
         const updated = await res.json();
         setMatches(prev => prev.map(m => m.id === matchId ? updated : m));
         playBeep(1046, 'sine', 0.4);
-        setSuccessMsg(`Trận đấu đã kết thúc & tỷ số ${match.score1} - ${match.score2} đã được cộng vào bảng xếp hạng!`);
+        // Đọc tỷ số từ payload server vừa xác nhận (updated) thay vì closure `match` cũ.
+        setSuccessMsg(`Trận đấu đã kết thúc & tỷ số ${updated.score1} - ${updated.score2} đã được cộng vào bảng xếp hạng!`);
         setTimeout(() => setSuccessMsg(null), 4000);
 
         // Announce result in Vietnamese
@@ -1083,11 +1086,11 @@ export default function BiLacArena({
       });
     });
 
-    // Compute gd as wins - losses
+    // Compute gd as real goal difference (scored − conceded), not wins − losses.
     players.forEach(p => {
       const stats = statsMap[p.id];
       if (stats) {
-        stats.gd = stats.wins - stats.losses;
+        stats.gd = stats.goalsScored - stats.goalsConceded;
       }
     });
 
@@ -1334,6 +1337,9 @@ export default function BiLacArena({
             visibleTournaments.map((tour: any) => (
               <div
                 key={tour.id}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); (e.currentTarget as HTMLElement).click(); } }}
                 onClick={() => {
                   if (tour.isMember) {
                     handleQuickAccessTournament(tour);
@@ -1773,6 +1779,10 @@ export default function BiLacArena({
                     return (
                       <div
                         key={player.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={isSelected}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); (e.currentTarget as HTMLElement).click(); } }}
                         onClick={() => togglePlayerSelect(player.id)}
                         className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer select-none transition-all ${
                           isSelected 
@@ -2471,17 +2481,6 @@ export default function BiLacArena({
         </div>
       )}
 
-      {/* Floating Button */}
-      <div className="fixed bottom-6 right-6 z-50">
-        <button
-          onClick={() => { playBeep(659, 'sine', 0.15); setIsDonateModalOpen(true); }}
-          className="w-12 h-12 rounded-full bg-gradient-to-r from-rose-500 to-orange-500 text-white flex items-center justify-center shadow-2xl hover:scale-110 active:scale-95 transition-all duration-300 relative cursor-pointer border border-rose-400/20"
-          title="Donate mua server"
-        >
-          <span className="absolute inset-0 rounded-full bg-rose-500/40 animate-ping pointer-events-none"></span>
-          <Heart className="w-5 h-5 fill-white text-white relative z-10 animate-pulse" />
-        </button>
-      </div>
     </div>
   );
 }
