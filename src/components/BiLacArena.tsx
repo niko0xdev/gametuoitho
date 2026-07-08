@@ -821,15 +821,6 @@ export default function BiLacArena({
       score2 = Math.max(0, score2 + diff);
     }
 
-    if (diff > 0) {
-      playBeep(523, 'sine', 0.12);
-      const teamLabel = teamNum === 1 ? 'Đội Xanh' : 'Đội Đỏ';
-      speakText(`Vào! ${teamLabel} ghi bàn! Tỷ số hiện tại là Đội Xanh ${score1}, Đội Đỏ ${score2}.`);
-    } else {
-      playBeep(349, 'sine', 0.1);
-      speakText(`Hủy bàn thắng. Tỷ số quay lại Đội Xanh ${score1}, Đội Đỏ ${score2}.`);
-    }
-
     try {
       const res = await bilacFetch(`/api/bilac/matches/${matchId}/update`, {
         method: 'POST',
@@ -839,9 +830,22 @@ export default function BiLacArena({
       if (res.ok) {
         const updated = await res.json();
         setMatches(prev => prev.map(m => m.id === matchId ? updated : m));
+        // Chỉ phát âm thanh/lời nói sau khi server xác nhận — tránh báo "ghi bàn" falsely.
+        if (diff > 0) {
+          playBeep(523, 'sine', 0.12);
+          const teamLabel = teamNum === 1 ? 'Đội Xanh' : 'Đội Đỏ';
+          speakText(`Vào! ${teamLabel} ghi bàn! Tỷ số hiện tại là Đội Xanh ${updated.score1}, Đội Đỏ ${updated.score2}.`);
+        } else {
+          playBeep(349, 'sine', 0.1);
+          speakText(`Hủy bàn thắng. Tỷ số quay lại Đội Xanh ${updated.score1}, Đội Đỏ ${updated.score2}.`);
+        }
+      } else {
+        setError('Không ghi được bàn — mã giải đấu có thể đã đổi. Vui lòng vào lại giải đấu.');
+        playBeep(180, 'sawtooth', 0.2);
       }
     } catch (e) {
       console.error(e);
+      setError('Lỗi kết nối khi ghi bàn. Vui lòng thử lại.');
     }
   };
 
@@ -1145,6 +1149,23 @@ export default function BiLacArena({
         ) : (
           <ViewOnlyTournamentView data={viewOnlyData} />
         )}
+
+        {/* Render the join modal here too so the "Tham gia" button isn't a no-op in view-only mode. */}
+        <AnimatePresence>
+          {joinModalOpen && (
+            <JoinTournamentModal
+              tournaments={allTournaments.length ? allTournaments : (viewOnlyData ? [viewOnlyData] : [])}
+              preselectedId={viewOnlyData?.id || preselectJoinTournamentId}
+              accessCodeInput={accessCodeInput}
+              setAccessCodeInput={setAccessCodeInput}
+              selectedTournamentId={selectedTournamentId}
+              setSelectedTournamentId={setSelectedTournamentId}
+              loading={loading}
+              onClose={() => setJoinModalOpen(false)}
+              onSubmit={(e, id) => { handleAccessTournament(e, id); setJoinModalOpen(false); }}
+            />
+          )}
+        </AnimatePresence>
       </div>
     );
   }
