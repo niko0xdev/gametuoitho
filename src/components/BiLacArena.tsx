@@ -627,7 +627,7 @@ export default function BiLacArena({
     try {
       const res = await fetch('/api/ai/parse-players', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': loggedInUserId || localStorage.getItem('auth_userId') || '' },
         body: JSON.stringify({ text: aiBulkText }),
       });
       const data = await res.json();

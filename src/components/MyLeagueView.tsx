@@ -614,6 +614,7 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-user-id': userId,
         },
         body: JSON.stringify({ summary: aiRosterText }),
       });
@@ -999,7 +1000,7 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
       const awayTeam = selectedLeague.teams.find(t => t.id === editingMatch.away);
       const res = await fetch('/api/ai/parse-events', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
         body: JSON.stringify({
           summary: aiSummaryText,
           homeTeamName: homeTeam?.name || 'đội nhà',

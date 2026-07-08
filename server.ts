@@ -15,7 +15,7 @@ import { handleLeaderboardGlobal, handleLeaderboardByGame } from './server/handl
 import { handleListTournaments, handleCreateTournament, handleJoinTournament, handleGetTournamentByCode, handleGetTournament, handleStartTournament, handleLaunchTournamentMatch } from './server/handlers/tournamentHandlers.ts';
 import { handleGetChallenge, handleSubmitChallenge } from './server/handlers/challengeHandlers.ts';
 import { handleGetReplaysByUser, handleGetReplay } from './server/handlers/replayHandlers.ts';
-import { checkBiLacTournamentAccess, requireBiLacMember, requireBiLacOwner } from './server/handlers/_middleware.ts';
+import { checkBiLacTournamentAccess, requireBiLacMember, requireBiLacOwner, requireLoggedIn } from './server/handlers/_middleware.ts';
 import { handleListBilacTournaments, handleAccessBilacTournament, handleCreateBilacTournament, handleListBilacMembers, handleInviteBilacMember, handleRemoveBilacMember, handleGetBilacPlayers, handleCreateBilacPlayer, handleDeleteBilacPlayer, handleGetBilacMatches, handleCreateBilacMatch, handleUpdateBilacMatch, handleDeleteBilacMatch, handleGetBilacTournamentBySlug } from './server/handlers/bilacHandlers.ts';
 import { handleListLeagues, handleCreateLeague, handlePutLeague, handleDeleteLeague, handleGetLeaguePermissions, handleToggleLeaguePermission } from './server/handlers/leagueHandlers.ts';
 import { db } from './server/db.ts';
@@ -31,15 +31,21 @@ async function startServer() {
   // Standard express middlewares
   app.use(express.json());
 
+  // Gate AI routes — require login so anonymous callers can't burn OpenAI credits.
+  const aiRequireLogin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (!requireLoggedIn(req, res)) return; // requireLoggedIn already sent 401
+    next();
+  };
+
   // AI-powered roster parsing route (OpenAI-compatible)
-  app.post('/api/ai/parse-roster', handleParseRoster);
+  app.post('/api/ai/parse-roster', aiRequireLogin, handleParseRoster);
 
   // AI-powered bulk player names parser (for Bi Lắc arena)
-  app.post('/api/ai/parse-players', handleParsePlayers);
+  app.post('/api/ai/parse-players', aiRequireLogin, handleParsePlayers);
 
   // AI helper: parse a free-text match summary into structured events (futsal).
   // The route ONLY fills events — it does not persist; the client must review then save.
-  app.post('/api/ai/parse-events', handleParseEvents);
+  app.post('/api/ai/parse-events', aiRequireLogin, handleParseEvents);
 
   // 1. AUTHENTICATION & PROFILES (Module A)
   app.post('/api/auth/register', handleRegister);
