@@ -69,6 +69,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   // = widget hidden + BE skips verify, so dev/preview stays unblocked.
   const turnstileSitekey = (import.meta.env.VITE_TURNSTILE_SITEKEY as string | undefined) ?? '';
   const turnstileRef = useRef<HTMLDivElement>(null);
+  const turnstileWidgetIdRef = useRef<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
 
   const handleGoogleCredential = async (response: any) => {
@@ -136,7 +137,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     const w = window as any;
     const render = () => {
       if (!w.turnstile || !turnstileRef.current) return;
-      w.turnstile.render(turnstileRef.current, {
+      turnstileWidgetIdRef.current = w.turnstile.render(turnstileRef.current, {
         sitekey: turnstileSitekey,
         action: 'turnstile-spin-v1',
         callback: (t: string) => setTurnstileToken(t),
@@ -159,6 +160,16 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     }
   }, [mode, turnstileSitekey]);
 
+  // Reset the Turnstile widget + cached token so a consumed/expired token can't
+  // block a retry (siteverify rejects reused tokens as timeout-or-duplicate).
+  const resetTurnstile = () => {
+    const w = window as any;
+    if (w.turnstile && turnstileWidgetIdRef.current) {
+      try { w.turnstile.reset(turnstileWidgetIdRef.current); } catch { /* widget may be gone */ }
+    }
+    setTurnstileToken(null);
+  };
+
   if (!isOpen) return null;
 
   const handleSwitchMode = (newMode: AuthMode) => {
@@ -166,7 +177,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     setMode(newMode);
     setErrorMsg(null);
     setSuccessMsg(null);
-    setTurnstileToken(null);
+    resetTurnstile();
   };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
@@ -251,6 +262,9 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     } catch (err: any) {
       setErrorMsg(err.message);
       triggerBeep(150, 'sawtooth', 0.2);
+      // Failed register consumed the Turnstile token — reset so the user can retry
+      // with a corrected username/password without reloading the page.
+      resetTurnstile();
     } finally {
       setLoading(false);
     }
