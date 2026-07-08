@@ -507,7 +507,7 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
       if (updatedLeagues.length > prevLeagues.length) {
         // Created new league
         const newLeague = updatedLeagues[0];
-        const res = await fetch('/api/leagues', {
+        const res = await fetch(`/api/leagues?userId=${encodeURIComponent(userId)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newLeague)
@@ -518,7 +518,7 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
         // We find the modified league from updatedLeagues compared with current leagues array
         const changedLeague = updatedLeagues.find((ul, idx) => JSON.stringify(ul) !== JSON.stringify(prevLeagues[idx]));
         if (changedLeague) {
-          const res = await fetch(`/api/leagues/${changedLeague.id}`, {
+          const res = await fetch(`/api/leagues/${changedLeague.id}?userId=${encodeURIComponent(userId)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(changedLeague)
@@ -529,7 +529,7 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
         // Deleted league
         const deletedLeague = prevLeagues.find(l => !updatedLeagues.some(ul => ul.id === l.id));
         if (deletedLeague) {
-          const res = await fetch(`/api/leagues/${deletedLeague.id}`, {
+          const res = await fetch(`/api/leagues/${deletedLeague.id}?userId=${encodeURIComponent(userId)}`, {
             method: 'DELETE'
           });
           if (!res.ok) { rollback('Xoá giải đấu thất bại — đã hoàn tác thay đổi. Hãy thử lại.'); return; }

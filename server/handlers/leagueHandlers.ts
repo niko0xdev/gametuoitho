@@ -1,6 +1,21 @@
 import type { Request, Response } from 'express';
 import { db } from '../db.ts';
 
+// Mutating league routes require a permitted caller (mirrors handleListLeagues).
+function requireLeaguePermission(req: Request, res: Response): boolean {
+  const userId = (req.query.userId as string) || (req.headers['x-user-id'] as string) || req.body?.userId;
+  if (!userId) {
+    res.status(401).json({ error: 'Vui lòng đăng nhập để tiếp tục!' });
+    return false;
+  }
+  const perms = db.getLeaguePermissions();
+  if (perms[userId] !== true) {
+    res.status(403).json({ error: 'Quyền truy cập bị hạn chế' });
+    return false;
+  }
+  return true;
+}
+
 export function handleListLeagues(req: Request, res: Response) {
   const { userId } = req.query;
   if (userId) {
@@ -13,6 +28,7 @@ export function handleListLeagues(req: Request, res: Response) {
 }
 
 export function handleCreateLeague(req: Request, res: Response) {
+  if (!requireLeaguePermission(req, res)) return;
   const league = req.body;
   if (!league || !league.id || !league.name) {
     return res.status(400).json({ error: 'Dữ liệu giải đấu không hợp lệ!' });
@@ -22,6 +38,7 @@ export function handleCreateLeague(req: Request, res: Response) {
 }
 
 export function handlePutLeague(req: Request, res: Response) {
+  if (!requireLeaguePermission(req, res)) return;
   const league = req.body;
   if (!league || !league.id || !league.name) {
     return res.status(400).json({ error: 'Dữ liệu giải đấu không hợp lệ!' });
@@ -31,6 +48,7 @@ export function handlePutLeague(req: Request, res: Response) {
 }
 
 export function handleDeleteLeague(req: Request, res: Response) {
+  if (!requireLeaguePermission(req, res)) return;
   const { id } = req.params;
   db.deleteMyLeague(id);
   res.json({ success: true });

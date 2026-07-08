@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { db } from '../db.ts';
 import { roomManager } from '../roomManager.ts';
+import { requireLoggedIn } from './_middleware.ts';
 
 export function handleGetProfile(req: Request, res: Response) {
   const profile = roomManager.getOrInitializeProfile(req.params.userId);
@@ -15,6 +16,11 @@ export function handleGetOnlineUsers(req: Request, res: Response) {
 }
 
 export function handleUpdateProfile(req: Request, res: Response) {
+  const uid = requireLoggedIn(req, res);
+  if (!uid) return;
+  if (uid !== req.params.userId) {
+    return res.status(403).json({ error: 'Bạn không có quyền sửa profile của người khác.' });
+  }
   const { displayName, avatar } = req.body;
   const profile = roomManager.getOrInitializeProfile(req.params.userId);
   if (displayName) profile.displayName = displayName;
@@ -32,6 +38,11 @@ export function handleUpdateProfile(req: Request, res: Response) {
 }
 
 export function handleResetElo(req: Request, res: Response) {
+  const uid = requireLoggedIn(req, res);
+  if (!uid) return;
+  if (uid !== req.params.userId) {
+    return res.status(403).json({ error: 'Bạn không có quyền đặt lại Elo của người khác.' });
+  }
   const profile = roomManager.getOrInitializeProfile(req.params.userId);
   profile.elo = {
     caro: 1500,
