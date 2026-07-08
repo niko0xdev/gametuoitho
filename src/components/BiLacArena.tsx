@@ -156,7 +156,17 @@ export default function BiLacArena({
   // localStorage.auth_userId (single source of truth — see src/lib/api.ts#3-6).
   // Fall back to it so we don't 401 on the very first fetch.
   const bilacFetch = async (url: string, options: RequestInit = {}) => {
-    const tid = currentTournament?.id || localStorage.getItem('bilac_tournament') || '';
+    // `bilac_tournament` holds JSON.stringify(tournament), not the bare id —
+    // parse it. Sending the raw blob would put Vietnamese name chars into the
+    // x-tournament-id header and fetch() rejects non-ISO-8859-1 header values.
+    const storedTourId = (() => {
+      try {
+        return (JSON.parse(localStorage.getItem('bilac_tournament') || 'null') as { id?: string } | null)?.id || '';
+      } catch {
+        return '';
+      }
+    })();
+    const tid = currentTournament?.id || storedTourId;
     const code = localStorage.getItem('bilac_tournament_code') || '';
     const effectiveUserId = loggedInUserId || localStorage.getItem('auth_userId') || '';
     const headers: Record<string, string> = {
