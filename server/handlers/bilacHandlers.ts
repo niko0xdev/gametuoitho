@@ -44,8 +44,19 @@ export function handleCreateBilacTournament(req: Request, res: Response) {
     return res.status(400).json({ error: 'Tên giải đấu này đã tồn tại!' });
   }
   const id = 'tour-' + Date.now();
+  // Generate a unique 8-char base36 slug for the public /bilac/{slug} URL.
+  // Retry up to 5 times on collision (collision probability ~ 1e-9 at 100K rows).
+  let slug = db.generateBilacTournamentSlug();
+  for (let i = 0; i < 5; i++) {
+    if (!db.getBiLacTournamentBySlug(slug)) break;
+    if (i === 4) {
+      return res.status(500).json({ error: 'Không thể tạo slug, thử lại.' });
+    }
+    slug = db.generateBilacTournamentSlug();
+  }
   const tournament = {
     id,
+    slug,
     name: nameTrimmed,
     code: code.trim(),
     description: description ? description.trim() : '',
