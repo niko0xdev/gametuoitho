@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Trophy, Users, PlusCircle, Award, Calendar, Link, Play } from 'lucide-react';
 import { GAMES } from '../gamesData.ts';
+import { gameDisplayName } from '../lib/gameDisplayName.ts';
 import { Tournament } from '../types.ts';
 import { playRetroBeep } from './games/CaroBoard.tsx';
 
@@ -171,7 +172,7 @@ export default function TournamentsView({ userId, onJoinMatch, onSpectateMatch }
                 <Trophy className="text-yellow-500 w-4 h-4 sm:w-5 sm:h-5 shrink-0" /> {selectedT.name}
               </h2>
               <span className="text-xs text-stone-500 font-mono">
-                Bộ môn: <b>Cờ {GAMES.find(g => g.id === selectedT.gameId)?.name}</b>
+                Bộ môn: <b>{gameDisplayName(GAMES.find(g => g.id === selectedT.gameId))}</b>
               </span>
             </div>
 
@@ -391,7 +392,7 @@ export default function TournamentsView({ userId, onJoinMatch, onSpectateMatch }
                     className="bg-white border border-stone-300 rounded-lg text-xs py-2 px-3 cursor-pointer"
                   >
                     {activeGameList.map(g => (
-                      <option key={g.id} value={g.id}>Cờ {g.name}</option>
+                      <option key={g.id} value={g.id}>{gameDisplayName(g)}</option>
                     ))}
                   </select>
                 </div>
@@ -456,7 +457,7 @@ export default function TournamentsView({ userId, onJoinMatch, onSpectateMatch }
                       <h4 className="font-bold text-stone-800 tracking-tight group-hover:text-orange-500 transition-colors">
                         {tour.name}
                       </h4>
-                      <span className="text-[10px] text-stone-400 font-mono">Bộ môn: Cờ {GAMES.find(g => g.id === tour.gameId)?.name}</span>
+                      <span className="text-[10px] text-stone-400 font-mono">Bộ môn: {gameDisplayName(GAMES.find(g => g.id === tour.gameId))}</span>
                     </div>
                     <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider
                       ${tour.status === 'REGISTRATION' ? 'bg-blue-100 text-blue-800' : ''}

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { playRetroBeep } from './games/CaroBoard.tsx';
 import { History, Eye, Play, ArrowLeft, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import { GAMES } from '../gamesData.ts';
+import { gameDisplayName } from '../lib/gameDisplayName.ts';
 
 // Dynamic board imports to render exact states
 import CaroBoard from './games/CaroBoard.tsx';
@@ -168,7 +169,7 @@ export default function ReplayView({ userId }: ReplayViewProps) {
                 <History className="w-5 h-5 text-orange-500" /> Phát Lại Trận Đấu
               </h2>
               <span className="text-xs text-stone-500 font-mono">
-                Bộ môn: <b>Cờ {GAMES.find(g => g.id === selectedMatch.gameId)?.name}</b>
+                Bộ môn: <b>{gameDisplayName(GAMES.find(g => g.id === selectedMatch.gameId))}</b>
               </span>
             </div>
 

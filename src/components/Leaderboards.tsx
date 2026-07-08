@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Award, Trophy, User } from 'lucide-react';
 import { GAMES } from '../gamesData.ts';
+import { gameDisplayName } from '../lib/gameDisplayName.ts';
 
 interface LeaderboardPlayer {
   id: string;
@@ -57,7 +58,7 @@ export default function Leaderboards() {
           >
             <option value="global">Bảng Danh Vọng Toàn Cầu</option>
             {GAMES.filter(g => g.isRealTime).map(g => (
-              <option key={g.id} value={g.id}>Cờ {g.name}</option>
+              <option key={g.id} value={g.id}>{gameDisplayName(g)}</option>
             ))}
           </select>
         </div>
