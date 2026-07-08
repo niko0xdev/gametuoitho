@@ -97,3 +97,87 @@ aiRoute.post('/parse-players', requireLoggedIn(), async (c) => {
     return c.json({ error: 'Không thể tách tên bằng AI. Chi tiết: ' + (e.message || String(e)) }, 500);
   }
 });
+
+// Parse a free-text match summary into structured events (futsal MyLeague).
+// Prefill ONLY — the client reviews then saves; this route never persists.
+aiRoute.post('/parse-events', requireLoggedIn(), async (c) => {
+  const { summary, homeTeamName, awayTeamName, homePlayers, awayPlayers } = await c.req.json();
+  if (!summary || typeof summary !== 'string' || summary.trim() === '') {
+    return c.json({ error: 'Vui lòng nhập tóm tắt diễn biến trận đấu!' }, 400);
+  }
+  if (new TextEncoder().encode(summary).byteLength > MAX_SUMMARY_BYTES) {
+    return c.json({ error: `Nội dung vượt quá ${MAX_SUMMARY_BYTES / 1024} KB!` }, 413);
+  }
+  if (!c.env.OPENAI_API_KEY || !c.env.OPENAI_MODEL) {
+    return c.json({ error: 'Chưa cấu hình OPENAI_API_KEY/OPENAI_MODEL trên Worker secrets!' }, 500);
+  }
+
+  const safeHome = (typeof homeTeamName === 'string' && homeTeamName.trim()) || 'đội nhà';
+  const safeAway = (typeof awayTeamName === 'string' && awayTeamName.trim()) || 'đội khách';
+  const rosterInfo = [
+    `- Đội nhà ("home"): ${safeHome}. Cầu thủ: ${Array.isArray(homePlayers) && homePlayers.length ? homePlayers.join(', ') : '(không rõ)'}.`,
+    `- Đội khách ("away"): ${safeAway}. Cầu thủ: ${Array.isArray(awayPlayers) && awayPlayers.length ? awayPlayers.join(', ') : '(không rõ)'}.`,
+  ].join('\n');
+
+  const schema = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      events: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            type: { type: 'string', enum: ['goal', 'yellow', 'red'], description: "Loại sự kiện: 'goal' (bàn thắng), 'yellow' (thẻ vàng), 'red' (thẻ đỏ)." },
+            teamSide: { type: 'string', enum: ['home', 'away', 'unknown'], description: "Bên nào: 'home' (đội nhà), 'away' (đội khách), 'unknown' nếu không phân được." },
+            playerName: { type: 'string', description: 'Tên cầu thủ liên quan, để trống nếu không nêu.' },
+            minute: { type: 'integer', minimum: 0, maximum: 200, description: 'Phút diễn ra, bỏ qua nếu không nêu.' },
+            note: { type: 'string', description: 'Mô tả ngắn gốc từ văn bản (1 câu, tiếng Việt).' },
+          },
+          required: ['type', 'teamSide', 'playerName'],
+        },
+      },
+    },
+    required: ['events'],
+  };
+
+  try {
+    const result = await callStructured({
+      apiKey: c.env.OPENAI_API_KEY,
+      model: c.env.OPENAI_MODEL,
+      baseUrl: c.env.OPENAI_BASE_URL,
+      systemPrompt: `Bạn là trợ lý AI phân tích diễn biến trận đấu bóng đá/futsal. Nhiệm vụ: đọc văn bản tóm tắt tự do và trích xuất danh sách sự kiện (bàn thắng, thẻ vàng, thẻ đỏ). Với mỗi sự kiện:
+- Loại sự kiện: 'goal' (ghi bàn), 'yellow' (thẻ vàng), 'red' (thẻ đỏ).
+- Bên nào: 'home' nếu liên quan đội nhà, 'away' nếu đội khách, 'unknown' nếu văn bản không rõ.
+- Tên cầu thủ: chuẩn hoá trùng với roster nếu có thể, bỏ tiêu đề "Cầu thủ". Bỏ qua nếu không nêu.
+- Phút: là số nguyên 0-200, bỏ qua nếu không nêu.
+- Note: 1 câu tóm tắt gốc.
+Bỏ qua các thông tin khác (kết quả cuối, nhận xét chung, dự bị). Trả về JSON đúng schema.`,
+      userPrompt: `Thông tin hai đội:\n${rosterInfo}\n\nTóm tắt diễn biến trận đấu:\n"""\n${summary}\n"""`,
+      functionName: 'extract_match_events',
+      schema,
+    });
+
+    // Sanitize whatever the LLM returned (defense-in-depth — model may ignore enums).
+    const allowedTypes = new Set(['goal', 'yellow', 'red']);
+    const allowedSides = new Set(['home', 'away', 'unknown']);
+    const raw = (result as { events?: unknown }).events;
+    const cleanEvents = (Array.isArray(raw) ? raw : [])
+      .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object'
+        && allowedTypes.has(e.type as string) && allowedSides.has(e.teamSide as string))
+      .map((e) => ({
+        type: e.type,
+        teamSide: e.teamSide,
+        playerName: typeof e.playerName === 'string' ? e.playerName.trim() : '',
+        minute: typeof e.minute === 'number' && e.minute >= 0 && e.minute <= 200 ? e.minute : undefined,
+        note: typeof e.note === 'string' ? e.note.trim() : undefined,
+      }))
+      .filter((e) => e.teamSide !== 'unknown' || e.playerName);
+
+    return c.json({ events: cleanEvents });
+  } catch (e: any) {
+    console.error('AI error:', e);
+    return c.json({ error: 'Không thể phân tích diễn biến bằng AI. Chi tiết: ' + (e.message || String(e)) }, 500);
+  }
+});
