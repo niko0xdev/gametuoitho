@@ -50,8 +50,8 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   // the default so the button renders with zero config. VITE_GOOGLE_CLIENT_ID
   // still overrides it (e.g. a different OAuth client per environment).
   const googleBtnRef = useRef<HTMLDivElement>(null);
-  const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)
-    ?? '1037610366569-vfi2uh8sfhqd9qlfj4orgjobutfj044c.apps.googleusercontent.com';
+  const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim()
+    || '1037610366569-vfi2uh8sfhqd9qlfj4orgjobutfj044c.apps.googleusercontent.com';
 
   // Cloudflare Turnstile on the register form (anti bot-signup). Empty sitekey
   // = widget hidden + BE skips verify, so dev/preview stays unblocked.
@@ -101,6 +101,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
       s.async = true;
       s.defer = true;
       s.onload = render;
+      s.onerror = () => console.error('[GIS] Google Identity script failed to load');
       document.head.appendChild(s);
     } else {
       const t = setTimeout(render, 300);
