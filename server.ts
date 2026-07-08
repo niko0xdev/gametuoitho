@@ -16,7 +16,7 @@ import { handleListTournaments, handleCreateTournament, handleJoinTournament, ha
 import { handleGetChallenge, handleSubmitChallenge } from './server/handlers/challengeHandlers.ts';
 import { handleGetReplaysByUser, handleGetReplay } from './server/handlers/replayHandlers.ts';
 import { checkBiLacTournamentAccess, requireBiLacMember, requireBiLacOwner } from './server/handlers/_middleware.ts';
-import { handleListBilacTournaments, handleAccessBilacTournament, handleCreateBilacTournament, handleListBilacMembers, handleInviteBilacMember, handleRemoveBilacMember, handleGetBilacPlayers, handleCreateBilacPlayer, handleDeleteBilacPlayer, handleGetBilacMatches, handleCreateBilacMatch, handleUpdateBilacMatch, handleDeleteBilacMatch, handleGetBilacTournamentBySlug } from './server/handlers/bilacHandlers.ts';
+import { handleListBilacTournaments, handleAccessBilacTournament, handleCreateBilacTournament, handleUpdateBilacTournament, handleDeleteBilacTournament, handleListBilacMembers, handleInviteBilacMember, handleRemoveBilacMember, handleGetBilacPlayers, handleCreateBilacPlayer, handleUpdateBilacPlayer, handleDeleteBilacPlayer, handleGetBilacMatches, handleCreateBilacMatch, handleUpdateBilacMatch, handleDeleteBilacMatch, handleGetBilacTournamentBySlug } from './server/handlers/bilacHandlers.ts';
 import { handleListLeagues, handleCreateLeague, handlePutLeague, handleDeleteLeague, handleGetLeaguePermissions, handleToggleLeaguePermission } from './server/handlers/leagueHandlers.ts';
 import { db } from './server/db.ts';
 import { handleParseRoster, handleParsePlayers, handleParseEvents } from './server/handlers/aiHandlers.ts';
@@ -82,11 +82,14 @@ async function startServer() {
   app.get('/api/bilac/tournaments/by-slug/:slug', handleGetBilacTournamentBySlug);
   app.post('/api/bilac/tournaments/access', handleAccessBilacTournament);
   app.post('/api/bilac/tournaments', handleCreateBilacTournament);
+  app.put('/api/bilac/tournaments', requireBiLacOwner, handleUpdateBilacTournament);
+  app.delete('/api/bilac/tournaments/:id', requireBiLacOwner, handleDeleteBilacTournament);
   app.get('/api/bilac/tournaments/members', checkBiLacTournamentAccess, handleListBilacMembers);
   app.post('/api/bilac/tournaments/members', requireBiLacOwner, handleInviteBilacMember);
   app.delete('/api/bilac/tournaments/members/:userId', requireBiLacOwner, handleRemoveBilacMember);
   app.get('/api/bilac/players', checkBiLacTournamentAccess, handleGetBilacPlayers);
   app.post('/api/bilac/players', requireBiLacMember, handleCreateBilacPlayer);
+  app.put('/api/bilac/players/:id', requireBiLacMember, handleUpdateBilacPlayer);
   app.delete('/api/bilac/players/:id', requireBiLacMember, handleDeleteBilacPlayer);
   app.get('/api/bilac/matches', checkBiLacTournamentAccess, handleGetBilacMatches);
   app.post('/api/bilac/matches', requireBiLacMember, handleCreateBilacMatch);
