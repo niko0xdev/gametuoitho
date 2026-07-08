@@ -358,6 +358,14 @@ export default function BiLacArena({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode, slug, loggedInUserId]);
 
+  // Esc closes the edit-tournament modal (a11y).
+  useEffect(() => {
+    if (!editTournamentOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setEditTournamentOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editTournamentOpen]);
+
   // Logout/switch tournament
   const handleLogoutTournament = () => {
     localStorage.removeItem('bilac_tournament');
@@ -823,6 +831,7 @@ export default function BiLacArena({
         setCurrentTournament(null);
         setPlayers([]); setMatches([]); setMembers([]); setMyMemberRole(null);
         setLastVisitedTournament(null);
+        setLastCreatedSlug(null);
         setAllTournaments(prev => prev.filter(t => t.id !== deletedId));
         setMyTournaments(prev => prev.filter(t => t.id !== deletedId));
         setEditTournamentOpen(false);
@@ -2663,6 +2672,9 @@ export default function BiLacArena({
             onClick={() => setEditTournamentOpen(false)}
           >
             <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="edit_tour_title"
               className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md"
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -2670,16 +2682,18 @@ export default function BiLacArena({
               onClick={e => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-extrabold text-stone-900 flex items-center gap-2">
+                <h3 id="edit_tour_title" className="text-lg font-extrabold text-stone-900 flex items-center gap-2">
                   <Pencil className="w-5 h-5 text-orange-600" /> Sửa giải đấu
                 </h3>
                 <button onClick={() => setEditTournamentOpen(false)} className="text-stone-400 hover:text-stone-700 cursor-pointer">
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <label className="block text-xs font-bold text-stone-600 mb-1">Tên giải đấu</label>
+              <label className="block text-xs font-bold text-stone-600 mb-1" htmlFor="edit_tour_name">Tên giải đấu</label>
               <input
+                id="edit_tour_name"
                 type="text"
+                autoFocus
                 value={editTourName}
                 onChange={e => setEditTourName(e.target.value)}
                 className="w-full text-sm px-3 py-2 mb-3 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300"

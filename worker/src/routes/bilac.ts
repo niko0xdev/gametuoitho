@@ -47,7 +47,13 @@ const checkAccess = async (c: any, next: any) => {
   const rows = await db.select().from(bilacTournamentsTable).where(eq(bilacTournamentsTable.id, tournamentId)).all();
   if (!rows[0]) return c.json({ error: 'Không tìm thấy giải đấu này!' }, 404);
   if ((rows[0] as any).code !== code) return c.json({ error: 'Mã code truy cập không chính xác!' }, 403);
+  // Require login on every gated route (parity with express checkBiLacTournamentAccess).
+  const uid = c.req.header('x-user-id');
+  if (!uid) return c.json({ error: 'Vui lòng đăng nhập để tiếp tục!' }, 401);
+  const userRows = await db.select().from(usersTable).where(eq(usersTable.id, uid)).all();
+  if (!userRows[0]) return c.json({ error: 'Tài khoản không tồn tại!' }, 401);
   c.set('tournamentId', tournamentId);
+  c.set('userId', uid);
   await next();
 };
 
@@ -123,6 +129,12 @@ bilacRoute.post('/tournaments', requireLoggedIn(), async (c) => {
   if (!code || !code.trim()) return c.json({ error: 'Mã truy cập giải đấu không được để trống!' }, 400);
   const id = 'tour-' + Date.now();
   const db = createDb(c.env);
+  // Duplicate-name guard (parity with express handler).
+  const nameTrimmed = name.trim();
+  const allTours = await db.select().from(bilacTournamentsTable).all();
+  if (allTours.some((t: any) => (t.name || '').toLowerCase() === nameTrimmed.toLowerCase())) {
+    return c.json({ error: 'Tên giải đấu này đã tồn tại!' }, 400);
+  }
   // 8-char base36 slug for the public /bilac/{slug} view-only URL.
   const generateSlug = () => {
     const alphabet = '0123456789abcdefghijklmnopqrstuvwxyz';
@@ -163,8 +175,11 @@ bilacRoute.put('/tournaments', checkAccess, requireOwner, async (c: any) => {
   const { name, description } = await c.req.json();
   if (!name || !String(name).trim()) return c.json({ error: 'Tên giải đấu không được để trống!' }, 400);
   const nameTrimmed = String(name).trim();
-  const descTrimmed = description != null ? String(description).trim() : null;
   const db = createDb(c.env);
+  // Preserve existing description when the body omits it (parity with express).
+  const existingRows = await db.select().from(bilacTournamentsTable).where(eq(bilacTournamentsTable.id, tournamentId)).all();
+  const existing = existingRows[0] as any;
+  const descTrimmed = description != null ? String(description).trim() : (existing?.description ?? null);
   await db.update(bilacTournamentsTable).set({ name: nameTrimmed, description: descTrimmed } as any).where(eq(bilacTournamentsTable.id, tournamentId));
   return c.json({ success: true, tournament: { id: tournamentId, name: nameTrimmed, description: descTrimmed ?? '' } });
 });
@@ -172,6 +187,8 @@ bilacRoute.put('/tournaments', checkAccess, requireOwner, async (c: any) => {
 // Owner-only: cascade-delete the tournament and everything under it.
 bilacRoute.delete('/tournaments/:id', checkAccess, requireOwner, async (c: any) => {
   const tournamentId = c.get('tournamentId');
+  // URL :id must match the header-derived tournament (don't silently ignore it).
+  if (c.req.param('id') !== tournamentId) return c.json({ error: 'Tournament ID không khớp!' }, 400);
   const db = createDb(c.env);
   await db.delete(bilacMatchesTable).where(eq(bilacMatchesTable.tournamentId, tournamentId));
   await db.delete(bilacPlayersTable).where(eq(bilacPlayersTable.tournamentId, tournamentId));
@@ -325,9 +342,10 @@ bilacRoute.delete('/players/:id', checkAccess, async (c: any) => {
   const tournamentId = c.get('tournamentId');
   const db = createDb(c.env);
   const matches = await db.select().from(bilacMatchesTable).where(eq(bilacMatchesTable.tournamentId, tournamentId)).all();
-  const hasMatch = matches.some((m: any) =>
-    (m.team1 || '').includes(playerId) || (m.team2 || '').includes(playerId) || m.benched === playerId
-  );
+  // team1/team2 are JSON-stringified arrays — parse + exact match (substring .includes
+  // would false-positive: 'bl-12' matches '["bl-123"]').
+  const inTeam = (v: any) => { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) && a.includes(playerId); } catch { return false; } };
+  const hasMatch = matches.some((m: any) => inTeam(m.team1) || inTeam(m.team2) || m.benched === playerId);
   if (hasMatch) return c.json({ error: 'Không thể xóa người chơi này vì họ đã tham gia ít nhất một trận đấu!' }, 400);
   await db.delete(bilacPlayersTable).where(eq(bilacPlayersTable.id, playerId));
   return c.json({ success: true });
