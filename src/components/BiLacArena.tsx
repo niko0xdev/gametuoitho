@@ -24,7 +24,8 @@ import {
   Sparkles,
   Loader2,
   Shield,
-  LogIn
+  LogIn,
+  Pencil
 } from 'lucide-react';
 import { BiLacPlayer, BiLacMatch, UserProfile } from '../types';
 
@@ -122,6 +123,12 @@ export default function BiLacArena({
   const [members, setMembers] = useState<Array<{ userId: string; username: string; displayName: string; role: 'owner' | 'member'; joinedAt: number }>>([]);
   const [inviteUsername, setInviteUsername] = useState<string>('');
   const [myMemberRole, setMyMemberRole] = useState<'owner' | 'member' | null>(null);
+  // Edit/delete tournament (owner) + rename player (member) UI state.
+  const [editTournamentOpen, setEditTournamentOpen] = useState(false);
+  const [editTourName, setEditTourName] = useState('');
+  const [editTourDesc, setEditTourDesc] = useState('');
+  const [renamingPlayerId, setRenamingPlayerId] = useState<string | null>(null);
+  const [renamePlayerName, setRenamePlayerName] = useState('');
 
   // Portal tabs: 'all' = default; 'joined' = chỉ giải user là thành viên.
   const [portalTab, setPortalTab] = useState<'all' | 'joined'>('all');
@@ -731,6 +738,106 @@ export default function BiLacArena({
     } catch (e) {
       console.error(e);
       setError('Lỗi kết nối máy chủ!');
+    }
+  };
+
+  // Rename a player (member). PUT /api/bilac/players/:id.
+  const handleRenamePlayer = async (id: string) => {
+    const name = renamePlayerName.trim();
+    if (!name) { setError('Tên người chơi không được để trống!'); return; }
+    setError(null);
+    try {
+      const res = await bilacFetch(`/api/bilac/players/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setPlayers(prev => prev.map(p => (p.id === id ? { ...p, name: data.name, avatar: data.avatar } : p)));
+        setRenamingPlayerId(null);
+        setRenamePlayerName('');
+        playBeep(880, 'sine', 0.12);
+        setSuccessMsg(`Đã đổi tên thành "${data.name}".`);
+        setTimeout(() => setSuccessMsg(null), 3000);
+      } else {
+        setError(data.error || 'Không thể đổi tên người chơi!');
+        playBeep(220, 'sawtooth', 0.3);
+      }
+    } catch (e) {
+      console.error(e);
+      setError('Lỗi kết nối máy chủ!');
+    }
+  };
+
+  // Owner: update tournament name/description. PUT /api/bilac/tournaments.
+  const handleUpdateTournament = async () => {
+    if (!currentTournament) return;
+    const name = editTourName.trim();
+    if (!name) { setError('Tên giải đấu không được để trống!'); return; }
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await bilacFetch('/api/bilac/tournaments', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description: editTourDesc.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const updated = { id: currentTournament.id, name: data.tournament.name, description: data.tournament.description || '' };
+        setCurrentTournament(updated);
+        localStorage.setItem('bilac_tournament', JSON.stringify(updated));
+        setAllTournaments(prev => prev.map(t => (t.id === updated.id ? { ...t, name: updated.name, description: updated.description } : t)));
+        setMyTournaments(prev => prev.map(t => (t.id === updated.id ? { ...t, name: updated.name, description: updated.description } : t)));
+        setEditTournamentOpen(false);
+        playBeep(880, 'sine', 0.2);
+        setSuccessMsg('Đã cập nhật giải đấu.');
+        setTimeout(() => setSuccessMsg(null), 3000);
+      } else {
+        setError(data.error || 'Không thể cập nhật giải đấu!');
+        playBeep(220, 'sawtooth', 0.3);
+      }
+    } catch (e) {
+      console.error(e);
+      setError('Lỗi kết nối máy chủ!');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Owner: cascade-delete the tournament. DELETE /api/bilac/tournaments/:id.
+  const handleDeleteTournament = async () => {
+    if (!currentTournament) return;
+    if (!confirm(`Xoá toàn bộ giải "${currentTournament.name}"? Thành viên, người chơi, mọi trận đấu sẽ bị xoá vĩnh viễn và không thể khôi phục!`)) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await bilacFetch(`/api/bilac/tournaments/${currentTournament.id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const deletedId = currentTournament.id;
+        localStorage.removeItem('bilac_tournament');
+        localStorage.removeItem('bilac_tournament_code');
+        localStorage.removeItem(`bilac_tournament_code_${deletedId}`);
+        setCurrentTournament(null);
+        setPlayers([]); setMatches([]); setMembers([]); setMyMemberRole(null);
+        setLastVisitedTournament(null);
+        setAllTournaments(prev => prev.filter(t => t.id !== deletedId));
+        setMyTournaments(prev => prev.filter(t => t.id !== deletedId));
+        setEditTournamentOpen(false);
+        playBeep(330, 'triangle', 0.3);
+        setSuccessMsg('Đã xoá giải đấu.');
+        setTimeout(() => setSuccessMsg(null), 3000);
+      } else {
+        setError(data.error || 'Không thể xoá giải đấu!');
+        playBeep(220, 'sawtooth', 0.3);
+      }
+    } catch (e) {
+      console.error(e);
+      setError('Lỗi kết nối máy chủ!');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1454,6 +1561,26 @@ export default function BiLacArena({
             >
               Đổi giải đấu ➔
             </button>
+            {myMemberRole === 'owner' && (
+              <>
+                <button
+                  onClick={() => {
+                    setEditTourName(currentTournament.name);
+                    setEditTourDesc(currentTournament.description || '');
+                    setEditTournamentOpen(true);
+                  }}
+                  className="ml-1 text-[10px] text-orange-700 hover:text-orange-900 underline font-semibold transition-colors cursor-pointer uppercase tracking-wider flex items-center gap-1"
+                >
+                  <Pencil className="w-3 h-3" /> Sửa giải
+                </button>
+                <button
+                  onClick={handleDeleteTournament}
+                  className="ml-1 text-[10px] text-red-600 hover:text-red-800 underline font-semibold transition-colors cursor-pointer uppercase tracking-wider"
+                >
+                  Xoá giải
+                </button>
+              </>
+            )}
             {(() => {
               const slug = allTournaments.find((t: any) => t.id === currentTournament.id)?.slug || lastCreatedSlug;
               if (!slug) return null;
@@ -1978,18 +2105,48 @@ export default function BiLacArena({
               <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
                 {players.map(p => (
                   <div key={p.id} className="flex items-center justify-between p-2 bg-stone-50 rounded-xl border border-stone-100 hover:border-stone-200 transition-all">
-                    <div className="flex items-center gap-2 truncate">
-                      <img src={p.avatar} className="w-7 h-7 rounded-full bg-stone-200 border border-stone-300" alt="Avatar" />
-                      <span className="text-xs font-bold text-stone-800 truncate">{p.name}</span>
-                    </div>
-                    {/* Only allow deleting if it's not a seed id or if they want to clean up */}
-                    <button
-                      onClick={() => handleDeletePlayer(p.id, p.name)}
-                      className="text-stone-400 hover:text-red-500 p-1 rounded-md hover:bg-red-50 cursor-pointer transition-all"
-                      title="Xóa người chơi"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {renamingPlayerId === p.id ? (
+                      <>
+                        <input
+                          autoFocus
+                          value={renamePlayerName}
+                          onChange={e => setRenamePlayerName(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') handleRenamePlayer(p.id); if (e.key === 'Escape') { setRenamingPlayerId(null); setRenamePlayerName(''); } }}
+                          className="flex-1 min-w-0 text-xs font-bold px-2 py-1 border border-orange-300 rounded bg-white text-stone-800 focus:outline-none focus:ring-2 focus:ring-orange-300"
+                        />
+                        <div className="flex items-center gap-1 ml-2 shrink-0">
+                          <button onClick={() => handleRenamePlayer(p.id)} className="text-emerald-600 hover:text-emerald-800 p-1 rounded-md hover:bg-emerald-50 cursor-pointer" title="Lưu">
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => { setRenamingPlayerId(null); setRenamePlayerName(''); }} className="text-stone-400 hover:text-stone-700 p-1 rounded-md hover:bg-stone-100 cursor-pointer" title="Hủy">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 truncate">
+                          <img src={p.avatar} className="w-7 h-7 rounded-full bg-stone-200 border border-stone-300" alt="Avatar" />
+                          <span className="text-xs font-bold text-stone-800 truncate">{p.name}</span>
+                        </div>
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          <button
+                            onClick={() => { setRenamingPlayerId(p.id); setRenamePlayerName(p.name); }}
+                            className="text-stone-400 hover:text-orange-500 p-1 rounded-md hover:bg-orange-50 cursor-pointer transition-all"
+                            title="Đổi tên người chơi"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeletePlayer(p.id, p.name)}
+                            className="text-stone-400 hover:text-red-500 p-1 rounded-md hover:bg-red-50 cursor-pointer transition-all"
+                            title="Xóa người chơi"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -2494,6 +2651,66 @@ export default function BiLacArena({
           </p>
         </div>
       )}
+
+      {/* EDIT TOURNAMENT MODAL (owner) */}
+      <AnimatePresence>
+        {editTournamentOpen && currentTournament && (
+          <motion.div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setEditTournamentOpen(false)}
+          >
+            <motion.div
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md"
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-extrabold text-stone-900 flex items-center gap-2">
+                  <Pencil className="w-5 h-5 text-orange-600" /> Sửa giải đấu
+                </h3>
+                <button onClick={() => setEditTournamentOpen(false)} className="text-stone-400 hover:text-stone-700 cursor-pointer">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <label className="block text-xs font-bold text-stone-600 mb-1">Tên giải đấu</label>
+              <input
+                type="text"
+                value={editTourName}
+                onChange={e => setEditTourName(e.target.value)}
+                className="w-full text-sm px-3 py-2 mb-3 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300"
+              />
+              <label className="block text-xs font-bold text-stone-600 mb-1">Mô tả (tuỳ chọn)</label>
+              <input
+                type="text"
+                value={editTourDesc}
+                onChange={e => setEditTourDesc(e.target.value)}
+                className="w-full text-sm px-3 py-2 mb-5 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleUpdateTournament}
+                  disabled={loading}
+                  className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-sm font-bold py-2.5 rounded-lg cursor-pointer transition-colors flex items-center justify-center gap-2"
+                >
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Lưu thay đổi
+                </button>
+                <button
+                  onClick={() => setEditTournamentOpen(false)}
+                  className="px-4 bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm font-bold py-2.5 rounded-lg cursor-pointer transition-colors"
+                >
+                  Hủy
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

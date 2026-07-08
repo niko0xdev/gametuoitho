@@ -1126,6 +1126,15 @@ class Database {
     drizzleDb.delete(bilacTournamentsTable).where(eq(bilacTournamentsTable.id, id)).run();
   }
 
+  // Cascade delete: remove all matches, players, members, then the tournament
+  // row itself. Used by the owner-only DELETE /tournaments/:id route.
+  deleteBiLacTournamentCascade(id: string): void {
+    drizzleDb.delete(bilacMatchesTable).where(eq(bilacMatchesTable.tournamentId, id)).run();
+    drizzleDb.delete(bilacPlayersTable).where(eq(bilacPlayersTable.tournamentId, id)).run();
+    drizzleDb.delete(bilacTournamentMembersTable).where(eq(bilacTournamentMembersTable.tournamentId, id)).run();
+    drizzleDb.delete(bilacTournamentsTable).where(eq(bilacTournamentsTable.id, id)).run();
+  }
+
   // BiLac Tournament Members
   saveBiLacTournamentMember(member: { id: string; tournamentId: string; userId: string; username: string; displayName: string; role: 'owner' | 'member'; joinedAt: number; }): void {
     drizzleDb.insert(bilacTournamentMembersTable)

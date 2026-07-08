@@ -157,6 +157,29 @@ bilacRoute.post('/tournaments', requireLoggedIn(), async (c) => {
   return c.json({ success: true, tournament: { id, slug, name: name.trim(), code: code.trim(), description: description?.trim() ?? '', createdAt: Date.now() } });
 });
 
+// Owner-only: rename tournament / update description. Code + slug preserved.
+bilacRoute.put('/tournaments', checkAccess, requireOwner, async (c: any) => {
+  const tournamentId = c.get('tournamentId');
+  const { name, description } = await c.req.json();
+  if (!name || !String(name).trim()) return c.json({ error: 'Tên giải đấu không được để trống!' }, 400);
+  const nameTrimmed = String(name).trim();
+  const descTrimmed = description != null ? String(description).trim() : null;
+  const db = createDb(c.env);
+  await db.update(bilacTournamentsTable).set({ name: nameTrimmed, description: descTrimmed } as any).where(eq(bilacTournamentsTable.id, tournamentId));
+  return c.json({ success: true, tournament: { id: tournamentId, name: nameTrimmed, description: descTrimmed ?? '' } });
+});
+
+// Owner-only: cascade-delete the tournament and everything under it.
+bilacRoute.delete('/tournaments/:id', checkAccess, requireOwner, async (c: any) => {
+  const tournamentId = c.get('tournamentId');
+  const db = createDb(c.env);
+  await db.delete(bilacMatchesTable).where(eq(bilacMatchesTable.tournamentId, tournamentId));
+  await db.delete(bilacPlayersTable).where(eq(bilacPlayersTable.tournamentId, tournamentId));
+  await db.delete(bilacTournamentMembersTable).where(eq(bilacTournamentMembersTable.tournamentId, tournamentId));
+  await db.delete(bilacTournamentsTable).where(eq(bilacTournamentsTable.id, tournamentId));
+  return c.json({ success: true });
+});
+
 // Public read-only endpoint keyed by slug. No login required.
 bilacRoute.get('/tournaments/by-slug/:slug', async (c) => {
   const slug = c.req.param('slug');
@@ -275,6 +298,26 @@ bilacRoute.post('/players', checkAccess, async (c: any) => {
   const db = createDb(c.env);
   await db.insert(bilacPlayersTable).values({ id, name: name.trim(), avatar, tournamentId } as any);
   return c.json({ id, name: name.trim(), avatar, tournamentId });
+});
+
+// Rename a player (regenerates the dicebear avatar). Any member may edit.
+bilacRoute.put('/players/:id', checkAccess, async (c: any) => {
+  const playerId = c.req.param('id');
+  const tournamentId = c.get('tournamentId');
+  const { name } = await c.req.json();
+  if (!name || !String(name).trim()) return c.json({ error: 'Tên người chơi không được để trống!' }, 400);
+  const nameTrimmed = String(name).trim();
+  const db = createDb(c.env);
+  const rows = await db.select().from(bilacPlayersTable).where(eq(bilacPlayersTable.id, playerId)).all();
+  const existing = rows[0] as any;
+  if (!existing || existing.tournamentId !== tournamentId) return c.json({ error: 'Không tìm thấy người chơi trong giải đấu này!' }, 404);
+  const allPlayers = await db.select().from(bilacPlayersTable).where(eq(bilacPlayersTable.tournamentId, tournamentId)).all();
+  if (allPlayers.find((p: any) => p.id !== playerId && p.name.toLowerCase() === nameTrimmed.toLowerCase())) {
+    return c.json({ error: 'Tên người chơi đã tồn tại trong giải đấu này!' }, 400);
+  }
+  const avatar = `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(nameTrimmed)}`;
+  await db.update(bilacPlayersTable).set({ name: nameTrimmed, avatar } as any).where(eq(bilacPlayersTable.id, playerId));
+  return c.json({ id: playerId, name: nameTrimmed, avatar, tournamentId });
 });
 
 bilacRoute.delete('/players/:id', checkAccess, async (c: any) => {
@@ -396,6 +439,14 @@ bilacRoute.delete('/matches/:id', checkAccess, async (c: any) => {
   const m = rows[0];
   if (!m) return c.json({ error: 'Không tìm thấy trận đấu!' }, 404);
   if ((m as any).tournamentId !== tournamentId) return c.json({ error: 'Bạn không có quyền xóa trận đấu của giải đấu này!' }, 403);
+  // Finished results are ranking-authoritative — only the owner may delete them.
+  // In-progress matches may be cancelled by any member.
+  if ((m as any).status === 'FINISHED') {
+    const uid = c.req.header('x-user-id');
+    const members = await db.select().from(bilacTournamentMembersTable).where(eq(bilacTournamentMembersTable.tournamentId, tournamentId)).all();
+    const isOwner = !!members.find((mm: any) => mm.userId === uid && mm.role === 'owner');
+    if (!isOwner) return c.json({ error: 'Chỉ chủ giải đấu mới được xoá kết quả trận đã ghi. Hãy nhờ chủ giải xoá giúp.' }, 403);
+  }
   await db.delete(bilacMatchesTable).where(eq(bilacMatchesTable.id, matchId));
   return c.json({ success: true });
 });
