@@ -1132,7 +1132,7 @@ export default function BiLacArena({
             <button
               id="tab_all_tournaments"
               onClick={() => setPortalTab('all')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors cursor-pointer ${
+              className={`px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-bold transition-colors cursor-pointer whitespace-nowrap ${
                 portalTab === 'all'
                   ? 'bg-white text-stone-900 shadow-sm'
                   : 'text-stone-500 hover:text-stone-700'
@@ -1145,7 +1145,7 @@ export default function BiLacArena({
             <button
               id="tab_my_tournaments"
               onClick={() => setPortalTab('joined')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors cursor-pointer ${
+              className={`px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-bold transition-colors cursor-pointer whitespace-nowrap ${
                 portalTab === 'joined'
                   ? 'bg-white text-stone-900 shadow-sm'
                   : 'text-stone-500 hover:text-stone-700'
