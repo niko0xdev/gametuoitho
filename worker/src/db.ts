@@ -15,6 +15,10 @@ export type Bindings = {
   MATCHMAKING_DO: DurableObjectNamespace<MatchmakingDO>;
   GAMESERVER_DO: DurableObjectNamespace<GameServerDO>;
   GOOGLE_CLIENT_ID?: string;
+  RATE_LIMITER: RateLimit;
+  BREVO_API_KEY?: string;
+  BREVO_SENDER_EMAIL?: string;
+  BREVO_SENDER_NAME?: string;
 };
 
 export type Db = ReturnType<typeof createDb>;

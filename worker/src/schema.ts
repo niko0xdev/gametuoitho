@@ -10,7 +10,10 @@ export const usersTable = sqliteTable('users', {
   role: text('role').$type<'admin' | 'user'>().notNull(),
   otp: text('otp'),
   otpExpires: integer('otp_expires'),
+  otpAttempts: integer('otp_attempts').default(0),
+  lastOtpAt: integer('last_otp_at').default(0),
   isGoogleUser: integer('is_google_user'),
+  emailVerified: integer('email_verified').default(0),
 });
 
 export const profilesTable = sqliteTable('profiles', {

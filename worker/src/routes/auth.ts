@@ -4,64 +4,122 @@ import { eq } from 'drizzle-orm';
 import type { Bindings } from '../db';
 import { createDb } from '../db';
 import { usersTable, profilesTable } from '../schema';
-import { sha256Hex } from '../lib/password';
+import {
+  sha256Hex, validatePassword, generateOtp,
+  OTP_TTL_MS, OTP_RESEND_MIN_MS, OTP_MAX_ATTEMPTS,
+} from '../lib/password';
+import { sendOtpEmail } from '../lib/email';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 
-// Google OIDC public keys (cached by jose). Used to verify ID tokens issued by
-// Google Sign In. Fetched from https://www.googleapis.com/oauth2/v3/certs.
+// Google OIDC public keys (cached by jose).
 const GOOGLE_JWKS = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
 
 export const authRoute = new Hono<{ Bindings: Bindings }>();
 
+// Per-IP rate limit on sensitive auth endpoints (anti-spam). Returns a 429
+// Response when over the limit, null otherwise. Absent binding (local dev) => allow.
+const ipRateLimit = async (c: any, key: string): Promise<Response | null> => {
+  if (!c.env.RATE_LIMITER) return null;
+  const ip = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown';
+  const { success } = await c.env.RATE_LIMITER.limit({ key: `${key}:${ip}` });
+  return success ? null : c.json({ error: 'Quá nhiều yêu cầu. Vui lòng thử lại sau ít phút.' }, 429);
+};
+
+const userPublic = (u: any) => ({
+  id: u.id, username: u.username, email: u.email,
+  displayName: u.displayName, avatar: u.avatar, role: u.role,
+});
+
+// Issue an OTP (hashed at rest), persist it, and email it. Used by register,
+// resend-otp, and forgot-password.
+async function issueOtp(c: any, user: any): Promise<void> {
+  const otp = generateOtp();
+  const otpHash = await sha256Hex(otp);
+  const db = createDb(c.env);
+  await db.update(usersTable).set({
+    otp: otpHash,
+    otpExpires: Date.now() + OTP_TTL_MS,
+    otpAttempts: 0,
+    lastOtpAt: Date.now(),
+  } as any).where(eq(usersTable.id, user.id));
+  await sendOtpEmail(c.env, user.email, user.displayName, otp);
+}
+
 authRoute.post('/register', async (c) => {
+  const rl = await ipRateLimit(c, 'register');
+  if (rl) return rl;
   const { username, password, email, displayName } = await c.req.json();
   if (!username || !password || !email || !displayName) {
     return c.json({ error: 'Vui lòng nhập đầy đủ thông tin đăng ký!' }, 400);
   }
+  const pwCheck = validatePassword(password);
+  if (!pwCheck.ok) return c.json({ error: pwCheck.error! }, 400);
+
   const tu = username.trim().toLowerCase();
   const te = email.trim().toLowerCase();
   const db = createDb(c.env);
 
   const existing = await db.select().from(usersTable).where(eq(usersTable.username, tu)).all();
   if (existing.length) return c.json({ error: 'Tên tài khoản này đã tồn tại!' }, 400);
-
   const byEmail = await db.select().from(usersTable).where(eq(usersTable.email, te)).all();
   if (byEmail.length) return c.json({ error: 'Email này đã được đăng ký!' }, 400);
 
   const userId = 'user_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
   const passwordHash = await sha256Hex(password);
   const avatar = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(userId)}`;
+  const otp = generateOtp();
+  const otpHash = await sha256Hex(otp);
 
   await db.insert(usersTable).values({
-    id: userId,
-    username: tu,
-    email: te,
-    passwordHash,
-    displayName: displayName.trim(),
-    avatar,
-    role: 'user',
-  });
-
+    id: userId, username: tu, email: te, passwordHash,
+    displayName: displayName.trim(), avatar, role: 'user',
+    otp: otpHash, otpExpires: Date.now() + OTP_TTL_MS,
+    otpAttempts: 0, lastOtpAt: Date.now(), emailVerified: 0,
+  } as any);
   await db.insert(profilesTable).values({
-    id: userId,
-    displayName: displayName.trim(),
-    avatar,
-    eloCaro: 1500,
-    eloCoTuong: 1500,
-    eloCoVua: 1500,
-    eloOAnQuan: 1500,
-    eloCoCaNgua: 1500,
-    eloDuoiHinhBatChu: 1500,
-    eloNoiChu: 1500,
-    eloDoanTu: 1500,
-    honorScore: 100,
-    badges: '[]',
+    id: userId, displayName: displayName.trim(), avatar,
+    eloCaro: 1500, eloCoTuong: 1500, eloCoVua: 1500, eloOAnQuan: 1500,
+    eloCoCaNgua: 1500, eloDuoiHinhBatChu: 1500, eloNoiChu: 1500, eloDoanTu: 1500,
+    honorScore: 100, badges: '[]',
   });
 
-  return c.json({
-    success: true,
-    user: { id: userId, displayName: displayName.trim(), username: tu, email: te, role: 'user', avatar },
-  });
+  await sendOtpEmail(c.env, te, displayName.trim(), otp);
+  return c.json({ success: true, needsVerification: true, email: te });
+});
+
+authRoute.post('/verify-email', async (c) => {
+  const rl = await ipRateLimit(c, 'verify');
+  if (rl) return rl;
+  const { email, otp } = await c.req.json();
+  if (!email || !otp) return c.json({ error: 'Thiếu email hoặc mã OTP!' }, 400);
+  const db = createDb(c.env);
+  const rows = await db.select().from(usersTable).where(eq(usersTable.email, String(email).trim().toLowerCase())).all();
+  const user = rows[0];
+  if (!user) return c.json({ error: 'Không tìm thấy tài khoản!' }, 404);
+
+  const err = await verifyOtpAttempt(c, user, otp);
+  if (err) return err;
+
+  await db.update(usersTable).set({
+    emailVerified: 1, otp: null, otpExpires: null, otpAttempts: 0,
+  } as any).where(eq(usersTable.id, user.id));
+  return c.json({ success: true, user: userPublic({ ...user, emailVerified: 1 }) });
+});
+
+authRoute.post('/resend-otp', async (c) => {
+  const rl = await ipRateLimit(c, 'resend');
+  if (rl) return rl;
+  const { email } = await c.req.json();
+  if (!email) return c.json({ error: 'Thiếu email!' }, 400);
+  const db = createDb(c.env);
+  const rows = await db.select().from(usersTable).where(eq(usersTable.email, String(email).trim().toLowerCase())).all();
+  const user = rows[0];
+  if (!user) return c.json({ error: 'Không tìm thấy tài khoản!' }, 404);
+  if (user.lastOtpAt && Date.now() - user.lastOtpAt < OTP_RESEND_MIN_MS) {
+    return c.json({ error: 'Vui lòng đợi 60 giây trước khi yêu cầu mã mới.' }, 429);
+  }
+  await issueOtp(c, user);
+  return c.json({ success: true, message: 'Đã gửi mã OTP mới về email.' });
 });
 
 authRoute.post('/login', async (c) => {
@@ -77,19 +135,29 @@ authRoute.post('/login', async (c) => {
 
   const hash = await sha256Hex(password);
   if (user.passwordHash !== hash) return c.json({ error: 'Mật khẩu không chính xác!' }, 400);
-
-  return c.json({
-    success: true,
-    user: {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      displayName: user.displayName,
-      avatar: user.avatar,
-      role: user.role,
-    },
-  });
+  if (!user.emailVerified) {
+    return c.json({ error: 'Tài khoản chưa xác thực email. Vui lòng kiểm tra hộp thư của bạn.' }, 403);
+  }
+  return c.json({ success: true, user: userPublic(user) });
 });
+
+// Shared OTP verify+attempt logic for /verify-email and /reset-password.
+async function verifyOtpAttempt(c: any, user: any, otpInput: any): Promise<Response | null> {
+  if (!user.otp || !user.otpExpires) {
+    return c.json({ error: 'Chưa có mã OTP. Vui lòng yêu cầu mã mới.' }, 400);
+  }
+  if (Date.now() > user.otpExpires) return c.json({ error: 'Mã OTP đã hết hạn!' }, 400);
+  if ((user.otpAttempts ?? 0) >= OTP_MAX_ATTEMPTS) {
+    return c.json({ error: 'Bạn đã nhập sai quá nhiều lần. Vui lòng yêu cầu mã OTP mới.' }, 400);
+  }
+  const hash = await sha256Hex(String(otpInput).trim());
+  if (hash !== user.otp) {
+    const db = createDb(c.env);
+    await db.update(usersTable).set({ otpAttempts: (user.otpAttempts ?? 0) + 1 }).where(eq(usersTable.id, user.id));
+    return c.json({ error: 'Mã OTP không chính xác!' }, 400);
+  }
+  return null;
+}
 
 authRoute.post('/google-sso', async (c) => {
   const { credential } = await c.req.json();
@@ -98,7 +166,6 @@ authRoute.post('/google-sso', async (c) => {
     return c.json({ error: 'Chưa cấu hình GOOGLE_CLIENT_ID trên Worker!' }, 500);
   }
 
-  // Verify the Google ID token (signature via JWKS + iss/aud/exp claims).
   let payload;
   try {
     const verified = await jwtVerify(credential, GOOGLE_JWKS, {
@@ -126,82 +193,62 @@ authRoute.post('/google-sso', async (c) => {
     const userId = 'user_g_' + sub;
     const tempUsername = ('g_' + sub).slice(0, 30);
     await db.insert(usersTable).values({
-      id: userId,
-      username: tempUsername,
-      email,
-      passwordHash: '',
-      displayName,
-      avatar,
-      role: 'user',
-      isGoogleUser: 1,
-    });
+      id: userId, username: tempUsername, email, passwordHash: '',
+      displayName, avatar, role: 'user', isGoogleUser: 1, emailVerified: 1,
+    } as any);
     await db.insert(profilesTable).values({
-      id: userId,
-      displayName,
-      avatar,
+      id: userId, displayName, avatar,
       eloCaro: 1500, eloCoTuong: 1500, eloCoVua: 1500, eloOAnQuan: 1500,
       eloCoCaNgua: 1500, eloDuoiHinhBatChu: 1500, eloNoiChu: 1500, eloDoanTu: 1500,
-      honorScore: 100,
-      badges: '[]',
+      honorScore: 100, badges: '[]',
     });
     user = { id: userId, username: tempUsername, email, displayName, avatar, role: 'user' } as typeof user;
   }
 
-  return c.json({
-    success: true,
-    user: {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      displayName: user.displayName,
-      avatar: user.avatar,
-      role: user.role,
-    },
-  });
+  return c.json({ success: true, user: userPublic(user) });
 });
 
 authRoute.post('/forgot-password', async (c) => {
+  const rl = await ipRateLimit(c, 'forgot');
+  if (rl) return rl;
   const { email } = await c.req.json();
   if (!email) return c.json({ error: 'Vui lòng cung cấp địa chỉ email!' }, 400);
   const db = createDb(c.env);
-  const rows = await db.select().from(usersTable).where(eq(usersTable.email, email.trim())).all();
+  const rows = await db.select().from(usersTable).where(eq(usersTable.email, String(email).trim().toLowerCase())).all();
   const user = rows[0];
-  if (!user) return c.json({ error: 'Không tìm thấy tài khoản nào liên kết với email này!' }, 404);
-
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const expires = Date.now() + 5 * 60 * 1000;
-
-  await db.update(usersTable)
-    .set({ otp, otpExpires: expires })
-    .where(eq(usersTable.id, user.id));
-
-  console.log(`OTP for ${user.email}: ${otp}`);
-
-  return c.json({
-    success: true,
-    message: 'Mã xác thực OTP đã được gửi về email của bạn (kiểm tra console log server)!',
-    _debugOtp: otp,
-  });
+  // Do not reveal whether the email exists.
+  if (!user) return c.json({ success: true, message: 'Nếu email tồn tại, mã OTP đã được gửi.' });
+  if (user.lastOtpAt && Date.now() - user.lastOtpAt < OTP_RESEND_MIN_MS) {
+    return c.json({ error: 'Vui lòng đợi 60 giây trước khi yêu cầu mã mới.' }, 429);
+  }
+  await issueOtp(c, user);
+  return c.json({ success: true, message: 'Mã OTP đã được gửi về email của bạn.' });
 });
 
 authRoute.post('/reset-password', async (c) => {
+  const rl = await ipRateLimit(c, 'reset');
+  if (rl) return rl;
   const { email, otp, newPassword } = await c.req.json();
   if (!email || !otp || !newPassword) {
     return c.json({ error: 'Vui lòng cung cấp đầy đủ email, mã OTP và mật khẩu mới!' }, 400);
   }
+  const pwCheck = validatePassword(newPassword);
+  if (!pwCheck.ok) return c.json({ error: pwCheck.error! }, 400);
+
   const db = createDb(c.env);
-  const rows = await db.select().from(usersTable).where(eq(usersTable.email, email.trim())).all();
+  const rows = await db.select().from(usersTable).where(eq(usersTable.email, String(email).trim().toLowerCase())).all();
   const user = rows[0];
   if (!user) return c.json({ error: 'Không tìm thấy tài khoản!' }, 404);
-  if (!user.otp || user.otp !== otp.trim()) return c.json({ error: 'Mã xác thực OTP không chính xác!' }, 400);
-  if (!user.otpExpires || Date.now() > user.otpExpires) return c.json({ error: 'Mã OTP đã hết hạn (hiệu lực trong 5 phút)!' }, 400);
+
+  const err = await verifyOtpAttempt(c, user, otp);
+  if (err) return err;
 
   const passwordHash = await sha256Hex(newPassword);
-  await db.update(usersTable)
-    .set({ passwordHash, otp: null, otpExpires: null })
-    .where(eq(usersTable.id, user.id));
+  await db.update(usersTable).set({
+    passwordHash, otp: null, otpExpires: null, otpAttempts: 0,
+  } as any).where(eq(usersTable.id, user.id));
 
-  return c.json({ success: true, message: 'Đổi mật khẩu thành công! Bạn có thể sử dụng mật khẩu mới để đăng nhập.' });
+  return c.json({ success: true, message: 'Đổi mật khẩu thành công! Bạn có thể đăng nhập với mật khẩu mới.' });
 });
 
 authRoute.post('/quick-login', async (c) => {

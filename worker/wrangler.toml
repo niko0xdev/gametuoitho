@@ -37,6 +37,13 @@ new_sqlite_classes = ["MatchDO", "MatchmakingDO"]
 tag = "v2"
 new_sqlite_classes = ["GameServerDO"]
 
+# Anti-spam: per-IP rate limit on auth endpoints (10 req / 60s).
+[[unsafe.bindings]]
+name = "RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 10, period = 60 }
+
 # Production values — `wrangler deploy` ships these. Local `wrangler dev`
 # overrides them via worker/.dev.vars (copy from worker/.dev.vars.example).
 [vars]
@@ -50,3 +57,6 @@ OPENAI_BASE_URL = "https://api.minimax.io/v1"
 # Set this + the frontend VITE_GOOGLE_CLIENT_ID to enable "Sign in with Google".
 # Public value (embedded in the client too) — not a secret.
 GOOGLE_CLIENT_ID = "1037610366569-vfi2uh8sfhqd9qlfj4orgjobutfj044c.apps.googleusercontent.com"
+# Brevo transactional email (sender). BREVO_API_KEY stays a Worker secret.
+BREVO_SENDER_EMAIL = ""
+BREVO_SENDER_NAME = "Game Tuổi Thơ"

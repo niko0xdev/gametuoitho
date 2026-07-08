@@ -6,6 +6,7 @@ import {
 import { playRetroBeep } from './games/CaroBoard.tsx';
 import { motion, AnimatePresence } from 'motion/react';
 import { UserProfile } from '../types.ts';
+import { validatePassword } from '../lib/passwordRules';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -13,7 +14,7 @@ interface AuthModalProps {
   onLoginSuccess: (userProfile: UserProfile) => void;
 }
 
-type AuthMode = 'login' | 'register' | 'forgot_password' | 'enter_otp';
+type AuthMode = 'login' | 'register' | 'forgot_password' | 'enter_otp' | 'verify_email';
 
 export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModalProps) {
   const [mode, setMode] = useState<AuthMode>('login');
@@ -33,6 +34,10 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
   const [resetOtp, setResetOtp] = useState('');
   const [resetNewPassword, setResetNewPassword] = useState('');
   const [receivedOtp, setReceivedOtp] = useState<string | null>(null);
+
+  // Email verification (signup)
+  const [verifyEmail, setVerifyEmail] = useState('');
+  const [verifyOtp, setVerifyOtp] = useState('');
 
   // Status & Error
   const [loading, setLoading] = useState(false);
@@ -148,6 +153,12 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
       triggerBeep(180, 'sawtooth', 0.15);
       return;
     }
+    const pwCheck = validatePassword(registerPassword);
+    if (!pwCheck.ok) {
+      setErrorMsg(pwCheck.error || 'Mật khẩu không đủ mạnh!');
+      triggerBeep(180, 'sawtooth', 0.15);
+      return;
+    }
 
     setLoading(true);
     setErrorMsg(null);
@@ -167,9 +178,11 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
         throw new Error(data.error || 'Đăng ký không thành công');
       }
       triggerBeep(880, 'sine', 0.3);
-      setSuccessMsg('Đăng ký tài khoản mới thành công!');
-      onLoginSuccess(data.user);
-      onClose();
+      // Backend requires email verification before login.
+      setVerifyEmail(data.email || registerEmail.trim().toLowerCase());
+      setVerifyOtp('');
+      setSuccessMsg('Tài khoản đã tạo! Nhập mã OTP gửi về email để xác thực.');
+      setMode('verify_email');
     } catch (err: any) {
       setErrorMsg(err.message);
       triggerBeep(150, 'sawtooth', 0.2);
@@ -199,13 +212,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
         throw new Error(data.error || 'Yêu cầu OTP thất bại');
       }
       triggerBeep(660, 'triangle', 0.2);
-      
-      // Store the debug OTP so we can show it to the user in the UI for seamless testing!
-      if (data._debugOtp) {
-        setReceivedOtp(data._debugOtp);
-      }
-      
-      setSuccessMsg(data.message || 'Mã OTP đã được gửi!');
+      setSuccessMsg(data.message || 'Mã OTP đã được gửi về email!');
       setMode('enter_otp');
     } catch (err: any) {
       setErrorMsg(err.message);
@@ -253,6 +260,50 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
     }
   };
 
+  const handleVerifyEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!verifyOtp) { setErrorMsg('Vui lòng nhập mã OTP!'); triggerBeep(180, 'sawtooth', 0.15); return; }
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch('/api/auth/verify-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: verifyEmail, otp: verifyOtp }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Xác thực thất bại');
+      triggerBeep(987, 'sine', 0.3);
+      onLoginSuccess(data.user);
+      onClose();
+    } catch (err: any) {
+      setErrorMsg(err.message);
+      triggerBeep(150, 'sawtooth', 0.2);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch('/api/auth/resend-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: verifyEmail }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Gửi lại OTP thất bại');
+      setSuccessMsg(data.message || 'Đã gửi lại mã OTP.');
+      setVerifyOtp('');
+    } catch (err: any) {
+      setErrorMsg(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-stone-950/85 backdrop-blur-md flex items-center justify-center p-4 z-[9999] overflow-y-auto animate-fadeIn">
       {/* Container */}
@@ -279,12 +330,14 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
               {mode === 'register' && 'ĐĂNG KÝ KỲ THỦ'}
               {mode === 'forgot_password' && 'QUÊN MẬT KHẨU'}
               {mode === 'enter_otp' && 'XÁC THỰC MÃ OTP'}
+              {mode === 'verify_email' && 'XÁC THỰC EMAIL'}
             </h2>
             <p className="text-xs text-stone-400 mt-1">
               {mode === 'login' && 'Đăng nhập để lưu điểm xếp hạng và tham gia đấu trường'}
               {mode === 'register' && 'Tạo tài khoản mới và nhận danh hiệu Khai Quốc'}
               {mode === 'forgot_password' && 'Nhập email liên kết để nhận mã khôi phục'}
               {mode === 'enter_otp' && 'Nhập mã OTP 6 số để tiến hành đặt mật khẩu mới'}
+              {mode === 'verify_email' && 'Nhập mã OTP gửi về email để hoàn tất đăng ký'}
             </p>
           </div>
 
@@ -590,6 +643,59 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModal
                     className="flex-[2] bg-orange-500 hover:bg-orange-600 text-white font-extrabold py-2.5 rounded-xl text-xs cursor-pointer flex items-center justify-center gap-1.5 transition-colors"
                   >
                     {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'ĐỔI MẬT KHẨU'}
+                  </button>
+                </div>
+              </motion.form>
+            )}
+
+            {mode === 'verify_email' && (
+              <motion.form
+                key="verify-email-form"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                onSubmit={handleVerifyEmailSubmit}
+                className="flex flex-col gap-4"
+              >
+                <div className="bg-stone-950 p-3 rounded-2xl border border-stone-800 text-[11px] text-stone-300 leading-relaxed">
+                  Mã OTP đã gửi đến <b className="text-orange-400 break-all">{verifyEmail}</b>. Kiểm tra hộp thư (kể cả mục Spam).
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-extrabold uppercase tracking-wider text-stone-400">Mã OTP (6 số)</label>
+                  <div className="relative">
+                    <Key className="absolute left-3 top-3 w-4 h-4 text-stone-500" />
+                    <input
+                      type="text"
+                      placeholder="Nhập 6 chữ số OTP..."
+                      value={verifyOtp}
+                      onChange={(e) => setVerifyOtp(e.target.value)}
+                      maxLength={6}
+                      className="w-full bg-stone-950 border border-stone-800 rounded-xl py-2.5 pl-10 pr-4 text-xs font-mono tracking-widest text-orange-400 placeholder-stone-600 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="bg-orange-500 hover:bg-orange-600 active:scale-[0.98] text-white font-extrabold py-2.5 rounded-xl text-xs cursor-pointer flex items-center justify-center gap-1.5 shadow-md transition-all"
+                >
+                  {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'XÁC THỰC & VÀO GAME'}
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchMode('login')}
+                    className="flex-1 bg-stone-950 hover:bg-stone-850 text-stone-300 border border-stone-800 font-bold py-2.5 rounded-xl text-xs cursor-pointer flex items-center justify-center gap-1 transition-colors"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" /><span>QUAY LẠI</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResendOtp}
+                    disabled={loading}
+                    className="flex-[2] bg-stone-900 hover:bg-stone-800 text-stone-200 border border-stone-800 font-bold py-2.5 rounded-xl text-xs cursor-pointer transition-colors"
+                  >
+                    Gửi lại mã OTP
                   </button>
                 </div>
               </motion.form>
