@@ -243,6 +243,7 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
   const [teamPlayers, setTeamPlayers] = useState<string[][]>([]);
   const [selectedTacticalTeamId, setSelectedTacticalTeamId] = useState<string>('');
   const [formError, setFormError] = useState('');
+  const [syncError, setSyncError] = useState('');
 
   // AI Quick Import States
   const [aiRosterText, setAiRosterText] = useState('');
@@ -471,10 +472,13 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
 
   // Save changes helper syncing with server API contract
   const saveLeaguesToLocalStorage = async (updatedLeagues: MyLeague[]) => {
+    // Snapshot prior state so we can roll back the optimistic update on server failure.
+    const prevLeagues = leagues;
+
     // Keep local cache for offline resiliency
     setLeagues(updatedLeagues);
     localStorage.setItem('my_leagues_v1', JSON.stringify(updatedLeagues));
-    
+
     if (selectedLeague) {
       const freshSelected = updatedLeagues.find(l => l.id === selectedLeague.id);
       if (freshSelected) {
@@ -482,37 +486,51 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
       }
     }
 
+    const rollback = (why: string) => {
+      setLeagues(prevLeagues);
+      localStorage.setItem('my_leagues_v1', JSON.stringify(prevLeagues));
+      if (selectedLeague) {
+        setSelectedLeague(prevLeagues.find(l => l.id === selectedLeague.id) || null);
+      }
+      setSyncError(why);
+    };
+
     try {
-      if (updatedLeagues.length > leagues.length) {
+      if (updatedLeagues.length > prevLeagues.length) {
         // Created new league
         const newLeague = updatedLeagues[0];
-        await fetch('/api/leagues', {
+        const res = await fetch('/api/leagues', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newLeague)
         });
-      } else if (updatedLeagues.length === leagues.length) {
+        if (!res.ok) { rollback('Lưu giải đấu thất bại — đã hoàn tác thay đổi. Hãy thử lại.'); return; }
+      } else if (updatedLeagues.length === prevLeagues.length) {
         // Updated league
         // We find the modified league from updatedLeagues compared with current leagues array
-        const changedLeague = updatedLeagues.find((ul, idx) => JSON.stringify(ul) !== JSON.stringify(leagues[idx]));
+        const changedLeague = updatedLeagues.find((ul, idx) => JSON.stringify(ul) !== JSON.stringify(prevLeagues[idx]));
         if (changedLeague) {
-          await fetch(`/api/leagues/${changedLeague.id}`, {
+          const res = await fetch(`/api/leagues/${changedLeague.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(changedLeague)
           });
+          if (!res.ok) { rollback('Cập nhật giải đấu thất bại — đã hoàn tác thay đổi. Hãy thử lại.'); return; }
         }
-      } else if (updatedLeagues.length < leagues.length) {
+      } else if (updatedLeagues.length < prevLeagues.length) {
         // Deleted league
-        const deletedLeague = leagues.find(l => !updatedLeagues.some(ul => ul.id === l.id));
+        const deletedLeague = prevLeagues.find(l => !updatedLeagues.some(ul => ul.id === l.id));
         if (deletedLeague) {
-          await fetch(`/api/leagues/${deletedLeague.id}`, {
+          const res = await fetch(`/api/leagues/${deletedLeague.id}`, {
             method: 'DELETE'
           });
+          if (!res.ok) { rollback('Xoá giải đấu thất bại — đã hoàn tác thay đổi. Hãy thử lại.'); return; }
         }
       }
+      setSyncError('');
     } catch (err) {
       console.error('Error syncing league state to server:', err);
+      rollback('Mất kết nối máy chủ — đã hoàn tác thay đổi. Hãy thử lại.');
     }
   };
 
@@ -1426,6 +1444,13 @@ export default function MyLeagueView({ userId = 'user_a', userProfile }: MyLeagu
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       
+      {syncError && (
+        <div className="mb-4 bg-red-50 text-red-700 border border-red-200 p-3 rounded-xl text-xs font-semibold flex items-center justify-between gap-2">
+          <span>⚠️ {syncError}</span>
+          <button onClick={() => setSyncError('')} className="text-red-500 hover:text-red-700 font-bold">Đóng</button>
+        </div>
+      )}
+
       {/* 1. HEADER SECTION */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-4 border-b border-stone-200">
         <div>
