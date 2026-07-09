@@ -2,7 +2,7 @@ export interface UserProfile {
   id: string;
   displayName: string;
   avatar: string;
-  elo: Record<string, number>; // Game ID to Elo mapping
+  elo?: Record<string, number>; // Game ID to Elo mapping (optional: bot/opponent profiles may omit)
   honorScore: number;
   badges: string[];
   role?: 'admin' | 'user';
