@@ -212,9 +212,11 @@ bilacRoute.get('/tournaments/by-slug/:slug', async (c) => {
     .map((p: any) => ({ id: p.id, name: p.name, avatar: p.avatar }));
 
   const matches = (await db.select().from(bilacMatchesTable).where(eq(bilacMatchesTable.tournamentId, tour.id)).all())
+    .map((m: any) => serializeMatch(m))
     .map((m: any) => ({
       id: m.id,
       timestamp: m.timestamp,
+      weekLabel: m.weekLabel,
       team1: m.team1,
       team2: m.team2,
       score1: m.score1,

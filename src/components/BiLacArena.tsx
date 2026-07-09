@@ -2762,17 +2762,154 @@ function PortalModalBackdrop({ onClose, children }: { onClose: () => void; child
   );
 }
 
+// Current Bi Lắc "mùa" (weekly edition): the week window + the exact weekLabel
+// stored on matches. Mirrors server/handlers/bilacHandlers.ts#getBiLacWeeklyInterval
+// and worker/src/routes/bilac.ts#getBiLacWeeklyInterval — keep in sync.
+function bilacCurrentWeek() {
+  const raw = new Date();
+  const d = new Date(raw.getTime() + (raw.getTimezoneOffset() * 60000) + (7 * 3600000)); // UTC+7
+  const day = d.getDay();
+  const wed = new Date(d);
+  wed.setDate(d.getDate() + (3 - day));
+  wed.setHours(11, 30, 0, 0);
+  let start: Date, end: Date;
+  if (d.getTime() < wed.getTime()) {
+    start = new Date(wed); start.setDate(wed.getDate() - 7); start.setHours(12, 0, 0, 0);
+    end = new Date(wed);
+  } else {
+    start = new Date(wed); start.setHours(12, 0, 0, 0);
+    end = new Date(wed); end.setDate(wed.getDate() + 7);
+  }
+  const fmt = (x: Date) =>
+    `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}/${x.getFullYear()}`;
+  const short = (x: Date) =>
+    `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}`;
+  return {
+    label: `Tuần từ ${fmt(start)} đến ${fmt(end)}`,
+    timeframe: `Thứ 4 ${short(start)} (12:00) ➔ Thứ 4 ${short(end)} (11:30)`,
+  };
+}
+
+// Standings for the current weekly "mùa" only. Same scoring/sort as the member
+// leaderboard (gd desc → wins desc — see calculateLeaderboards). team1/team2 may
+// arrive as arrays (express) or JSON strings (older worker) — coerce defensively.
+function computeSeasonLeaderboard(players: any[], matches: any[], weekLabel: string) {
+  const stats: Record<string, {
+    player: any; matchesPlayed: number; wins: number; losses: number;
+    goalsScored: number; goalsConceded: number; gd: number; points: number;
+  }> = {};
+  players.forEach(p => {
+    stats[p.id] = { player: p, matchesPlayed: 0, wins: 0, losses: 0, goalsScored: 0, goalsConceded: 0, gd: 0, points: 0 };
+  });
+  const teamArr = (t: any): string[] => {
+    if (Array.isArray(t)) return t;
+    try { const a = JSON.parse(t || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
+  };
+  matches
+    .filter(m => m.status === 'FINISHED' && m.weekLabel === weekLabel)
+    .forEach(m => {
+      const s1 = m.score1, s2 = m.score2;
+      const apply = (team: any, scored: number, conceded: number, won: boolean, draw: boolean) =>
+        teamArr(team).forEach((pid: string) => {
+          const st = stats[pid]; if (!st) return;
+          st.matchesPlayed += 1; st.goalsScored += scored; st.goalsConceded += conceded;
+          if (won) { st.wins += 1; st.points += 3; }
+          else if (draw) { st.points += 1; }
+          else { st.losses += 1; }
+        });
+      apply(m.team1, s1, s2, s1 > s2, s1 === s2);
+      apply(m.team2, s2, s1, s2 > s1, s1 === s2);
+    });
+  Object.values(stats).forEach((st: any) => { st.gd = st.goalsScored - st.goalsConceded; });
+  return Object.values(stats).sort((a: any, b: any) => b.gd - a.gd || b.wins - a.wins || 0);
+}
+
 function ViewOnlyTournamentView({ data }: { data: any }) {
   const sortedPlayers = [...(data.players || [])].sort((a, b) =>
     String(a.name).localeCompare(String(b.name))
   );
   const finished = (data.matches || []).filter((m: any) => m.status === 'FINISHED');
+  const { timeframe, label: weekLabel } = bilacCurrentWeek();
+  const seasonRows = computeSeasonLeaderboard(data.players || [], data.matches || [], weekLabel);
+  const playedRows = seasonRows.filter(r => r.matchesPlayed > 0);
   return (
     <div className="space-y-4">
       <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm">
         <h2 className="font-bold text-stone-900 text-lg">{data.name}</h2>
         {data.description && <p className="text-sm text-stone-600 mt-1">{data.description}</p>}
         <p className="text-xs text-stone-400 mt-2">{data.memberCount} thành viên</p>
+      </div>
+
+      {/* MÙA HIỆN TẠI */}
+      <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm" id="bilac_viewonly_season">
+        <div className="flex items-center gap-2 mb-1">
+          <Calendar className="w-4 h-4 text-orange-500" />
+          <h3 className="font-bold text-stone-900 text-sm">Mùa hiện tại</h3>
+        </div>
+        <p className="text-xs text-stone-600 font-semibold">{timeframe}</p>
+        <p className="text-[10px] text-stone-400 font-mono mt-1">{weekLabel}</p>
+      </div>
+
+      {/* BẢNG XẾP HẠNG MÙA HIỆN TẠI */}
+      <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm" id="bilac_viewonly_leaderboard">
+        <div className="flex items-center gap-2 mb-3">
+          <Trophy className="w-4 h-4 text-yellow-500" />
+          <h3 className="font-bold text-stone-900 text-sm">Bảng xếp hạng mùa hiện tại</h3>
+        </div>
+        {playedRows.length === 0 ? (
+          <p className="text-xs text-stone-500">Chưa có trận đấu nào được ghi nhận trong mùa này.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-stone-200 text-stone-500 font-bold">
+                  <th scope="col" className="py-2 px-2 text-center w-8">Hạng</th>
+                  <th scope="col" className="py-2 px-2">Đấu thủ</th>
+                  <th scope="col" className="py-2 px-2 text-center">Trận</th>
+                  <th scope="col" className="py-2 px-2 text-center">Thắng</th>
+                  <th scope="col" className="py-2 px-2 text-center">Thua</th>
+                  <th scope="col" className="py-2 px-2 text-center">HS</th>
+                  <th scope="col" className="py-2 px-2 text-center">%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {playedRows.map((item, index) => {
+                  let rankStyle = 'bg-stone-100 text-stone-700';
+                  if (index === 0) rankStyle = 'bg-yellow-500 text-white font-extrabold';
+                  if (index === 1) rankStyle = 'bg-slate-300 text-slate-800 font-bold';
+                  if (index === 2) rankStyle = 'bg-amber-600 text-white font-bold';
+                  const winRate = Math.round((item.wins / item.matchesPlayed) * 100);
+                  return (
+                    <tr key={item.player.id} className="border-b border-stone-100">
+                      <td className="py-2 px-2 text-center font-bold">
+                        <span className={`w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] ${rankStyle}`}>
+                          {index + 1}
+                        </span>
+                      </td>
+                      <td className="py-2 px-2">
+                        <div className="flex items-center gap-2">
+                          {item.player.avatar && (
+                            <img src={item.player.avatar} className="w-6 h-6 rounded-full border border-stone-200 bg-stone-100" alt="" />
+                          )}
+                          <span className="font-bold text-stone-900">{item.player.name}</span>
+                        </div>
+                      </td>
+                      <td className="py-2 px-2 text-center font-mono font-semibold">{item.matchesPlayed}</td>
+                      <td className="py-2 px-2 text-center font-mono font-bold text-emerald-600">{item.wins}</td>
+                      <td className="py-2 px-2 text-center font-mono text-stone-400">{item.losses}</td>
+                      <td className="py-2 px-2 text-center font-mono font-bold">
+                        <span className={item.gd > 0 ? 'text-emerald-600' : item.gd < 0 ? 'text-red-600' : 'text-stone-400'}>
+                          {item.gd > 0 ? `+${item.gd}` : item.gd}
+                        </span>
+                      </td>
+                      <td className="py-2 px-2 text-center font-mono font-bold text-blue-600">{winRate}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
       <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm">
         <h3 className="font-bold text-stone-900 text-sm mb-3">Người chơi ({sortedPlayers.length})</h3>
