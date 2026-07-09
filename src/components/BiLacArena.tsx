@@ -31,6 +31,9 @@ import {
 import { BiLacPlayer, BiLacMatch, UserProfile } from '../types';
 import { UserSearchInput, type UserSearchResult } from './UserSearchInput';
 
+// ponytail: donate hidden until ready — flip to true to re-enable widget + modal
+const DONATE_ENABLED = false;
+
 // Simple sound synthesizer for retro beep effects
 const playBeep = (freq: number, type: OscillatorType = 'sine', duration = 0.1) => {
   try {
@@ -2536,7 +2539,7 @@ export default function BiLacArena({
       )}
 
       {/* DONATE MODAL */}
-      {isDonateModalOpen && (
+      {DONATE_ENABLED && isDonateModalOpen && (
         <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in" id="donate_modal_overlay">
           <div className="bg-white w-full max-w-md rounded-2xl border border-stone-200 shadow-2xl overflow-hidden flex flex-col relative animate-scale-up" id="donate_modal_card">
             {/* Header */}
@@ -2698,7 +2701,7 @@ export default function BiLacArena({
       )}
 
       {/* STICKY FLOATING DONATE WIDGET */}
-      <div className="fixed bottom-6 right-6 z-40 flex items-center gap-2 group" id="sticky_donate_widget">
+      {DONATE_ENABLED && <div className="fixed bottom-6 right-6 z-40 flex items-center gap-2 group" id="sticky_donate_widget">
         {/* Tooltip / Label on Hover */}
         <div className="bg-stone-950 text-white text-xs font-bold px-3 py-2 rounded-xl shadow-lg opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 absolute right-14 whitespace-nowrap pointer-events-none border border-stone-800 flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
@@ -2713,7 +2716,7 @@ export default function BiLacArena({
           <span className="absolute inset-0 rounded-full bg-rose-500/40 animate-ping pointer-events-none"></span>
           <Heart className="w-5 h-5 fill-white text-white relative z-10 animate-pulse" />
         </button>
-      </div>
+      </div>}
 
       {activeTab === 'members' && (
         <div className="bg-white p-6 sm:p-8 rounded-2xl border border-stone-200 shadow-sm" id="bilac_tab_members_content">
