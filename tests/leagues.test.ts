@@ -56,6 +56,23 @@ describe('POST /api/leagues', () => {
     assert.ok(db.isMyLeagueOwner(id, ownerId));
     assert.ok(db.isMyLeagueMember(id, ownerId));
   });
+  it('ignores body.id — never overwrites an existing league', async () => {
+    const first = await setupLeague();
+    const uid = uniq('lg_col'); await makeUser(uid, uid);
+    // Attacker POSTs with the existing league's id, trying to hijack it.
+    const res = await request(getApp()).post('/api/leagues', {
+      id: first.id, name: 'Hijacked', sport: 'futsal', format: 'round_robin', status: 'ACTIVE',
+      createdAt: new Date().toISOString(), code: 'stolen', teams: [], matches: []
+    }, { 'x-user-id': uid });
+    assert.equal(res.status, 200);
+    assert.notEqual(res.body.league.id, first.id, 'server generated a fresh id');
+    // Original league is untouched.
+    const original = db.getMyLeague(first.id)!;
+    assert.equal(original.name.startsWith('lg_t'), true);
+    assert.equal(original.code, first.code);
+    assert.equal(db.isMyLeagueOwner(first.id, first.ownerId), true);
+    assert.equal(db.isMyLeagueMember(first.id, uid), false, 'attacker did not become a member of the original');
+  });
 });
 
 describe('GET /api/leagues', () => {

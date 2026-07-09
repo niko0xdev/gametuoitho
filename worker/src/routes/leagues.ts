@@ -164,7 +164,9 @@ leaguesRoute.post('/leagues', requireLoggedIn(), async (c) => {
     if (i === 4) return c.json({ error: 'Không thể tạo mã chia sẻ, thử lại.' }, 500);
     slug = generateSlug();
   }
-  const id = body.id || `league-${Date.now()}`;
+  // Always generate the id server-side — never trust body.id (collision would
+  // either overwrite (express upsert) or 500 (worker insert)). See express parity.
+  const id = `league-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const league: any = {
     id,
     name: String(body.name).trim(),

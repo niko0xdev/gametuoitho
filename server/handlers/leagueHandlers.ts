@@ -86,8 +86,12 @@ export function handleCreateLeague(req: Request, res: Response) {
     if (i === 4) return res.status(500).json({ error: 'Không thể tạo mã chia sẻ, thử lại.' });
     slug = db.generateMyLeagueSlug();
   }
+  // Always generate the id server-side — never trust body.id. A client-supplied
+  // id could collide with an existing league and the upsert would silently
+  // overwrite it (hijacking code/teams/owner). ponytail: ceiling ~1k leagues,
+  // Date.now+random collision odds negligible; add retry if a real clash ever occurs.
   const league: MyLeague = {
-    id: body.id || `league-${Date.now()}`,
+    id: `league-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name: String(name).trim(),
     sport: body.sport || 'futsal',
     format: body.format || 'round_robin',
