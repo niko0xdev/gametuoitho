@@ -54,14 +54,14 @@ export default function Header({
 
   const copyUserId = () => {
     if (!profile?.id) return;
-    try {
-      navigator.clipboard.writeText(profile.id);
-      setCopiedUserId(true);
-      playRetroBeep(987, 'sine', 0.08);
-      setTimeout(() => setCopiedUserId(false), 2000);
-    } catch (err) {
-      console.error('Không thể sao chép:', err);
-    }
+    navigator.clipboard
+      .writeText(profile.id)
+      .then(() => {
+        setCopiedUserId(true);
+        playRetroBeep(987, 'sine', 0.08);
+        setTimeout(() => setCopiedUserId(false), 2000);
+      })
+      .catch((err) => console.error('Không thể sao chép:', err));
   };
 
   React.useEffect(() => {
