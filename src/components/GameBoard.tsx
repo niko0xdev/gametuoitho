@@ -339,7 +339,7 @@ export default function GameBoard({
               <div className="flex flex-col">
                 <span className="text-[10px] text-stone-400 font-bold uppercase">ĐỐI THỦ</span>
                 <span className="text-xs sm:text-sm font-bold text-stone-800 leading-none">{opponent.displayName}</span>
-                <span className="text-[10px] font-mono text-stone-500 mt-1.5">Elo: {opponent.elo[match.gameId] || 1500}</span>
+                <span className="text-[10px] font-mono text-stone-500 mt-1.5">Elo: {opponent.elo?.[match.gameId] || 1500}</span>
               </div>
             </div>
           )}
