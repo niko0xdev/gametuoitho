@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { UserProfile } from '../types.ts';
-import { 
-  Award, Shield, UserCheck, Menu, X, 
+import {
+  Award, Shield, UserCheck, Menu, X,
   Gamepad2, Trophy, Swords, Sparkles, History, Edit3,
-  Volume2, VolumeX, RefreshCw, ChevronDown, User, LogOut
+  Volume2, VolumeX, RefreshCw, ChevronDown, User, LogOut, Copy, Check
 } from 'lucide-react';
 import { playRetroBeep } from './games/CaroBoard.tsx';
 import { motion, AnimatePresence } from 'motion/react';
@@ -50,6 +50,19 @@ export default function Header({
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem('sound_enabled') !== 'false');
   const [showEloResetConfirm, setShowEloResetConfirm] = useState(false);
+  const [copiedUserId, setCopiedUserId] = useState(false);
+
+  const copyUserId = () => {
+    if (!profile?.id) return;
+    navigator.clipboard
+      .writeText(profile.id)
+      .then(() => {
+        setCopiedUserId(true);
+        playRetroBeep(987, 'sine', 0.08);
+        setTimeout(() => setCopiedUserId(false), 2000);
+      })
+      .catch((err) => console.error('Không thể sao chép:', err));
+  };
 
   React.useEffect(() => {
     if (profile?.displayName) {
@@ -221,7 +234,17 @@ export default function Header({
                                 </button>
                               </div>
                             )}
-                            <div className="text-[11px] text-stone-400 font-mono mt-0.5">@{profile.username ?? profile.id}</div>
+                            <div className="text-[11px] text-stone-400 font-mono mt-0.5 flex items-center gap-1">
+                              <span>@{profile.username ?? profile.id}</span>
+                              <button
+                                onClick={copyUserId}
+                                className="text-stone-500 hover:text-orange-400 cursor-pointer transition-colors flex items-center gap-0.5"
+                                title="Sao chép ID người dùng"
+                                aria-label={copiedUserId ? 'Đã sao chép ID' : 'Sao chép ID người dùng'}
+                              >
+                                {copiedUserId ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                              </button>
+                            </div>
                             
                             <div className="flex items-center gap-3.5 mt-1.5">
                               <span className="text-[10px] text-stone-300 flex items-center gap-0.5 font-mono bg-stone-950/40 px-2 py-0.5 rounded border border-stone-800">
@@ -645,7 +668,17 @@ export default function Header({
                           </button>
                         </div>
                       )}
-                      <div className="text-xs text-stone-400 font-mono mt-0.5">@{profile.username ?? profile.id}</div>
+                      <div className="text-xs text-stone-400 font-mono mt-0.5 flex items-center gap-1">
+                        <span>@{profile.username ?? profile.id}</span>
+                        <button
+                          onClick={copyUserId}
+                          className="text-stone-500 hover:text-orange-400 cursor-pointer transition-colors flex items-center gap-0.5"
+                          title="Sao chép ID người dùng"
+                          aria-label={copiedUserId ? 'Đã sao chép ID' : 'Sao chép ID người dùng'}
+                        >
+                          {copiedUserId ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
 
                       <div className="flex flex-wrap items-center gap-2 mt-2">
                         <span className="text-[10px] text-stone-300 flex items-center gap-0.5 font-mono bg-stone-950/40 px-2 py-0.5 rounded border border-stone-800">
