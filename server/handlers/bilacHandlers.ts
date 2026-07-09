@@ -140,6 +140,7 @@ export function handleGetBilacTournamentBySlug(req: Request, res: Response) {
     .map((m: any) => ({
       id: m.id,
       timestamp: m.timestamp,
+      weekLabel: m.weekLabel,
       team1: m.team1,
       team2: m.team2,
       score1: m.score1,
