@@ -25,7 +25,8 @@ import {
   Loader2,
   Shield,
   LogIn,
-  Pencil
+  Pencil,
+  KeyRound
 } from 'lucide-react';
 import { BiLacPlayer, BiLacMatch, UserProfile } from '../types';
 
@@ -71,6 +72,13 @@ export default function BiLacArena({
   const [loading, setLoading] = useState(false);
   const [viewOnlyData, setViewOnlyData] = useState<any | null>(null);
   const [viewOnlyError, setViewOnlyError] = useState<string | null>(null);
+  // Guest passcode gate: non-members must enter the tournament passcode each
+  // session. Valid code is cached in localStorage (bilac_guest_code_<slug>) so
+  // a reload of the same share link stays unlocked.
+  const [guestCode, setGuestCode] = useState<string | null>(null);
+  const [passcodeInput, setPasscodeInput] = useState('');
+  const [passcodeError, setPasscodeError] = useState<string | null>(null);
+  const [passcodeRequired, setPasscodeRequired] = useState(false);
   const [lastCreatedSlug, setLastCreatedSlug] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
 
@@ -323,26 +331,47 @@ export default function BiLacArena({
     }
   }, [currentTournament, activeTab]);
 
-  // View-only mode: fetch public by-slug payload, no auth required.
+  // View-only mode: fetch by-slug payload. Guests must supply the tournament
+  // passcode (?code=); logged-in members bypass via the isMember flag.
   useEffect(() => {
     if (viewMode !== 'view-only' || !slug) return;
     let cancelled = false;
+    const codeKey = `bilac_guest_code_${slug}`;
+    // guestCode (just-submitted) overrides the cached value so a retry uses the
+    // new input without waiting for localStorage to be re-read.
+    const code = guestCode !== null ? guestCode : localStorage.getItem(codeKey);
     setViewOnlyError(null);
+    setPasscodeError(null);
+    setPasscodeRequired(false);
     setViewOnlyData(null);
     const headers: Record<string, string> = {};
     // Prefer the live prop (re-triggers on login); fall back to cached id so
     // the very first render (profile still loading) still sends the header.
     const uid = loggedInUserId || localStorage.getItem('auth_userId');
     if (uid) headers['x-user-id'] = uid;
-    fetch(`/api/bilac/tournaments/by-slug/${slug}`, { headers })
+    const q = code ? `?code=${encodeURIComponent(code)}` : '';
+    fetch(`/api/bilac/tournaments/by-slug/${slug}${q}`, { headers })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (cancelled) return;
+        if (res.status === 403 && data.passcodeRequired) {
+          // Non-member without (valid) code → prompt. Drop any stale cache but
+          // keep guestCode as-is: resetting it would re-run this effect, and the
+          // top-level setPasscodeError(null) would then wipe the error we set here.
+          localStorage.removeItem(codeKey);
+          setPasscodeRequired(true);
+          // A tried-and-rejected code gets an explicit "sai mã"; a bare first load
+          // (no code) just shows the prompt with no error.
+          setPasscodeError(code ? 'Mã truy cập không chính xác.' : null);
+          return;
+        }
         if (!res.ok) {
           setViewOnlyError(data.error || 'Không tải được giải đấu.');
           return;
         }
         setViewOnlyData(data);
+        // Cache the valid code so a reload stays unlocked.
+        if (code) localStorage.setItem(codeKey, code);
         // Auto-promote: nếu user đã là member, vào full mode của chính giải này.
         // Phải set currentTournament trước khi navigate, nếu không member mode
         // rơi vào portal list (xem BiLacArena.tsx#1181) — tức bị "đá ra" khỏi
@@ -357,9 +386,9 @@ export default function BiLacArena({
       });
     return () => { cancelled = true; };
     // Re-run when the user logs in (loggedInUserId flips null → id) so the
-    // header is sent and isMember is re-evaluated.
+    // header is sent and isMember is re-evaluated, and when a new code is submitted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, slug, loggedInUserId]);
+  }, [viewMode, slug, loggedInUserId, guestCode]);
 
   // Esc closes the edit-tournament modal (a11y).
   useEffect(() => {
@@ -1304,6 +1333,16 @@ export default function BiLacArena({
     );
   };
 
+  // Guest passcode submit: re-triggers the view-only effect with the entered
+  // code; on success it's cached, on failure the 403 handler shows the error.
+  const submitGuestPasscode = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = passcodeInput.trim();
+    if (!trimmed) return;
+    setPasscodeError(null);
+    setGuestCode(trimmed);
+  };
+
   // VIEW-ONLY MODE: public /bilac/{slug} — skip login gate + member dashboard.
   if (viewMode === 'view-only' && slug) {
     return (
@@ -1345,6 +1384,35 @@ export default function BiLacArena({
               <button onClick={() => onNavigate?.('bilac')} className="text-xs font-bold px-4 py-2 bg-stone-200 hover:bg-stone-300 rounded-lg cursor-pointer">Danh sách giải đấu</button>
               <button onClick={() => { if (typeof window !== 'undefined') window.location.href = '/'; }} className="text-xs font-bold px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg cursor-pointer">Về trang chủ</button>
             </div>
+          </div>
+        ) : passcodeRequired ? (
+          <div className="bg-white border border-stone-300 rounded-2xl p-6 sm:p-8 max-w-md mx-auto">
+            <div className="flex items-center gap-2 mb-2 justify-center">
+              <KeyRound className="w-5 h-5 text-orange-500" />
+              <h2 className="font-extrabold text-stone-900 text-lg">Mã truy cập</h2>
+            </div>
+            <p className="text-xs text-stone-500 text-center mb-4">Nhập mã code để xem giải đấu.</p>
+            <form onSubmit={submitGuestPasscode} className="space-y-3">
+              <input
+                id="input_guest_passcode"
+                type="password"
+                placeholder="Nhập mã code..."
+                value={passcodeInput}
+                onChange={(e) => setPasscodeInput(e.target.value)}
+                autoFocus
+                autoComplete="off"
+                className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-stone-800 placeholder-stone-400 font-mono tracking-widest text-center"
+              />
+              {passcodeError && <p className="text-xs text-red-600 text-center font-semibold">{passcodeError}</p>}
+              <button
+                id="btn_guest_passcode"
+                type="submit"
+                disabled={!passcodeInput.trim()}
+                className="w-full py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-bold cursor-pointer transition-colors disabled:bg-stone-200 disabled:text-stone-400 disabled:cursor-not-allowed"
+              >
+                Xem giải đấu
+              </button>
+            </form>
           </div>
         ) : !viewOnlyData ? (
           <div className="text-center text-stone-500 py-12 text-sm">Đang tải giải đấu...</div>
@@ -2893,6 +2961,12 @@ function ViewOnlyTournamentView({ data }: { data: any }) {
     String(a.name).localeCompare(String(b.name))
   );
   const finished = (data.matches || []).filter((m: any) => m.status === 'FINISHED');
+  // Match history: 10 most recent, winner-first. team1/team2 are player-id arrays.
+  const playersById = new Map<string, string>((data.players || []).map((p: any) => [p.id, p.name]));
+  const teamLabel = (ids: any) => (Array.isArray(ids) ? ids : []).map((id: string) => playersById.get(id) || '?').join(' + ');
+  const recentMatches = [...finished]
+    .sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0))
+    .slice(0, 10);
   const { timeframe, label: weekLabel } = bilacCurrentWeek();
   const seasonRows = computeSeasonLeaderboard(data.players || [], data.matches || [], weekLabel);
   const playedRows = seasonRows.filter(r => r.matchesPlayed > 0);
@@ -2990,18 +3064,47 @@ function ViewOnlyTournamentView({ data }: { data: any }) {
           </div>
         )}
       </div>
-      <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm">
-        <h3 className="font-bold text-stone-900 text-sm mb-3">Trận đã đấu ({finished.length})</h3>
+      <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm" id="bilac_viewonly_history">
+        <h3 className="font-bold text-stone-900 text-sm mb-3">
+          Lịch sử thi đấu{finished.length > 10 ? ' · 10 trận gần nhất' : ` (${finished.length})`}
+        </h3>
         {finished.length === 0 ? (
           <p className="text-xs text-stone-500">Chưa có trận nào hoàn thành.</p>
         ) : (
           <ul className="space-y-2">
-            {finished.map((m: any) => (
-              <li key={m.id} className="text-xs text-stone-700 flex justify-between font-mono">
-                <span>Trận #{String(m.id).slice(-4)}</span>
-                <span>{m.score1} – {m.score2}</span>
-              </li>
-            ))}
+            {recentMatches.map((m: any) => {
+              const t1 = Array.isArray(m.team1) ? m.team1 : [];
+              const t2 = Array.isArray(m.team2) ? m.team2 : [];
+              const t1Win = m.score1 > m.score2;
+              const t2Win = m.score2 > m.score1;
+              const draw = !t1Win && !t2Win;
+              const winners = t1Win ? t1 : t2Win ? t2 : [];
+              const losers = t1Win ? t2 : t2Win ? t1 : [];
+              const date = m.timestamp
+                ? new Date(m.timestamp).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
+                : '';
+              return (
+                <li key={m.id} className="text-xs rounded-lg bg-stone-50 border border-stone-100 px-3 py-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {draw ? (
+                      <span className="font-semibold text-stone-700">
+                        {teamLabel(t1)} <span className="text-stone-400 font-normal">hoà</span> {teamLabel(t2)}
+                      </span>
+                    ) : (
+                      <>
+                        <span className="font-bold text-emerald-700 inline-flex items-center gap-1">
+                          <Trophy className="w-3 h-3 text-yellow-500" />
+                          {teamLabel(winners)}
+                        </span>
+                        <span className="text-stone-500">{teamLabel(losers)}</span>
+                      </>
+                    )}
+                    <span className="ml-auto font-mono font-bold text-stone-800">{m.score1}–{m.score2}</span>
+                  </div>
+                  {date && <p className="text-[10px] text-stone-400 mt-1">{date}</p>}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

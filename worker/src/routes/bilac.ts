@@ -242,6 +242,16 @@ bilacRoute.get('/tournaments/by-slug/:slug', async (c) => {
     .where(eq(bilacTournamentMembersTable.tournamentId, tour.id))
     .all()).length;
 
+  // Guests (non-members) must present the tournament passcode via ?code= or
+  // x-tournament-code header. Logged-in members bypass — they own the data and
+  // the client auto-promotes them into full member mode off the isMember flag.
+  if (!isMember) {
+    const code = c.req.query('code') || c.req.header('x-tournament-code');
+    if (!tour.code || tour.code !== code) {
+      return c.json({ error: 'Nhập mã truy cập để xem giải đấu.', passcodeRequired: true }, 403);
+    }
+  }
+
   return c.json({
     id: tour.id,
     slug: tour.slug,

@@ -157,6 +157,15 @@ export function handleGetBilacTournamentBySlug(req: Request, res: Response) {
     isMember = members.some((m: any) => m.userId === uid);
   }
 
+  // Guests (non-members) must present the tournament passcode via ?code= or
+  // x-tournament-code header. Logged-in members bypass (parity with worker).
+  if (!isMember) {
+    const code = (req.query.code as string) || (req.headers['x-tournament-code'] as string);
+    if (!tour.code || tour.code !== code) {
+      return res.status(403).json({ error: 'Nhập mã truy cập để xem giải đấu.', passcodeRequired: true });
+    }
+  }
+
   res.json({
     id: tour.id,
     slug: tour.slug,
