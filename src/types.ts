@@ -110,7 +110,7 @@ export interface BiLacTournament {
 }
 
 // Sports League Management Types
-export type SportType = 'futsal' | 'pes' | 'pingpong' | 'badminton';
+export type SportType = 'futsal' | 'pes' | 'pingpong' | 'badminton' | 'co_tuong';
 export type FormatType = 'round_robin' | 'knockout' | 'group_knockout';
 
 export interface LeagueTeam {

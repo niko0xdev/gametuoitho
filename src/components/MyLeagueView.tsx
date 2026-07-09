@@ -27,7 +27,8 @@ export const SPORT_LABELS: Record<SportType, { name: string; icon: string; score
   futsal: { name: 'Bóng đá Futsal', icon: '⚽', scoreUnit: 'Bàn thắng' },
   pes: { name: 'Đá PES (eFootball)', icon: '🎮', scoreUnit: 'Bàn thắng' },
   pingpong: { name: 'Bóng bàn', icon: '🏓', scoreUnit: 'Điểm số' },
-  badminton: { name: 'Cầu lông', icon: '🏸', scoreUnit: 'Điểm số' }
+  badminton: { name: 'Cầu lông', icon: '🏸', scoreUnit: 'Điểm số' },
+  co_tuong: { name: 'Cờ Tướng', icon: '♟️', scoreUnit: 'Ván thắng' }
 };
 
 export const FORMAT_LABELS: Record<FormatType, string> = {
@@ -35,6 +36,11 @@ export const FORMAT_LABELS: Record<FormatType, string> = {
   knockout: 'Loại trực tiếp (Knockout)',
   group_knockout: 'Chia bảng + Loại trực tiếp'
 };
+
+// Sport-aware noun for a competitor: chess plays as individuals ("Kỳ thủ"),
+// racket sports as athletes ("VĐV"), ball sports as teams ("Đội").
+export const competitorNoun = (sport: SportType): string =>
+  sport === 'co_tuong' ? 'Kỳ thủ' : (sport === 'pingpong' || sport === 'badminton') ? 'VĐV' : 'Đội';
 
 type LeagueListItem = MyLeague & { memberCount: number; role: LeagueMemberRole | null; isMember: boolean };
 
@@ -289,7 +295,7 @@ export default function MyLeagueView({
 
   // ── Create form helpers ────────────────────────────────────────────────
   useEffect(() => {
-    setTeamNames(prev => Array.from({ length: numTeams }, (_, i) => prev[i] || `Đội tuyển ${i + 1}`));
+    setTeamNames(prev => Array.from({ length: numTeams }, (_, i) => prev[i] || `${competitorNoun(newLeagueSport)} ${i + 1}`));
     setTeamPlayers(prev => Array.from({ length: numTeams }, (_, i) => prev[i] || []));
   }, [numTeams, newLeagueSport]);
 
@@ -323,7 +329,7 @@ export default function MyLeagueView({
         else if (newLeagueFormat === 'knockout') target = parsedTeams.length > 4 ? 8 : 4;
         else target = parsedTeams.length <= 3 ? 3 : parsedTeams.length <= 6 ? parsedTeams.length : 8;
         setNumTeams(target);
-        setTeamNames(Array.from({ length: target }, (_, i) => parsedTeams[i]?.name || `Đội tuyển ${i + 1}`));
+        setTeamNames(Array.from({ length: target }, (_, i) => parsedTeams[i]?.name || `${competitorNoun(newLeagueSport)} ${i + 1}`));
         setTeamPlayers(Array.from({ length: target }, (_, i) => Array.isArray(parsedTeams[i]?.players) ? parsedTeams[i].players : []));
         setAiSuccessMessage(`✨ Đã phân tích ${parsedTeams.length} đội bằng AI và điền vào form!`);
         playRetroBeep(880, 'sine', 0.1);
@@ -767,11 +773,12 @@ export default function MyLeagueView({
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label htmlFor="form-league-sport" className="text-xs font-extrabold text-stone-600 uppercase tracking-wider">Bộ môn</label>
-                  <select id="form-league-sport" value={newLeagueSport} onChange={e => setNewLeagueSport(e.target.value as SportType)} className="bg-white border border-stone-300 focus:border-orange-500 rounded-xl text-xs py-2.5 px-3.5 cursor-pointer font-semibold">
+                  <select id="form-league-sport" value={newLeagueSport} onChange={e => { const s = e.target.value as SportType; setNewLeagueSport(s); if (s === 'co_tuong') { setNewLeagueFormat('round_robin'); setNumTeams(4); } }} className="bg-white border border-stone-300 focus:border-orange-500 rounded-xl text-xs py-2.5 px-3.5 cursor-pointer font-semibold">
                     <option value="futsal">⚽ Futsal</option>
                     <option value="pes">🎮 PES eFootball</option>
                     <option value="pingpong">🏓 Bóng bàn</option>
                     <option value="badminton">🏸 Cầu lông</option>
+                    <option value="co_tuong">♟️ Cờ Tướng (đánh đơn)</option>
                   </select>
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -783,9 +790,9 @@ export default function MyLeagueView({
                   </select>
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label htmlFor="form-league-teams-count" className="text-xs font-extrabold text-stone-600 uppercase tracking-wider">Số đội</label>
+                  <label htmlFor="form-league-teams-count" className="text-xs font-extrabold text-stone-600 uppercase tracking-wider">Số {competitorNoun(newLeagueSport).toLowerCase()}</label>
                   <select id="form-league-teams-count" value={numTeams} disabled={newLeagueFormat === 'group_knockout'} onChange={e => setNumTeams(parseInt(e.target.value))} className="bg-white border border-stone-300 focus:border-orange-500 rounded-xl text-xs py-2.5 px-3.5 cursor-pointer font-semibold disabled:opacity-50">
-                    {newLeagueFormat === 'knockout' ? (<><option value="4">4 Đội</option><option value="8">8 Đội</option></>) : newLeagueFormat === 'group_knockout' ? (<option value="8">8 Đội (2 bảng)</option>) : (<><option value="3">3 Đội</option><option value="4">4 Đội</option><option value="5">5 Đội</option><option value="6">6 Đội</option><option value="8">8 Đội</option></>)}
+                    {newLeagueFormat === 'knockout' ? (<><option value="4">4 {competitorNoun(newLeagueSport)}</option><option value="8">8 {competitorNoun(newLeagueSport)}</option></>) : newLeagueFormat === 'group_knockout' ? (<option value="8">8 {competitorNoun(newLeagueSport)} (2 bảng)</option>) : (<><option value="3">3 {competitorNoun(newLeagueSport)}</option><option value="4">4 {competitorNoun(newLeagueSport)}</option><option value="5">5 {competitorNoun(newLeagueSport)}</option><option value="6">6 {competitorNoun(newLeagueSport)}</option><option value="8">8 {competitorNoun(newLeagueSport)}</option><option value="10">10 {competitorNoun(newLeagueSport)}</option><option value="12">12 {competitorNoun(newLeagueSport)}</option></>)}
                   </select>
                 </div>
               </div>
@@ -804,13 +811,13 @@ export default function MyLeagueView({
                   {aiErrorMessage && <div className="bg-rose-50 text-rose-700 border border-rose-200 p-2.5 rounded-lg text-[10px] font-bold">❌ {aiErrorMessage}</div>}
                 </div>
 
-                <span className="text-xs font-extrabold text-stone-600 uppercase tracking-wider">Tên các đội / VĐV ({numTeams})</span>
+                <span className="text-xs font-extrabold text-stone-600 uppercase tracking-wider">Tên các {competitorNoun(newLeagueSport).toLowerCase()} ({numTeams})</span>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 max-h-[350px] overflow-y-auto p-2 border border-stone-200 rounded-xl bg-stone-50">
                   {Array.from({ length: numTeams }).map((_, idx) => (
                     <div key={idx} className="flex flex-col gap-2 bg-white border border-stone-200 p-3 rounded-xl">
                       <div className="flex items-center gap-2">
                         <span className={`w-3.5 h-3.5 rounded-full ${LOGO_COLORS[idx % LOGO_COLORS.length]} shrink-0`} />
-                        <input type="text" required placeholder={`Đội / VĐV thứ ${idx + 1}`} value={teamNames[idx] || ''} onChange={e => handleTeamNameChange(idx, e.target.value)} className="flex-1 bg-transparent border-b border-stone-100 focus:border-orange-500 p-0.5 text-xs font-bold text-stone-800" />
+                        <input type="text" required placeholder={`${competitorNoun(newLeagueSport)} thứ ${idx + 1}`} value={teamNames[idx] || ''} onChange={e => handleTeamNameChange(idx, e.target.value)} className="flex-1 bg-transparent border-b border-stone-100 focus:border-orange-500 p-0.5 text-xs font-bold text-stone-800" />
                       </div>
                       {newLeagueSport === 'futsal' && (
                         <div className="flex flex-col gap-1.5 pl-5.5">
@@ -1045,7 +1052,7 @@ function LeagueDetail(p: LeagueDetailProps) {
               <span className="text-stone-600">|</span>
               <span>Thể thức: <b>{FORMAT_LABELS[league.format]}</b></span>
               <span className="text-stone-600">|</span>
-              <span>Đội: <b>{league.teams.length}</b></span>
+              <span>{competitorNoun(league.sport)}: <b>{league.teams.length}</b></span>
               {p.myRole && (<><span className="text-stone-600">|</span><span className="text-amber-400">{p.myRole === 'owner' ? 'Chủ giải' : 'Quản trị viên'}</span></>)}
             </div>
           </div>
@@ -1076,7 +1083,7 @@ function LeagueDetail(p: LeagueDetailProps) {
       <div className="bg-stone-50 border-b border-stone-200 px-6 py-2 flex items-center gap-2 overflow-x-auto">
         <TabButton active={p.activeTab === 'schedule'} onClick={() => p.setActiveTab('schedule')}>🗓️ Lịch &amp; Tỉ Số</TabButton>
         {league.format !== 'knockout' && <TabButton active={p.activeTab === 'standings'} onClick={() => p.setActiveTab('standings')}>📊 Xếp Hạng</TabButton>}
-        <TabButton active={p.activeTab === 'teams'} onClick={() => p.setActiveTab('teams')}>🛡️ Các Đội</TabButton>
+        <TabButton active={p.activeTab === 'teams'} onClick={() => p.setActiveTab('teams')}>🛡️ Các {competitorNoun(league.sport)}</TabButton>
         {league.sport === 'futsal' && <TabButton active={p.activeTab === 'stats'} onClick={() => p.setActiveTab('stats')}>🏆 Thống Kê</TabButton>}
         {p.canManage && <TabButton active={p.activeTab === 'members'} onClick={() => p.setActiveTab('members')}>👥 Quản trị</TabButton>}
       </div>
@@ -1341,7 +1348,7 @@ function StandingsTable({ standings, league, getTeamName, getTeamColor }: { stan
       <table className="w-full text-left border-collapse bg-white text-xs">
         <thead>
           <tr className="bg-stone-50 border-b border-stone-200 text-stone-500 font-bold">
-            <th className="p-3 text-center w-12">#</th><th className="p-3">Đội</th><th className="p-3 text-center">Trận</th><th className="p-3 text-center">T</th><th className="p-3 text-center">H</th><th className="p-3 text-center">B</th><th className="p-3 text-center">HS</th><th className="p-3 text-center font-bold text-orange-600">Điểm</th>
+            <th className="p-3 text-center w-12">#</th><th className="p-3">{competitorNoun(league.sport)}</th><th className="p-3 text-center">Trận</th><th className="p-3 text-center">T</th><th className="p-3 text-center">H</th><th className="p-3 text-center">B</th><th className="p-3 text-center">HS</th><th className="p-3 text-center font-bold text-orange-600">Điểm</th>
           </tr>
         </thead>
         <tbody>
