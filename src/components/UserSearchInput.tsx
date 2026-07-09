@@ -39,9 +39,17 @@ export function UserSearchInput({
   const [active, setActive] = useState(-1);
   const boxRef = useRef<HTMLDivElement>(null);
   const reqId = useRef(0);
+  // Set on pick so the next effect run (triggered by the parent filling the
+  // input with the chosen username) skips searching instead of reopening the
+  // dropdown to show the just-invited user on slow links.
+  const justPicked = useRef(false);
   const excludeKey = (excludeUsernames ?? []).join(',');
 
   useEffect(() => {
+    if (justPicked.current) {
+      justPicked.current = false;
+      return;
+    }
     const q = value.trim();
     if (q.length < 2) {
       reqId.current++; // retire any in-flight request so it can't reopen the dropdown
@@ -88,6 +96,7 @@ export function UserSearchInput({
   }, []);
 
   const pick = (u: UserSearchResult) => {
+    justPicked.current = true;
     onSelect(u);
     setOpen(false);
     setResults([]);
