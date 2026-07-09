@@ -129,6 +129,9 @@ export default function BiLacArena({
   const [editTourDesc, setEditTourDesc] = useState('');
   const [renamingPlayerId, setRenamingPlayerId] = useState<string | null>(null);
   const [renamePlayerName, setRenamePlayerName] = useState('');
+  // Drag-and-drop team swap: the player row currently being dragged within the
+  // ongoing match scoreboard. Null when nothing is held.
+  const [draggedPlayer, setDraggedPlayer] = useState<{ matchId: string; playerId: string } | null>(null);
 
   // Portal tabs: 'all' = default; 'joined' = chỉ giải user là thành viên.
   const [portalTab, setPortalTab] = useState<'all' | 'joined'>('all');
@@ -1065,6 +1068,39 @@ export default function BiLacArena({
     }
   };
 
+  // Drag-and-drop: swap a player from one team with a player on the other team
+  // of the same ongoing match. Keeps both teams the same size — no orphans.
+  // Each id lives in exactly one team, so exchanging the pair in both arrays only
+  // moves the relevant ids. Backend re-asserts PLAYING-only; bail locally too.
+  const handleSwapPlayers = async (matchId: string, dragPlayerId: string, dropPlayerId: string) => {
+    const match = matches.find(m => m.id === matchId);
+    if (!match || match.status !== 'PLAYING' || dragPlayerId === dropPlayerId) return;
+    const onSameSide = match.team1.includes(dragPlayerId) === match.team1.includes(dropPlayerId);
+    if (onSameSide) return; // same team (or unknown) — nothing to swap
+    const exchange = (arr: string[]) => arr.map(id => (id === dragPlayerId ? dropPlayerId : id === dropPlayerId ? dragPlayerId : id));
+    const team1 = exchange(match.team1);
+    const team2 = exchange(match.team2);
+    try {
+      const res = await bilacFetch(`/api/bilac/matches/${matchId}/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ team1, team2 })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setMatches(prev => prev.map(m => (m.id === matchId ? updated : m)));
+        playBeep(659, 'sine', 0.1);
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setError(d.error || 'Không đổi đội được — mã giải đấu có thể đã đổi. Vui lòng vào lại giải.');
+        playBeep(180, 'sawtooth', 0.2);
+      }
+    } catch (e) {
+      console.error(e);
+      setError('Lỗi kết nối khi đổi đội.');
+    }
+  };
+
   // Compute Weekly Interval label for display
   const getWeeklyTimeframe = () => {
     const rawDate = new Date();
@@ -1229,6 +1265,44 @@ export default function BiLacArena({
 
   const currentLeaderboard = calculateLeaderboards();
   const ongoingMatch = matches.find(m => m.status === 'PLAYING');
+
+  // Render a single player row inside the ongoing-match scoreboard. Each row is
+  // both a drag source and a drop target — dropping player A onto player B swaps
+  // their teams (see handleSwapPlayers). Native HTML5 DnD, no library.
+  const renderTeamPlayer = (pId: string) => {
+    const player = players.find(p => p.id === pId);
+    const isDragging = draggedPlayer?.playerId === pId;
+    return (
+      <div
+        key={pId}
+        draggable
+        onDragStart={(e) => {
+          // Firefox cancels the drag unless dataTransfer is populated.
+          e.dataTransfer.setData('text/plain', pId);
+          setDraggedPlayer({ matchId: ongoingMatch!.id, playerId: pId });
+        }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          if (draggedPlayer && draggedPlayer.playerId !== pId) {
+            handleSwapPlayers(ongoingMatch!.id, draggedPlayer.playerId, pId);
+          }
+          setDraggedPlayer(null);
+        }}
+        onDragEnd={() => setDraggedPlayer(null)}
+        className={`flex items-center gap-2 p-2 rounded-xl border select-none transition-all cursor-grab active:cursor-grabbing ${
+          isDragging
+            ? 'opacity-40 border-orange-500/60 bg-stone-800/30'
+            : 'bg-stone-800/60 border-stone-700/50 hover:border-orange-500/50'
+        }`}
+        title="Kéo thả sang đội kia để đổi đội"
+      >
+        <img src={player?.avatar} className="w-7 h-7 rounded-full bg-stone-700 border border-stone-600" alt="Avatar" />
+        <span className="text-xs font-semibold truncate text-stone-200 flex-1">{player?.name || 'Vô danh'}</span>
+        <span className="text-stone-600 text-[10px] leading-none">⠿</span>
+      </div>
+    );
+  };
 
   // VIEW-ONLY MODE: public /bilac/{slug} — skip login gate + member dashboard.
   if (viewMode === 'view-only' && slug) {
@@ -1760,6 +1834,12 @@ export default function BiLacArena({
                   </div>
                 </div>
 
+                {/* Drag-and-drop hint */}
+                <p className="text-[10px] sm:text-xs text-stone-400 italic mb-2 flex items-center gap-1">
+                  <Shuffle className="w-3 h-3 text-orange-400" />
+                  Kéo thả thành viên này qua người chơi đội kia để đổi đội cho nhau.
+                </p>
+
                 {/* Score Area */}
                 <div className="grid grid-cols-7 items-center gap-2 sm:gap-4 my-8" id="score_display_area">
                   {/* TEAM 1 */}
@@ -1794,15 +1874,7 @@ export default function BiLacArena({
 
                     {/* Players in Team 1 */}
                     <div className="mt-6 space-y-2.5 text-left">
-                      {ongoingMatch.team1.map(pId => {
-                        const player = players.find(p => p.id === pId);
-                        return (
-                          <div key={pId} className="flex items-center gap-2 bg-stone-800/60 p-2 rounded-xl border border-stone-700/50">
-                            <img src={player?.avatar} className="w-7 h-7 rounded-full bg-stone-700 border border-stone-600" alt="Avatar" />
-                            <span className="text-xs font-semibold truncate text-stone-200">{player?.name || 'Vô danh'}</span>
-                          </div>
-                        );
-                      })}
+                      {ongoingMatch.team1.map(pId => renderTeamPlayer(pId))}
                     </div>
                   </div>
 
@@ -1844,15 +1916,7 @@ export default function BiLacArena({
 
                     {/* Players in Team 2 */}
                     <div className="mt-6 space-y-2.5 text-left">
-                      {ongoingMatch.team2.map(pId => {
-                        const player = players.find(p => p.id === pId);
-                        return (
-                          <div key={pId} className="flex items-center gap-2 bg-stone-800/60 p-2 rounded-xl border border-stone-700/50">
-                            <img src={player?.avatar} className="w-7 h-7 rounded-full bg-stone-700 border border-stone-600" alt="Avatar" />
-                            <span className="text-xs font-semibold truncate text-stone-200">{player?.name || 'Vô danh'}</span>
-                          </div>
-                        );
-                      })}
+                      {ongoingMatch.team2.map(pId => renderTeamPlayer(pId))}
                     </div>
                   </div>
                 </div>

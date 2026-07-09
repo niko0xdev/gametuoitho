@@ -500,7 +500,7 @@ export function handleCreateBilacMatch(req: Request, res: Response) {
 }
 
 export function handleUpdateBilacMatch(req: Request, res: Response) {
-  const { score1, score2, status } = req.body;
+  const { score1, score2, status, team1, team2 } = req.body;
   const match = db.getBiLacMatch(req.params.id);
   if (!match) {
     return res.status(404).json({ error: 'Không tìm thấy trận đấu!' });
@@ -510,9 +510,29 @@ export function handleUpdateBilacMatch(req: Request, res: Response) {
     return res.status(403).json({ error: 'Bạn không có quyền chỉnh sửa trận đấu của giải đấu này!' });
   }
 
+  // Capture play-state BEFORE applying any status change: swapping team rosters is
+  // only allowed mid-match — never on a FINISHED match (would rewrite ranking history).
+  const wasPlaying = match.status === 'PLAYING';
   if (typeof score1 === 'number') match.score1 = score1;
   if (typeof score2 === 'number') match.score2 = score2;
   if (status) match.status = status;
+
+  // Drag-and-drop team swap: both arrays must be present and contain only strings.
+  const isStrArray = (v: any) => Array.isArray(v) && v.every((x: any) => typeof x === 'string');
+  if (isStrArray(team1) && isStrArray(team2)) {
+    if (!wasPlaying) {
+      return res.status(400).json({ error: 'Chỉ có thể đổi đội khi trận đang diễn ra!' });
+    }
+    // Must be a pure rearrangement of the existing roster — same multiset of ids,
+    // no add/drop/phantom — so a code-holder can't wipe or corrupt the teams.
+    const oldSorted = [...match.team1, ...match.team2].sort();
+    const newSorted = [...team1, ...team2].sort();
+    if (oldSorted.length !== newSorted.length || oldSorted.some((id: string, i: number) => id !== newSorted[i])) {
+      return res.status(400).json({ error: 'Đội hình chỉ được hoán đổi thành viên hiện có — không thêm, bớt hay đặt người lạ!' });
+    }
+    match.team1 = team1;
+    match.team2 = team2;
+  }
 
   db.saveBiLacMatch(match);
   res.json(match);
