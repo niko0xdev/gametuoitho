@@ -1,6 +1,7 @@
 // Express types from server.ts inline middleware, extracted verbatim.
 import type { Request, Response, NextFunction } from 'express';
 import { db } from '../db.ts';
+import type { MyLeague } from '../../src/types.ts';
 
 export function getRequestUserId(req: any): string | null {
   // Header-only — never trust body/query for identity (impersonation risk).
@@ -93,5 +94,67 @@ export function requireBiLacOwner(req: any, res: any, next: NextFunction) {
   }
   req.userId = uid;
   req.tournamentId = tournamentId;
+  next();
+}
+
+// ── Sports League (MyLeague) access ──────────────────────────────────────────
+// Shared resolver for the three tiers. Reads league id + code from headers (or
+// query for the deep-link case), loads the league, verifies the access code,
+// and confirms login. Returns the resolved trio or null (after writing an error).
+function resolveLeagueAccess(req: any, res: any): { uid: string; leagueId: string; league: MyLeague } | null {
+  const leagueId = req.headers['x-league-id'] || req.query.leagueId;
+  const code = req.headers['x-league-code'] || req.query.code;
+  if (!leagueId) {
+    res.status(401).json({ error: 'Thiếu mã giải đấu (League ID)!' });
+    return null;
+  }
+  const league = db.getMyLeague(leagueId as string);
+  if (!league) {
+    res.status(404).json({ error: 'Không tìm thấy giải đấu này!' });
+    return null;
+  }
+  if (!league.code || league.code !== code) {
+    res.status(403).json({ error: 'Mã truy cập không chính xác!' });
+    return null;
+  }
+  const uid = requireLoggedIn(req, res);
+  if (!uid) return null;
+  return { uid, leagueId: leagueId as string, league };
+}
+
+// Any member (owner or admin) — used for reads like the member list.
+export function checkLeagueAccess(req: any, res: any, next: NextFunction) {
+  const acc = resolveLeagueAccess(req, res);
+  if (!acc) return;
+  if (!db.isMyLeagueMember(acc.leagueId, acc.uid)) {
+    return res.status(403).json({ error: 'Bạn chưa là thành viên của giải đấu này!' });
+  }
+  req.leagueId = acc.leagueId;
+  req.userId = acc.uid;
+  next();
+}
+
+// Owner or admin — can edit tournament details and results.
+export function requireLeagueEditor(req: any, res: any, next: NextFunction) {
+  const acc = resolveLeagueAccess(req, res);
+  if (!acc) return;
+  const role = db.getMyLeagueMemberRole(acc.leagueId, acc.uid);
+  if (role !== 'owner' && role !== 'admin') {
+    return res.status(403).json({ error: 'Chỉ chủ giải hoặc quản trị viên mới được chỉnh sửa!' });
+  }
+  req.leagueId = acc.leagueId;
+  req.userId = acc.uid;
+  next();
+}
+
+// Owner only — delete tournament, manage members.
+export function requireLeagueOwner(req: any, res: any, next: NextFunction) {
+  const acc = resolveLeagueAccess(req, res);
+  if (!acc) return;
+  if (!db.isMyLeagueOwner(acc.leagueId, acc.uid)) {
+    return res.status(403).json({ error: 'Chỉ chủ giải mới có quyền thực hiện thao tác này!' });
+  }
+  req.leagueId = acc.leagueId;
+  req.userId = acc.uid;
   next();
 }

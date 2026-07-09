@@ -15,9 +15,9 @@ import { handleLeaderboardGlobal, handleLeaderboardByGame } from './server/handl
 import { handleListTournaments, handleCreateTournament, handleJoinTournament, handleGetTournamentByCode, handleGetTournament, handleStartTournament, handleLaunchTournamentMatch } from './server/handlers/tournamentHandlers.ts';
 import { handleGetChallenge, handleSubmitChallenge } from './server/handlers/challengeHandlers.ts';
 import { handleGetReplaysByUser, handleGetReplay } from './server/handlers/replayHandlers.ts';
-import { checkBiLacTournamentAccess, requireBiLacMember, requireBiLacOwner, requireLoggedIn } from './server/handlers/_middleware.ts';
+import { checkBiLacTournamentAccess, requireBiLacMember, requireBiLacOwner, requireLoggedIn, checkLeagueAccess, requireLeagueEditor, requireLeagueOwner } from './server/handlers/_middleware.ts';
 import { handleListBilacTournaments, handleAccessBilacTournament, handleCreateBilacTournament, handleUpdateBilacTournament, handleDeleteBilacTournament, handleListBilacMembers, handleInviteBilacMember, handleRemoveBilacMember, handleGetBilacPlayers, handleCreateBilacPlayer, handleUpdateBilacPlayer, handleDeleteBilacPlayer, handleGetBilacMatches, handleCreateBilacMatch, handleUpdateBilacMatch, handleDeleteBilacMatch, handleGetBilacTournamentBySlug } from './server/handlers/bilacHandlers.ts';
-import { handleListLeagues, handleCreateLeague, handlePutLeague, handleDeleteLeague, handleGetLeaguePermissions, handleToggleLeaguePermission } from './server/handlers/leagueHandlers.ts';
+import { handleListLeagues, handleGetLeagueBySlug, handleAccessLeague, handleCreateLeague, handlePutLeague, handleDeleteLeague, handleListLeagueMembers, handleInviteLeagueMember, handleRemoveLeagueMember } from './server/handlers/leagueHandlers.ts';
 import { db } from './server/db.ts';
 import { handleParseRoster, handleParsePlayers, handleParseEvents } from './server/handlers/aiHandlers.ts';
 
@@ -102,13 +102,16 @@ async function startServer() {
   app.post('/api/bilac/matches/:id/update', requireBiLacMember, handleUpdateBilacMatch);
   app.delete('/api/bilac/matches/:id', requireBiLacMember, handleDeleteBilacMatch);
 
-  // 7. SPORTS LEAGUES & PERMISSION CONTRACT
+  // 7. SPORTS LEAGUES (per-league ACL: owner + admins, view-only share link)
   app.get('/api/leagues', handleListLeagues);
+  app.get('/api/leagues/by-slug/:slug', handleGetLeagueBySlug);
+  app.post('/api/leagues/access', handleAccessLeague);
   app.post('/api/leagues', handleCreateLeague);
-  app.put('/api/leagues/:id', handlePutLeague);
-  app.delete('/api/leagues/:id', handleDeleteLeague);
-  app.get('/api/leagues-permissions', handleGetLeaguePermissions);
-  app.post('/api/leagues-permissions/toggle', handleToggleLeaguePermission);
+  app.put('/api/leagues/:id', requireLeagueEditor, handlePutLeague);
+  app.delete('/api/leagues/:id', requireLeagueOwner, handleDeleteLeague);
+  app.get('/api/leagues/members', checkLeagueAccess, handleListLeagueMembers);
+  app.post('/api/leagues/members', requireLeagueOwner, handleInviteLeagueMember);
+  app.delete('/api/leagues/members/:userId', requireLeagueOwner, handleRemoveLeagueMember);
 
   // Expose app for in-process testing (without binding a port).
   (globalThis as any).__gametuoithoApp = app;

@@ -15,6 +15,7 @@ import {
   bilacTournamentsTable,
   bilacTournamentMembersTable,
   myLeaguesTable,
+  myLeagueMembersTable,
   leaguePermissionsTable
 } from './schema.ts';
 import {
@@ -25,7 +26,9 @@ import {
   BiLacPlayer,
   BiLacMatch,
   BiLacTournament,
-  MyLeague
+  MyLeague,
+  LeagueMember,
+  LeagueMemberRole
 } from '../src/types.ts';
 
 const DB_FILE = process.env.DB_FILE_JSON || path.join(process.cwd(), 'database.json');
@@ -197,6 +200,29 @@ class Database {
         user_id TEXT PRIMARY KEY,
         can_edit INTEGER DEFAULT 0
       );
+    `);
+    // my_leagues ACL columns (added incrementally — swallow "duplicate column" on re-init).
+    for (const col of ['slug TEXT', 'code TEXT', 'description TEXT', 'owner_user_id TEXT']) {
+      try {
+        sqliteDb.exec(`ALTER TABLE my_leagues ADD COLUMN ${col};`);
+      } catch (err: any) {
+        if (!/duplicate column name/i.test(String(err?.message))) throw err;
+      }
+    }
+    sqliteDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_my_leagues_slug ON my_leagues(slug) WHERE slug IS NOT NULL;`);
+    sqliteDb.exec(`
+      CREATE TABLE IF NOT EXISTS my_league_members (
+        id TEXT PRIMARY KEY,
+        league_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        joined_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_my_league_members_league ON my_league_members(league_id);
+      CREATE INDEX IF NOT EXISTS idx_my_league_members_user ON my_league_members(user_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_my_league_members_unique ON my_league_members(league_id, user_id);
     `);
   }
 
@@ -430,58 +456,11 @@ class Database {
         this.saveBiLacPlayer(p);
       }
 
-      const leagueSeeds: MyLeague[] = [
-        {
-          id: 'league-futsal-2026',
-          name: 'Giải Futsal Doanh Nghiệp Cúp Hà Nội 2026',
-          sport: 'futsal',
-          format: 'round_robin',
-          status: 'ACTIVE',
-          createdAt: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString(),
-          teams: [
-            { id: 't1', name: 'FC Futsal UIT', logoColor: 'bg-blue-500' },
-            { id: 't2', name: 'Văn Phòng FC', logoColor: 'bg-red-500' },
-            { id: 't3', name: 'Đồng Đội Brotherhood', logoColor: 'bg-emerald-500' },
-            { id: 't4', name: 'Tech Warriors FC', logoColor: 'bg-amber-500' }
-          ],
-          matches: [
-            { id: 'm-r1-1', round: 1, home: 't1', away: 't4', homeScore: 3, awayScore: 1, isPlayed: true },
-            { id: 'm-r1-2', round: 1, home: 't2', away: 't3', homeScore: 2, awayScore: 2, isPlayed: true },
-            { id: 'm-r2-1', round: 2, home: 't1', away: 't3', homeScore: 1, awayScore: 4, isPlayed: true },
-            { id: 'm-r2-2', round: 2, home: 't4', away: 't2', homeScore: null, awayScore: null, isPlayed: false },
-            { id: 'm-r3-1', round: 3, home: 't1', away: 't2', homeScore: null, awayScore: null, isPlayed: false },
-            { id: 'm-r3-2', round: 3, home: 't3', away: 't4', homeScore: null, awayScore: null, isPlayed: false }
-          ]
-        },
-        {
-          id: 'league-pes-cup',
-          name: 'PES eFootball Cyber Championship 2026',
-          sport: 'pes',
-          format: 'knockout',
-          status: 'ACTIVE',
-          createdAt: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
-          teams: [
-            { id: 'p1', name: 'Gamer Hoàng UIT', logoColor: 'bg-purple-500' },
-            { id: 'p2', name: 'PES Master Hải', logoColor: 'bg-pink-500' },
-            { id: 'p3', name: 'Pro Player Thắng', logoColor: 'bg-indigo-500' },
-            { id: 'p4', name: 'Sát Thủ Tay Cầm Duy', logoColor: 'bg-teal-500' }
-          ],
-          matches: [
-            { id: 'sf1', round: 1, stage: 'Semifinals', home: 'p1', away: 'p2', homeScore: 4, awayScore: 2, isPlayed: true, winner: 'p1', nextMatchId: 'f1', nextMatchPosition: 'home' },
-            { id: 'sf2', round: 1, stage: 'Semifinals', home: 'p3', away: 'p4', homeScore: 1, awayScore: 3, isPlayed: true, winner: 'p4', nextMatchId: 'f1', nextMatchPosition: 'away' },
-            { id: 'f1', round: 2, stage: 'Final', home: 'p1', away: 'p4', homeScore: null, awayScore: null, isPlayed: false, winner: null }
-          ]
-        }
-      ];
+      const leagueSeeds: MyLeague[] = [];
       for (const l of leagueSeeds) {
         this.saveMyLeague(l);
       }
 
-      this.saveLeaguePermissions({
-        user_a: true,
-        user_b: false,
-        user_c: false
-      });
       console.log('Successfully completed seeding SQLite defaults.');
     } catch (e) {
       console.error('Error seeding SQLite database defaults', e);
@@ -1214,9 +1193,11 @@ class Database {
   }
 
   // MyLeagues
-  getMyLeague(id: string): MyLeague | undefined {
-    const row = drizzleDb.select().from(myLeaguesTable).where(eq(myLeaguesTable.id, id)).get();
-    if (!row) return undefined;
+  private parseJsonArray(v: any): any[] {
+    try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
+  }
+
+  private leagueFromRow(row: any): MyLeague {
     return {
       id: row.id,
       name: row.name,
@@ -1224,9 +1205,36 @@ class Database {
       format: row.format as any,
       status: row.status as any,
       createdAt: row.createdAt,
-      teams: JSON.parse(row.teams),
-      matches: JSON.parse(row.matches)
+      teams: this.parseJsonArray(row.teams),
+      matches: this.parseJsonArray(row.matches),
+      slug: row.slug ?? undefined,
+      code: row.code ?? undefined,
+      description: row.description ?? undefined,
+      ownerUserId: row.ownerUserId ?? undefined,
     };
+  }
+
+  getMyLeague(id: string): MyLeague | undefined {
+    const row = drizzleDb.select().from(myLeaguesTable).where(eq(myLeaguesTable.id, id)).get();
+    if (!row) return undefined;
+    return this.leagueFromRow(row);
+  }
+
+  getMyLeagueBySlug(slug: string): MyLeague | undefined {
+    const row = drizzleDb.select().from(myLeaguesTable).where(eq(myLeaguesTable.slug, slug)).get();
+    if (!row) return undefined;
+    return this.leagueFromRow(row);
+  }
+
+  generateMyLeagueSlug(length = 8): string {
+    const alphabet = '0123456789abcdefghijklmnopqrstuvwxyz';
+    const buf = new Uint8Array(length);
+    crypto.getRandomValues(buf);
+    let out = '';
+    for (let i = 0; i < length; i++) {
+      out += alphabet[buf[i] % alphabet.length];
+    }
+    return out;
   }
 
   saveMyLeague(league: MyLeague): void {
@@ -1239,7 +1247,11 @@ class Database {
         status: league.status,
         createdAt: league.createdAt,
         teams: JSON.stringify(league.teams || []),
-        matches: JSON.stringify(league.matches || [])
+        matches: JSON.stringify(league.matches || []),
+        slug: league.slug ?? null,
+        code: league.code ?? null,
+        description: league.description ?? null,
+        ownerUserId: league.ownerUserId ?? null,
       })
       .onConflictDoUpdate({
         target: myLeaguesTable.id,
@@ -1250,31 +1262,143 @@ class Database {
           status: league.status,
           createdAt: league.createdAt,
           teams: JSON.stringify(league.teams || []),
-          matches: JSON.stringify(league.matches || [])
+          matches: JSON.stringify(league.matches || []),
+          slug: league.slug ?? null,
+          code: league.code ?? null,
+          description: league.description ?? null,
+          ownerUserId: league.ownerUserId ?? null,
         }
       })
       .run();
   }
 
-  getAllMyLeagues(): MyLeague[] {
-    const rows = drizzleDb.select().from(myLeaguesTable).all();
-    return rows.map(row => ({
-      id: row.id,
-      name: row.name,
-      sport: row.sport as any,
-      format: row.format as any,
-      status: row.status as any,
-      createdAt: row.createdAt,
-      teams: JSON.parse(row.teams),
-      matches: JSON.parse(row.matches)
-    }));
+  // Update mutable fields while preserving server-authoritative slug/code/ownerUserId.
+  // Used by the owner/admin PUT route so a stale client payload can't clobber them.
+  updateMyLeagueFields(id: string, patch: Partial<MyLeague>): void {
+    const existing = this.getMyLeague(id);
+    if (!existing) return;
+    const merged: MyLeague = {
+      ...existing,
+      ...patch,
+      slug: existing.slug,
+      code: existing.code,
+      ownerUserId: existing.ownerUserId,
+    };
+    this.saveMyLeague(merged);
   }
 
-  deleteMyLeague(id: string): void {
+  getAllMyLeagues(): MyLeague[] {
+    const rows = drizzleDb.select().from(myLeaguesTable).all();
+    return rows.map(row => this.leagueFromRow(row));
+  }
+
+  // All leagues enriched with memberCount + the caller's role (owner|admin) so
+  // the portal can render "Tất cả giải" and "Giải của tôi" from one fetch.
+  // Never exposes `code` — viewers must POST /access to retrieve it.
+  getAllMyLeaguesWithMembership(userId: string): Array<MyLeague & { memberCount: number; role: LeagueMemberRole | null; isMember: boolean }> {
+    const leagues = drizzleDb.select().from(myLeaguesTable).all();
+    const memberRows = drizzleDb
+      .select({
+        leagueId: myLeagueMembersTable.leagueId,
+        userId: myLeagueMembersTable.userId,
+        role: myLeagueMembersTable.role,
+      })
+      .from(myLeagueMembersTable)
+      .all();
+
+    const counts = new Map<string, number>();
+    const myRole = new Map<string, LeagueMemberRole>();
+    for (const m of memberRows) {
+      counts.set(m.leagueId, (counts.get(m.leagueId) ?? 0) + 1);
+      if (m.userId === userId) myRole.set(m.leagueId, m.role as LeagueMemberRole);
+    }
+
+    return leagues.map(row => {
+      const base = this.leagueFromRow(row);
+      const role = myRole.get(row.id) ?? null;
+      return {
+        ...base,
+        // strip the secret code from list payloads
+        code: undefined,
+        memberCount: counts.get(row.id) ?? 0,
+        role,
+        isMember: role !== null,
+      };
+    });
+  }
+
+  // Cascade delete: members + the league row. (teams/matches live as JSON inside
+  // the league row, so deleting the row removes them too.)
+  deleteMyLeagueCascade(id: string): void {
+    drizzleDb.delete(myLeagueMembersTable).where(eq(myLeagueMembersTable.leagueId, id)).run();
     drizzleDb.delete(myLeaguesTable).where(eq(myLeaguesTable.id, id)).run();
   }
 
-  // League Permissions
+  // MyLeague Members (per-league ACL: owner + admins)
+  saveMyLeagueMember(member: { id: string; leagueId: string; userId: string; username: string; displayName: string; role: LeagueMemberRole; joinedAt: number; }): void {
+    drizzleDb.insert(myLeagueMembersTable)
+      .values({
+        id: member.id,
+        leagueId: member.leagueId,
+        userId: member.userId,
+        username: member.username,
+        displayName: member.displayName,
+        role: member.role,
+        joinedAt: member.joinedAt,
+      })
+      .onConflictDoUpdate({
+        target: myLeagueMembersTable.id,
+        set: {
+          leagueId: member.leagueId,
+          userId: member.userId,
+          username: member.username,
+          displayName: member.displayName,
+          role: member.role,
+          joinedAt: member.joinedAt,
+        },
+      })
+      .run();
+  }
+
+  getMyLeagueMembers(leagueId: string): LeagueMember[] {
+    const rows = drizzleDb.select().from(myLeagueMembersTable).where(eq(myLeagueMembersTable.leagueId, leagueId)).all();
+    return rows.map(r => ({
+      id: r.id,
+      leagueId: r.leagueId,
+      userId: r.userId,
+      username: r.username,
+      displayName: r.displayName,
+      role: r.role as LeagueMemberRole,
+      joinedAt: r.joinedAt,
+    }));
+  }
+
+  getMyLeagueMemberRole(leagueId: string, userId: string): LeagueMemberRole | null {
+    const row = drizzleDb.select().from(myLeagueMembersTable)
+      .where(and(eq(myLeagueMembersTable.leagueId, leagueId), eq(myLeagueMembersTable.userId, userId)))
+      .get();
+    if (!row) return null;
+    return row.role as LeagueMemberRole;
+  }
+
+  isMyLeagueMember(leagueId: string, userId: string): boolean {
+    return this.getMyLeagueMemberRole(leagueId, userId) !== null;
+  }
+
+  isMyLeagueOwner(leagueId: string, userId: string): boolean {
+    return this.getMyLeagueMemberRole(leagueId, userId) === 'owner';
+  }
+
+  deleteMyLeagueMember(leagueId: string, userId: string): void {
+    drizzleDb.delete(myLeagueMembersTable)
+      .where(and(
+        eq(myLeagueMembersTable.leagueId, leagueId),
+        eq(myLeagueMembersTable.userId, userId)
+      ))
+      .run();
+  }
+
+  // League Permissions (legacy global whitelist — kept for json migration compat, no longer used by routes)
   getLeaguePermissions(): Record<string, boolean> {
     const rows = drizzleDb.select().from(leaguePermissionsTable).all();
     const res: Record<string, boolean> = {};

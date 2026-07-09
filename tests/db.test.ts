@@ -193,7 +193,7 @@ describe('bilac CRUD', () => {
 });
 
 describe('leagues CRUD', () => {
-  it('saveMyLeague / getMyLeague / getAllMyLeagues / deleteMyLeague', () => {
+  it('saveMyLeague / getMyLeague / getAllMyLeagues / deleteMyLeagueCascade', () => {
     const id = uniq('lg');
     const league = {
       id, name: 'L', sport: 'futsal' as const, format: 'round_robin' as const, status: 'ACTIVE' as const,
@@ -204,7 +204,7 @@ describe('leagues CRUD', () => {
     assert.equal(l.name, 'L');
     assert.equal(l.sport, 'futsal');
     assert.ok(Array.isArray(db.getAllMyLeagues()));
-    db.deleteMyLeague(id);
+    db.deleteMyLeagueCascade(id);
     assert.equal(db.getMyLeague(id), undefined);
   });
 });

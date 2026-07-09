@@ -14,36 +14,55 @@ import { playRetroBeep } from './components/games/CaroBoard.tsx';
 import AuthModal from './components/AuthModal.tsx';
 import { motion, AnimatePresence } from 'motion/react';
 
-type BiLacViewMode = 'member' | 'view-only';
+type ViewMode = 'member' | 'view-only';
+type ActiveView = 'catalog' | 'tournaments' | 'daily' | 'replays' | 'leaderboards' | 'bilac' | 'myleague';
 
-function parseBilacPath(pathname: string): {
-  activeView: 'catalog' | 'tournaments' | 'daily' | 'replays' | 'leaderboards' | 'bilac' | 'myleague';
-  viewMode: BiLacViewMode;
-  slug: string | null;
+// Parse the URL into view state. Supports two deep-linkable arenas:
+//   /bilac/{slug}        — Bi Lắc view-only share link
+//   /the-thao/{slug}?code=passcode — Sports league view-only share link
+function parsePath(pathname: string, search: string): {
+  activeView: ActiveView;
+  bilacViewMode: ViewMode; bilacSlug: string | null;
+  myleagueViewMode: ViewMode; myleagueSlug: string | null; myleagueCode: string | null;
 } {
-  const m = pathname.match(/^\/bilac\/([0-9a-z]{8})$/);
-  if (m) return { activeView: 'bilac', viewMode: 'view-only', slug: m[1] };
-  if (pathname === '/bilac') return { activeView: 'bilac', viewMode: 'member', slug: null };
-  return { activeView: 'catalog', viewMode: 'member', slug: null };
+  const bm = pathname.match(/^\/bilac\/([0-9a-z]{8})$/);
+  if (bm) return { activeView: 'bilac', bilacViewMode: 'view-only', bilacSlug: bm[1], myleagueViewMode: 'member', myleagueSlug: null, myleagueCode: null };
+  if (pathname === '/bilac') return { activeView: 'bilac', bilacViewMode: 'member', bilacSlug: null, myleagueViewMode: 'member', myleagueSlug: null, myleagueCode: null };
+  const tm = pathname.match(/^\/the-thao\/([0-9a-z]{8})$/);
+  if (tm) {
+    const code = new URLSearchParams(search).get('code');
+    return { activeView: 'myleague', bilacViewMode: 'member', bilacSlug: null, myleagueViewMode: 'view-only', myleagueSlug: tm[1], myleagueCode: code };
+  }
+  if (pathname === '/the-thao') return { activeView: 'myleague', bilacViewMode: 'member', bilacSlug: null, myleagueViewMode: 'member', myleagueSlug: null, myleagueCode: null };
+  return { activeView: 'catalog', bilacViewMode: 'member', bilacSlug: null, myleagueViewMode: 'member', myleagueSlug: null, myleagueCode: null };
 }
 
 export default function App() {
   const [userId, setUserId] = useState<string | null>(() => localStorage.getItem('auth_userId'));
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
-  // Initial view is read from the URL so deep-links like /bilac or /bilac/{slug} survive a refresh.
-  const [activeView, setActiveViewRaw] = useState<'catalog' | 'tournaments' | 'daily' | 'replays' | 'leaderboards' | 'bilac' | 'myleague'>(() =>
-    parseBilacPath(window.location.pathname).activeView
+  // Initial view is read from the URL so deep-links like /bilac/{slug} or /the-thao/{slug} survive a refresh.
+  const [activeView, setActiveViewRaw] = useState<ActiveView>(() =>
+    parsePath(window.location.pathname, window.location.search).activeView
   );
-  const [bilacViewMode, setBilacViewMode] = useState<BiLacViewMode>(() =>
-    parseBilacPath(window.location.pathname).viewMode
+  const [bilacViewMode, setBilacViewMode] = useState<ViewMode>(() =>
+    parsePath(window.location.pathname, window.location.search).bilacViewMode
   );
   const [bilacSlug, setBilacSlug] = useState<string | null>(() =>
-    parseBilacPath(window.location.pathname).slug
+    parsePath(window.location.pathname, window.location.search).bilacSlug
+  );
+  const [myleagueViewMode, setMyleagueViewMode] = useState<ViewMode>(() =>
+    parsePath(window.location.pathname, window.location.search).myleagueViewMode
+  );
+  const [myleagueSlug, setMyleagueSlug] = useState<string | null>(() =>
+    parsePath(window.location.pathname, window.location.search).myleagueSlug
+  );
+  const [myleagueCode, setMyleagueCode] = useState<string | null>(() =>
+    parsePath(window.location.pathname, window.location.search).myleagueCode
   );
 
   // Wrap setActiveView so the URL stays in sync. Other views collapse to "/".
-  const setActiveView = (view: typeof activeView, slug?: string) => {
+  const setActiveView = (view: typeof activeView, slug?: string, code?: string) => {
     setActiveViewRaw(view);
     if (view === 'bilac') {
       if (slug) {
@@ -60,6 +79,23 @@ export default function App() {
           window.history.pushState({}, '', '/bilac');
         }
       }
+    } else if (view === 'myleague') {
+      if (slug) {
+        setMyleagueViewMode('view-only');
+        setMyleagueSlug(slug);
+        setMyleagueCode(code ?? null);
+        const targetPath = code ? `/the-thao/${slug}?code=${encodeURIComponent(code)}` : `/the-thao/${slug}`;
+        if (window.location.pathname + window.location.search !== targetPath) {
+          window.history.pushState({}, '', targetPath);
+        }
+      } else {
+        setMyleagueViewMode('member');
+        setMyleagueSlug(null);
+        setMyleagueCode(null);
+        if (window.location.pathname !== '/the-thao') {
+          window.history.pushState({}, '', '/the-thao');
+        }
+      }
     } else {
       const targetPath = '/';
       if (window.location.pathname !== targetPath) {
@@ -71,10 +107,13 @@ export default function App() {
   // Browser back/forward — reverse-map pathname → view.
   useEffect(() => {
     const onPopState = () => {
-      const parsed = parseBilacPath(window.location.pathname);
+      const parsed = parsePath(window.location.pathname, window.location.search);
       setActiveViewRaw((prev) => (prev === parsed.activeView ? prev : parsed.activeView));
-      setBilacViewMode(parsed.viewMode);
-      setBilacSlug(parsed.slug);
+      setBilacViewMode(parsed.bilacViewMode);
+      setBilacSlug(parsed.bilacSlug);
+      setMyleagueViewMode(parsed.myleagueViewMode);
+      setMyleagueSlug(parsed.myleagueSlug);
+      setMyleagueCode(parsed.myleagueCode);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -89,7 +128,7 @@ export default function App() {
       localStorage.removeItem('bilac_tournament');
       for (let i = localStorage.length - 1; i >= 0; i--) {
         const k = localStorage.key(i);
-        if (k && k.startsWith('bilac_tournament_code_')) {
+        if (k && (k.startsWith('bilac_tournament_code_') || k.startsWith('myleague_code_'))) {
           localStorage.removeItem(k);
         }
       }
@@ -107,10 +146,10 @@ export default function App() {
     localStorage.removeItem('bilac_my_tournaments');
     localStorage.removeItem('bilac_tournament_code');
     localStorage.removeItem('bilac_tournament');
-    // Xoá per-tour code cache (key pattern `bilac_tournament_code_${id}`).
+    // Xoá per-tour code cache (key pattern `bilac_tournament_code_` / `myleague_code_${id}`).
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const k = localStorage.key(i);
-      if (k && k.startsWith('bilac_tournament_code_')) {
+      if (k && (k.startsWith('bilac_tournament_code_') || k.startsWith('myleague_code_'))) {
         localStorage.removeItem(k);
       }
     }
@@ -589,7 +628,15 @@ export default function App() {
               />
             )}
             {activeView === 'myleague' && (
-              <MyLeagueView userId={userId || ''} userProfile={profile} />
+              <MyLeagueView
+                userId={userId || ''}
+                userProfile={profile}
+                viewMode={myleagueViewMode}
+                slug={myleagueSlug}
+                accessCode={myleagueCode}
+                onOpenAuthModal={() => setIsAuthModalOpen(true)}
+                onNavigate={(view, slug, code) => setActiveView(view as any, slug, code)}
+              />
             )}
             {activeView === 'daily' && (
               <DailyChallengesView
