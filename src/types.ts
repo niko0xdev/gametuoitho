@@ -164,6 +164,22 @@ export interface MyLeague {
   matches: LeagueMatch[];
   status: 'PENDING' | 'ACTIVE' | 'ENDED';
   createdAt: string;
+  slug?: string;          // 8-char public share handle -> /the-thao/{slug}
+  code?: string;          // secret access passcode (never exposed in list views)
+  description?: string;
+  ownerUserId?: string;
+}
+
+export type LeagueMemberRole = 'owner' | 'admin';
+
+export interface LeagueMember {
+  id: string;
+  leagueId: string;
+  userId: string;
+  username: string;
+  displayName: string;
+  role: LeagueMemberRole;
+  joinedAt: number;
 }
 
 export interface ToastNotification {

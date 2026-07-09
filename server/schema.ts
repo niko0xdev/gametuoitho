@@ -116,6 +116,20 @@ export const myLeaguesTable = sqliteTable('my_leagues', {
   createdAt: text('created_at').notNull(), // ISO string
   teams: text('teams').notNull(), // JSON string array of LeagueTeam
   matches: text('matches').notNull(), // JSON string array of LeagueMatch
+  slug: text('slug'),
+  code: text('code'),
+  description: text('description'),
+  ownerUserId: text('owner_user_id'),
+});
+
+export const myLeagueMembersTable = sqliteTable('my_league_members', {
+  id: text('id').primaryKey(),
+  leagueId: text('league_id').notNull(),
+  userId: text('user_id').notNull(),
+  username: text('username').notNull(),
+  displayName: text('display_name').notNull(),
+  role: text('role').notNull(), // 'owner' | 'admin'
+  joinedAt: integer('joined_at').notNull(),
 });
 
 export const leaguePermissionsTable = sqliteTable('league_permissions', {
