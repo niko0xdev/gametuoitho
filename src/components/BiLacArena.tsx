@@ -28,6 +28,7 @@ import {
   Pencil
 } from 'lucide-react';
 import { BiLacPlayer, BiLacMatch, UserProfile } from '../types';
+import { UserSearchInput, type UserSearchResult } from './UserSearchInput';
 
 // Simple sound synthesizer for retro beep effects
 const playBeep = (freq: number, type: OscillatorType = 'sine', duration = 0.1) => {
@@ -263,9 +264,9 @@ export default function BiLacArena({
   };
 
   // Owner: mời user mới qua username.
-  const handleInviteMember = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteUsername.trim()) {
+  const inviteUser = async (username: string) => {
+    const uname = username.trim();
+    if (!uname) {
       setError('Vui lòng nhập username!');
       return;
     }
@@ -274,7 +275,7 @@ export default function BiLacArena({
       const res = await bilacFetch('/api/bilac/tournaments/members', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: inviteUsername.trim() })
+        body: JSON.stringify({ username: uname })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -289,6 +290,17 @@ export default function BiLacArena({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleInviteMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    inviteUser(inviteUsername);
+  };
+
+  // Picked from the search dropdown → fill + invite in one step.
+  const onSelectUser = (u: UserSearchResult) => {
+    setInviteUsername(u.username);
+    inviteUser(u.username);
   };
 
   // Owner: xoá member khỏi giải.
@@ -2655,14 +2667,14 @@ export default function BiLacArena({
               className="mb-6 flex flex-col sm:flex-row gap-2 items-stretch sm:items-center bg-stone-50 p-3 rounded-xl border border-stone-200"
               id="form_invite_member"
             >
-              <input
-                id="input_invite_username"
-                type="text"
-                placeholder="username của người cần mời"
+              <UserSearchInput
                 value={inviteUsername}
-                onChange={(e) => setInviteUsername(e.target.value)}
-                className="flex-1 px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
-                autoComplete="off"
+                onChange={setInviteUsername}
+                onSelect={onSelectUser}
+                userId={loggedInUserId || localStorage.getItem('auth_userId')}
+                placeholder="username của người cần mời"
+                excludeUsernames={members.map((m) => m.username)}
+                inputClassName="w-full px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
               />
               <button
                 id="btn_invite_member"

@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import DatabaseDriver from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, like, or } from 'drizzle-orm';
 import {
   usersTable,
   profilesTable,
@@ -500,6 +500,22 @@ class Database {
       otpExpires: row.otpExpires || undefined,
       isGoogleUser: row.isGoogleUser === 1
     };
+  }
+
+  // Shared user lookup for invite flows. Prefix on username + contains on displayName.
+  searchUsers(q: string): Array<{ id: string; username: string; displayName: string }> {
+    const trimmed = q.trim();
+    if (trimmed.length < 2) return [];
+    const rows = drizzleDb.select({
+      id: usersTable.id,
+      username: usersTable.username,
+      displayName: usersTable.displayName,
+    })
+      .from(usersTable)
+      .where(or(like(usersTable.username, `${trimmed.toLowerCase()}%`), like(usersTable.displayName, `%${trimmed}%`)))
+      .limit(8)
+      .all();
+    return rows;
   }
 
   getUserByEmail(email: string): UserRecord | undefined {
