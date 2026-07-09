@@ -439,14 +439,36 @@ bilacRoute.post('/matches', checkAccess, async (c: any) => {
 bilacRoute.post('/matches/:id/update', checkAccess, async (c: any) => {
   const matchId = c.req.param('id');
   const tournamentId = c.get('tournamentId');
-  const { score1, score2, status } = await c.req.json();
+  const { score1, score2, status, team1, team2 } = await c.req.json();
   const db = createDb(c.env);
   const rows = await db.select().from(bilacMatchesTable).where(eq(bilacMatchesTable.id, matchId)).all();
   const m = rows[0];
   if (!m) return c.json({ error: 'Không tìm thấy trận đấu!' }, 404);
   if ((m as any).tournamentId !== tournamentId) return c.json({ error: 'Bạn không có quyền chỉnh sửa trận đấu của giải đấu này!' }, 403);
-  await db.update(bilacMatchesTable).set({ score1, score2, status } as any).where(eq(bilacMatchesTable.id, matchId));
-  return c.json(serializeMatch({ ...m, score1, score2, status }));
+  // Patch only the fields the client actually sent. A team-swap request omits
+  // score/status — spreading undefined would blank them in both the DB write and
+  // the JSON response (JSON.stringify drops undefined), corrupting the client's
+  // in-memory match and unmounting the scoreboard.
+  const patch: any = {};
+  if (typeof score1 === 'number') patch.score1 = score1;
+  if (typeof score2 === 'number') patch.score2 = score2;
+  if (status) patch.status = status;
+  // Drag-and-drop team swap. Must be a pure rearrangement of the existing roster
+  // (same multiset of ids — no add/drop/phantom) and only while the match is live.
+  const isStrArray = (v: any) => Array.isArray(v) && v.every((x: any) => typeof x === 'string');
+  if (isStrArray(team1) && isStrArray(team2)) {
+    if ((m as any).status !== 'PLAYING') return c.json({ error: 'Chỉ có thể đổi đội khi trận đang diễn ra!' }, 400);
+    const parse = (v: any) => { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
+    const oldSorted = [...parse((m as any).team1), ...parse((m as any).team2)].sort();
+    const newSorted = [...team1, ...team2].sort();
+    if (oldSorted.length !== newSorted.length || oldSorted.some((id: string, i: number) => id !== newSorted[i])) {
+      return c.json({ error: 'Đội hình chỉ được hoán đổi thành viên hiện có — không thêm, bớt hay đặt người lạ!' }, 400);
+    }
+    patch.team1 = JSON.stringify(team1);
+    patch.team2 = JSON.stringify(team2);
+  }
+  await db.update(bilacMatchesTable).set(patch).where(eq(bilacMatchesTable.id, matchId));
+  return c.json(serializeMatch({ ...m, ...patch }));
 });
 
 bilacRoute.delete('/matches/:id', checkAccess, async (c: any) => {
