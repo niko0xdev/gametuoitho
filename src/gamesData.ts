@@ -183,3 +183,23 @@ export const GAMES: Game[] = [
   }
 ];
 export const GAMES_MAP = new Map(GAMES.map(g => [g.id, g]));
+
+// Games that actually have a solo implementation (engine + board renderer).
+// Catalog hides the solo button for any game not in this set so clicking never
+// lands on an unbuilt/hanging arena. Must stay in sync with worker
+// RULE_ENGINES (worker/src/game/rules.ts) + GameBoard renderers.
+export const SOLO_GAMES = new Set<string>([
+  'caro',
+  'co_tuong',
+  'co_vua',
+  'o_an_quan',
+  'co_ca_ngua',
+  'duoi_hinh_bat_chu',
+  'noi_chu',
+  'doan_tu',
+  'speed_math',
+  'number_pattern',
+  'memory_match',
+  'simon_says',
+  'reflex'
+]);

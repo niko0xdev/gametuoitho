@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GAMES } from '../gamesData.ts';
+import { GAMES, SOLO_GAMES } from '../gamesData.ts';
 import { Game } from '../types.ts';
 import { Sparkles, Users, Award, Play, Swords, LogIn } from 'lucide-react';
 import { playRetroBeep } from './games/CaroBoard.tsx';
@@ -232,7 +232,7 @@ export default function Catalog({
                       </div>
                     )}
                   </>
-                ) : (
+                ) : SOLO_GAMES.has(game.id) ? (
                   <button
                     id={`play-solo-${game.id}`}
                     onClick={() => {
@@ -243,6 +243,10 @@ export default function Catalog({
                   >
                     <Play className="w-4 h-4" /> Chơi Ngay (Solo)
                   </button>
+                ) : (
+                  <span className="block w-full text-center bg-stone-100 text-stone-400 font-bold py-2.5 md:py-2 rounded-xl text-[10px] uppercase tracking-wider">
+                    Sắp ra mắt
+                  </span>
                 )}
               </div>
             </div>
