@@ -1,6 +1,6 @@
 // worker/src/routes/leagues.ts
 import { Hono } from 'hono';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, like, or } from 'drizzle-orm';
 import type { Bindings } from '../db';
 import { createDb } from '../db';
 import { myLeaguesTable, myLeagueMembersTable, usersTable } from '../schema';
@@ -84,6 +84,25 @@ const requireOwner = async (c: any, next: any) => {
   c.set('userId', res.uid);
   await next();
 };
+
+// Shared user lookup for the invite-by-username flows (leagues + Bi Lắc).
+// Prefix match on username + contains on displayName, capped at 8 rows.
+// ponytail: no rate limiting — gated by requireLoggedIn; add a limiter if enumeration becomes a concern.
+leaguesRoute.get('/users/search', requireLoggedIn(), async (c) => {
+  const q = String(c.req.query('q') || '').trim();
+  if (q.length < 2) return c.json({ users: [] });
+  const db = createDb(c.env);
+  const rows = await db.select({
+    id: usersTable.id,
+    username: usersTable.username,
+    displayName: usersTable.displayName,
+  })
+    .from(usersTable)
+    .where(or(like(usersTable.username, `${q.toLowerCase()}%`), like(usersTable.displayName, `%${q}%`)))
+    .limit(8)
+    .all();
+  return c.json({ users: rows });
+});
 
 // All leagues with memberCount + caller's role. Code is never exposed.
 leaguesRoute.get('/leagues', requireLoggedIn(), async (c) => {

@@ -17,7 +17,7 @@ import { handleGetChallenge, handleSubmitChallenge } from './server/handlers/cha
 import { handleGetReplaysByUser, handleGetReplay } from './server/handlers/replayHandlers.ts';
 import { checkBiLacTournamentAccess, requireBiLacMember, requireBiLacOwner, requireLoggedIn, checkLeagueAccess, requireLeagueEditor, requireLeagueOwner } from './server/handlers/_middleware.ts';
 import { handleListBilacTournaments, handleAccessBilacTournament, handleCreateBilacTournament, handleUpdateBilacTournament, handleDeleteBilacTournament, handleListBilacMembers, handleInviteBilacMember, handleRemoveBilacMember, handleGetBilacPlayers, handleCreateBilacPlayer, handleUpdateBilacPlayer, handleDeleteBilacPlayer, handleGetBilacMatches, handleCreateBilacMatch, handleUpdateBilacMatch, handleDeleteBilacMatch, handleGetBilacTournamentBySlug } from './server/handlers/bilacHandlers.ts';
-import { handleListLeagues, handleGetLeagueBySlug, handleAccessLeague, handleCreateLeague, handlePutLeague, handleDeleteLeague, handleListLeagueMembers, handleInviteLeagueMember, handleRemoveLeagueMember } from './server/handlers/leagueHandlers.ts';
+import { handleListLeagues, handleGetLeagueBySlug, handleAccessLeague, handleCreateLeague, handlePutLeague, handleDeleteLeague, handleListLeagueMembers, handleInviteLeagueMember, handleRemoveLeagueMember, handleSearchUsers } from './server/handlers/leagueHandlers.ts';
 import { db } from './server/db.ts';
 import { handleParseRoster, handleParsePlayers, handleParseEvents } from './server/handlers/aiHandlers.ts';
 
@@ -109,6 +109,7 @@ async function startServer() {
   app.post('/api/leagues', handleCreateLeague);
   app.put('/api/leagues/:id', requireLeagueEditor, handlePutLeague);
   app.delete('/api/leagues/:id', requireLeagueOwner, handleDeleteLeague);
+  app.get('/api/users/search', handleSearchUsers);
   app.get('/api/leagues/members', checkLeagueAccess, handleListLeagueMembers);
   app.post('/api/leagues/members', requireLeagueOwner, handleInviteLeagueMember);
   app.delete('/api/leagues/members/:userId', requireLeagueOwner, handleRemoveLeagueMember);

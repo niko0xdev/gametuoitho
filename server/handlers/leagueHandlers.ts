@@ -5,6 +5,14 @@ import type { MyLeague } from '../../src/types.ts';
 
 const SLUG_RE = /^[0-9a-z]{8}$/;
 
+// Shared user search for invite-by-username flows (leagues + Bi Lắc).
+export function handleSearchUsers(req: Request, res: Response) {
+  const uid = requireLoggedIn(req, res);
+  if (!uid) return;
+  const q = String((req.query.q as string) || '');
+  res.json({ users: db.searchUsers(q) });
+}
+
 // List all leagues enriched with memberCount + the caller's role. The secret
 // `code` is stripped — members retrieve it via POST /access.
 export function handleListLeagues(req: Request, res: Response) {

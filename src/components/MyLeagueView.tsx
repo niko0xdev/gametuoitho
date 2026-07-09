@@ -10,6 +10,7 @@ import {
   GroupStanding, SportType, FormatType, LeagueMember, LeagueMemberRole
 } from '../types.ts';
 import { knockoutWinner } from '../lib/knockout.ts';
+import { UserSearchInput, type UserSearchResult } from './UserSearchInput.tsx';
 
 // Re-export so any historical `import { MyLeague } from './MyLeagueView'` still resolves.
 export type {
@@ -254,13 +255,14 @@ export default function MyLeagueView({
     fetchLeagues();
   };
 
-  const inviteMember = async () => {
-    if (!selectedLeague || !inviteUsername.trim()) return;
+  const inviteMember = async (overrideUsername?: string) => {
+    const uname = (overrideUsername ?? inviteUsername).trim();
+    if (!selectedLeague || !uname) return;
     try {
       const res = await fetch('/api/leagues/members', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...leagueHeaders() },
-        body: JSON.stringify({ username: inviteUsername.trim() }),
+        body: JSON.stringify({ username: uname }),
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); alert(e.error || 'Mời thất bại'); return; }
       setInviteUsername('');
@@ -268,6 +270,12 @@ export default function MyLeagueView({
       fetchLeagues();
       playRetroBeep(700, 'sine', 0.1);
     } catch { alert('Mất kết nối'); }
+  };
+
+  // Picked from the search dropdown → fill + invite in one step.
+  const onSelectUser = (u: UserSearchResult) => {
+    setInviteUsername(u.username);
+    inviteMember(u.username);
   };
 
   const removeMember = async (memberUserId: string) => {
@@ -865,6 +873,8 @@ export default function MyLeagueView({
           members={members}
           onInvite={canManage ? inviteMember : undefined}
           onRemoveMember={canManage ? removeMember : undefined}
+          onSelectUser={canManage ? onSelectUser : undefined}
+          currentUserId={userId}
           inviteUsername={inviteUsername}
           setInviteUsername={setInviteUsername}
           computeStandings={computeStandings}
@@ -1024,6 +1034,8 @@ interface LeagueDetailProps {
   members: LeagueMember[];
   onInvite?: () => void;
   onRemoveMember?: (userId: string) => void;
+  onSelectUser?: (u: UserSearchResult) => void;
+  currentUserId?: string;
   inviteUsername?: string;
   setInviteUsername?: (v: string) => void;
   computeStandings: (teams: LeagueTeam[], matches: LeagueMatch[], g?: 'A' | 'B') => GroupStanding[];
@@ -1252,7 +1264,14 @@ function LeagueDetail(p: LeagueDetailProps) {
               <h3 className="text-xs font-extrabold uppercase tracking-widest text-stone-800 border-b border-stone-100 pb-2 flex items-center gap-1.5"><UserPlus className="w-4 h-4 text-orange-500" /> Thêm quản trị viên</h3>
               <p className="text-[11px] text-stone-500">Nhập username của thành viên đã đăng ký. Quản trị viên có thể cập nhật kết quả (không xoá được giải).</p>
               <div className="flex gap-2">
-                <input type="text" value={p.inviteUsername || ''} onChange={e => p.setInviteUsername?.(e.target.value)} placeholder="username" className="flex-1 bg-stone-50 border border-stone-300 focus:border-orange-500 rounded-xl text-xs py-2.5 px-3.5 font-semibold" />
+                <UserSearchInput
+                  value={p.inviteUsername || ''}
+                  onChange={(v) => p.setInviteUsername?.(v)}
+                  onSelect={(u) => p.onSelectUser?.(u)}
+                  userId={p.currentUserId ?? null}
+                  placeholder="username"
+                  excludeUsernames={p.members.map((m) => m.username)}
+                />
                 <button onClick={p.onInvite} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-xl text-xs cursor-pointer flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Mời</button>
               </div>
             </div>
