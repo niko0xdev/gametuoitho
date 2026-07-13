@@ -3019,6 +3019,46 @@ function weekdayVN(ymd: string): string {
   return WEEKDAY_VN[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
 }
 
+// Smooth SVG path through points via Fritsch-Carlson monotone cubic
+// interpolation. C¹-continuous (no kinks) but never overshoots the data —
+// essential for a cumulative step series, where Catmull-Rom would wave past
+// each flat→step transition. Assumes strictly increasing x. Returns a "d".
+function smoothPath(pts: [number, number][]): string {
+  const n = pts.length;
+  if (n === 0) return '';
+  if (n === 1) return `M ${pts[0][0]},${pts[0][1]}`;
+  if (n === 2) return `M ${pts[0][0]},${pts[0][1]} L ${pts[1][0]},${pts[1][1]}`;
+  const dx = (i: number) => pts[i + 1][0] - pts[i][0];
+  const slope = (i: number) => (pts[i + 1][1] - pts[i][1]) / dx(i);
+  const m: number[] = new Array(n);
+  m[0] = slope(0);
+  m[n - 1] = slope(n - 2);
+  for (let k = 1; k < n - 1; k++) {
+    const a = slope(k - 1), b = slope(k);
+    m[k] = (a <= 0 && b >= 0) || (a >= 0 && b <= 0) ? 0 : (a + b) / 2;
+  }
+  for (let k = 0; k < n - 1; k++) {
+    const s = slope(k);
+    if (s === 0) { m[k] = 0; m[k + 1] = 0; continue; }
+    const al = m[k] / s, be = m[k + 1] / s, sq = al * al + be * be;
+    if (sq > 9) {
+      const tau = 3 / Math.sqrt(sq);
+      m[k] = tau * al * s;
+      m[k + 1] = tau * be * s;
+    }
+  }
+  let d = `M ${pts[0][0]},${pts[0][1]}`;
+  for (let k = 0; k < n - 1; k++) {
+    const h = dx(k);
+    const cp1x = pts[k][0] + h / 3;
+    const cp1y = pts[k][1] + (h / 3) * m[k];
+    const cp2x = pts[k + 1][0] - h / 3;
+    const cp2y = pts[k + 1][1] - (h / 3) * m[k + 1];
+    d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${pts[k + 1][0]},${pts[k + 1][1]}`;
+  }
+  return d;
+}
+
 // Cumulative thắng − thua (running season total) per player, over the days of
 // the scope. Each day has 2 slots — sáng 10–14h, tối 16–23h (Vietnam time);
 // matches outside both windows are ignored. For weekly mode (weekLabel given)
@@ -3127,7 +3167,7 @@ function BiLacFormLine({ players, matches, weekLabel }: { players: any[]; matche
   const fmt = (v: number) => (v > 0 ? `+${v}` : `${v}`);
   const ddmm = (ymd: string) => { const [, mm, dd] = ymd.split('-'); return `${dd}/${mm}`; };
   const ticks = [-maxAbs, 0, maxAbs];
-  const pts = (s: { cum: number[] }) => s.cum.map((v, k) => `${xOf(k)},${yOf(v)}`).join(' ');
+  const pathD = (s: { cum: number[] }) => smoothPath(s.cum.map((v, k) => [xOf(k), yOf(v)] as [number, number]));
 
   return (
     <div>
@@ -3155,7 +3195,7 @@ function BiLacFormLine({ players, matches, weekLabel }: { players: any[]; matche
         ))}
         {/* one cumulative line per shown player */}
         {shown.map(s => (
-          <polyline key={`cum-${s.player.id}`} points={pts(s)} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          <path key={`cum-${s.player.id}`} d={pathD(s)} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
         ))}
         {hover !== null && (
           <g>
