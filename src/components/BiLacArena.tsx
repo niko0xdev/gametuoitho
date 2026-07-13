@@ -2994,67 +2994,90 @@ function computeFormRows(players: any[], matches: any[]) {
 // Color follows the entity (player), assigned by name-sorted index, never by rank.
 const FORM_COLORS = ['#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e34948', '#e87ba4', '#eb6834'];
 
-// Cumulative-points trajectory: one series per player over the chronological
-// sequence of FINISHED matches. Same W/D/L points (3/1/0) as the leaderboard.
-// points[] has n+1 entries (index 0 = before any match); every series advances
-// one tick per match so X is a shared timeline (carry-forward when benched).
-function computeTrajectory(players: any[], matches: any[]) {
+// Daily win/loss (thắng − thua, +1/−1/0) per player, split by two time-of-day
+// windows in Vietnam time: "day" 10:00–14:00 and "evening" 16:00–23:00. Matches
+// outside both windows are ignored. Returns per-player day[] + evening[] arrays
+// over the sorted set of match days (0 when the player had no window matches
+// that day). Color is bound to the player by name-sorted index, never by rank.
+function computeDailyWinLoss(players: any[], matches: any[]) {
   const teamArr = (t: any): string[] => {
     if (Array.isArray(t)) return t;
     try { const a = JSON.parse(t || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
   };
-  const finished = [...matches]
-    .filter((m: any) => m.status === 'FINISHED')
-    .sort((a: any, b: any) => (a.timestamp || 0) - (b.timestamp || 0));
+  // Shift to UTC+7, then read hour/minute in that zone.
+  const windowOf = (ts: number): 'day' | 'evening' | null => {
+    const d = new Date(ts + 7 * 3600000);
+    const min = d.getUTCHours() * 60 + d.getUTCMinutes();
+    if (min >= 600 && min <= 840) return 'day';        // 10:00–14:00
+    if (min >= 960 && min <= 1380) return 'evening';   // 16:00–23:00
+    return null;
+  };
+  const ymdOf = (ts: number) => {
+    const d = new Date(ts + 7 * 3600000);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  };
+  const finished = [...matches].filter((m: any) => m.status === 'FINISHED');
+  const daySet = new Set<string>();
+  const agg: Record<string, number> = {}; // `${pid}|${window}|${ymd}` → thắng − thua
+  finished.forEach(m => {
+    const w = windowOf(m.timestamp || 0);
+    if (!w) return;
+    const ymd = ymdOf(m.timestamp || 0);
+    daySet.add(ymd);
+    const s1 = m.score1, s2 = m.score2;
+    const award = (team: any, won: boolean, lost: boolean) =>
+      teamArr(team).forEach((pid: string) => {
+        const delta = won ? 1 : lost ? -1 : 0;
+        if (delta === 0) return;
+        const k = `${pid}|${w}|${ymd}`;
+        agg[k] = (agg[k] || 0) + delta;
+      });
+    award(m.team1, s1 > s2, s1 < s2);
+    award(m.team2, s2 > s1, s1 > s2);
+  });
+  const days = [...daySet].sort();
   const named = [...players].sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
   const series = named.map((p: any, i: number) => ({
     player: p,
     color: FORM_COLORS[i % FORM_COLORS.length],
-    points: [0] as number[],
+    day: days.map(d => agg[`${p.id}|day|${d}`] || 0),
+    evening: days.map(d => agg[`${p.id}|evening|${d}`] || 0),
   }));
-  const byId: Record<string, typeof series[number]> = {};
-  series.forEach(s => { byId[s.player.id] = s; });
-  finished.forEach(m => {
-    const s1 = m.score1, s2 = m.score2;
-    const earned: Record<string, number> = {};
-    const award = (team: any, won: boolean, draw: boolean) =>
-      teamArr(team).forEach((pid: string) => {
-        if (!byId[pid]) return;
-        earned[pid] = (earned[pid] || 0) + (won ? 3 : draw ? 1 : 0);
-      });
-    award(m.team1, s1 > s2, s1 === s2);
-    award(m.team2, s2 > s1, s1 === s2);
-    series.forEach(s => {
-      const last = s.points[s.points.length - 1];
-      s.points.push(last + (earned[s.player.id] || 0));
-    });
-  });
-  const maxPoints = series.reduce((mx, s) => Math.max(mx, s.points[s.points.length - 1]), 0);
-  return { n: finished.length, maxPoints, series };
+  // Keep only players who actually have a result in some window (signal).
+  const active = series.filter(s => s.day.some(v => v !== 0) || s.evening.some(v => v !== 0));
+  const maxAbs = Math.max(1, ...active.flatMap(s => [...s.day, ...s.evening].map(Math.abs)));
+  return { days, series: active, maxAbs };
 }
 
-// Line chart: cumulative points per player over the match timeline. Hand-rolled
-// SVG (no chart lib). Crosshair + snapshot tooltip on hover; legend with final
-// points. Relief for sub-3:1 hues (aqua/yellow/magenta) is the name legend here.
+// Line chart: daily thắng − thua per player, split by window. Per player: two
+// lines — day window 10–14h (solid) + evening 16–23h (dashed) — sharing the
+// player's color. Y is diverging around 0. Crosshair + per-day tooltip on hover.
+// Relief for sub-3:1 hues (aqua/yellow/magenta) is the name legend + dash style.
 function BiLacFormLine({ players, matches }: { players: any[]; matches: any[] }) {
-  const { n, maxPoints, series } = computeTrajectory(players, matches);
-  const W = 640, H = 260, padL = 30, padR = 14, padT = 12, padB = 26;
+  const { days, series, maxAbs } = computeDailyWinLoss(players, matches);
+  const D = days.length;
+  const W = 640, H = 280, padL = 34, padR = 14, padT = 14, padB = 38;
   const plotW = W - padL - padR, plotH = H - padT - padB;
-  const last = (s: { points: number[] }) => s.points[s.points.length - 1];
-  const xOf = (i: number) => padL + (n <= 0 ? 0 : (i / n) * plotW);
-  const yOf = (v: number) => padT + plotH - (maxPoints <= 0 ? 0 : (v / maxPoints) * plotH);
-  // render low→high so the top performer paints last (on top); legend high→low.
-  const ascending = [...series].sort((a, b) => last(a) - last(b));
-  const legend = [...series].sort((a, b) => last(b) - last(a));
+  const midY = padT + plotH / 2;
+  const xOf = (i: number) => padL + (D <= 1 ? plotW / 2 : (i / (D - 1)) * plotW);
+  const yOf = (v: number) => midY - (v / maxAbs) * (plotH / 2);
   const [hover, setHover] = useState<number | null>(null);
-  const ticks = Array.from(new Set([0, Math.round(maxPoints / 2), maxPoints])).filter(t => t >= 0);
+
+  if (D === 0 || series.length === 0) {
+    return <p className="text-xs text-stone-500 italic">Chưa có trận nào trong khung giờ 10–14h hoặc 16–23h.</p>;
+  }
 
   const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const rel = ((e.clientX - rect.left) / rect.width) * W;
-    let idx = n <= 0 ? 0 : Math.round(((rel - padL) / plotW) * n);
-    setHover(Math.max(0, Math.min(n, idx)));
+    const idx = D <= 1 ? 0 : Math.round(((rel - padL) / plotW) * (D - 1));
+    setHover(Math.max(0, Math.min(D - 1, idx)));
   };
+  const fmt = (v: number) => (v > 0 ? `+${v}` : `${v}`);
+  const labelOf = (ymd: string) => { const [, mm, dd] = ymd.split('-'); return `${dd}/${mm}`; };
+  const labelIdx = D <= 7 ? days.map((_, i) => i) : [0, Math.floor((D - 1) / 4), Math.floor((D - 1) / 2), Math.floor((3 * (D - 1)) / 4), D - 1].filter((v, i, a) => a.indexOf(v) === i);
+  const ticks = [-maxAbs, 0, maxAbs];
+  const pts = (arr: number[]) => arr.map((v, i) => `${xOf(i)},${yOf(v)}`).join(' ');
 
   return (
     <div>
@@ -3065,75 +3088,66 @@ function BiLacFormLine({ players, matches }: { players: any[]; matches: any[] })
         onMouseMove={onMove}
         onMouseLeave={() => setHover(null)}
         role="img"
-        aria-label="Đồ thị đà điểm tích lũy theo thứ tự trận"
+        aria-label="Đồ thị hiệu số thắng − thua theo ngày và khung giờ"
       >
         {ticks.map(t => (
-          <g key={t}>
-            <line x1={padL} x2={W - padR} y1={yOf(t)} y2={yOf(t)} stroke="#f1f5f9" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-            <text x={padL - 6} y={yOf(t) + 3} textAnchor="end" fontSize="10" fill="#a8a29e">{t}</text>
+          <g key={`tk-${t}`}>
+            <line x1={padL} x2={W - padR} y1={yOf(t)} y2={yOf(t)} stroke={t === 0 ? '#d6d3d1' : '#f1f5f9'} strokeWidth={t === 0 ? 1.5 : 1} vectorEffect="non-scaling-stroke" />
+            <text x={padL - 6} y={yOf(t) + 3} textAnchor="end" fontSize="10" fill="#a8a29e">{fmt(t)}</text>
           </g>
         ))}
-        <line x1={padL} x2={W - padR} y1={padT + plotH} y2={padT + plotH} stroke="#e7e5e4" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-        {ascending.map(s => (
-          <polyline
-            key={`line-${s.player.id}`}
-            points={s.points.map((v, i) => `${xOf(i)},${yOf(v)}`).join(' ')}
-            fill="none"
-            stroke={s.color}
-            strokeWidth={2}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-        {legend.slice(0, 3).map(s => (
-          <circle key={`dot-${s.player.id}`} cx={xOf(n)} cy={yOf(last(s))} r={3} fill={s.color} />
-        ))}
+        {series.flatMap(s => [
+          <polyline key={`day-${s.player.id}`} points={pts(s.day)} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />,
+          <polyline key={`eve-${s.player.id}`} points={pts(s.evening)} fill="none" stroke={s.color} strokeWidth={2} strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" opacity={0.8} vectorEffect="non-scaling-stroke" />,
+        ])}
+        {/* data-point markers (non-zero only) so sparse days still read */}
+        {series.flatMap(s => [
+          ...s.day.map((v, i) => v !== 0 ? [<circle key={`md-${s.player.id}-${i}`} cx={xOf(i)} cy={yOf(v)} r={2.5} fill={s.color} vectorEffect="non-scaling-stroke" />] : []),
+          ...s.evening.map((v, i) => v !== 0 ? [<circle key={`me-${s.player.id}-${i}`} cx={xOf(i)} cy={yOf(v)} r={2.5} fill="#fff" stroke={s.color} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />] : []),
+        ])}
         {hover !== null && (
-          <g>
-            <line x1={xOf(hover)} x2={xOf(hover)} y1={padT} y2={padT + plotH} stroke="#a8a29e" strokeWidth={1} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
-            {series.map(s => (
-              <circle key={s.player.id} cx={xOf(hover)} cy={yOf(s.points[hover])} r={3} fill="#fff" stroke={s.color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
-            ))}
-          </g>
+          <line x1={xOf(hover)} x2={xOf(hover)} y1={padT} y2={padT + plotH} stroke="#a8a29e" strokeWidth={1} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
         )}
-        <text x={padL} y={H - 6} textAnchor="start" fontSize="10" fill="#a8a29e">Trận 1</text>
-        <text x={W - padR} y={H - 6} textAnchor="end" fontSize="10" fill="#a8a29e">Trận {n}</text>
+        {labelIdx.map(i => (
+          <text key={`lb-${i}`} x={xOf(i)} y={H - 10} textAnchor="middle" fontSize="10" fill="#a8a29e">{labelOf(days[i])}</text>
+        ))}
       </svg>
 
       {hover !== null && (
         <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2 text-[11px]">
-          <div className="font-semibold text-stone-600 mb-1">
-            {hover === 0 ? 'Mở đầu giải' : `Sau trận ${hover}/${n}`}
-          </div>
+          <div className="font-semibold text-stone-600 mb-1">Ngày {labelOf(days[hover])}</div>
           <div className="flex flex-wrap gap-x-3 gap-y-1">
-            {legend.map(s => (
+            {series.map(s => (
               <span key={s.player.id} className="inline-flex items-center gap-1">
                 <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
                 <span className="text-stone-700">{s.player.name}</span>
-                <span className="font-mono font-semibold text-stone-900">{s.points[hover]}đ</span>
+                <span className="font-mono text-stone-500">sáng {fmt(s.day[hover])}</span>
+                <span className="font-mono font-semibold text-stone-900">tối {fmt(s.evening[hover])}</span>
               </span>
             ))}
           </div>
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1">
-        {legend.map(s => (
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+        {series.map(s => (
           <span key={s.player.id} className="inline-flex items-center gap-1 text-[11px]">
             <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
             <span className="text-stone-700">{s.player.name}</span>
-            <span className="font-mono font-semibold text-stone-900">{last(s)}đ</span>
           </span>
         ))}
+        <span className="text-[10px] text-stone-500 ml-2 inline-flex items-center gap-3">
+          <span className="inline-flex items-center gap-1"><span className="inline-block w-4 h-[2px] bg-stone-400" />sáng 10–14h</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block w-4 border-t-2 border-dotted border-stone-400" />tối 16–23h</span>
+        </span>
       </div>
     </div>
   );
 }
 
-// "Phong độ" card with a Bar (win-rate + form string) / Line (cumulative-points
-// trajectory) toggle. Pure Tailwind + inline SVG, no chart lib. Shared by the
-// member leaderboard tab + the view-only view.
+// "Phong độ" card with a Bar (win-rate + form string) / Line (daily thắng−thua
+// by time-of-day window) toggle. Pure Tailwind + inline SVG, no chart lib.
+// Shared by the member leaderboard tab + the view-only view.
 function BiLacFormChart({ players, matches, title = 'Phong độ', emptyHint }: {
   players: any[];
   matches: any[];
@@ -3165,14 +3179,14 @@ function BiLacFormChart({ players, matches, title = 'Phong độ', emptyHint }: 
             onClick={() => setView('line')}
             className={`px-2.5 py-1 rounded-md cursor-pointer transition-all ${view === 'line' ? 'bg-white text-stone-950 shadow-xs' : 'text-stone-500 hover:text-stone-800'}`}
           >
-            Đà điểm
+            Thắng/thua
           </button>
         </div>
       </div>
       <p className="text-xs text-stone-500 mb-4">
         {view === 'bar'
           ? 'Tỷ lệ thắng + chuỗi 5 trận gần nhất (cũ ➔ mới).'
-          : 'Tổng điểm tích lũy (3 thắng / 1 hoà) qua từng trận — chuột vào để xem chi tiết.'}
+          : 'Hiệu số thắng − thua theo ngày: sáng 10–14h (nét liền) và tối 16–23h (nét đứt).'}
       </p>
       {!hasData ? (
         <p className="text-xs text-stone-500 italic">{emptyHint || 'Chưa có trận đấu nào được ghi nhận.'}</p>
