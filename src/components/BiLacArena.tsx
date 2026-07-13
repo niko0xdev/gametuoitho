@@ -3104,10 +3104,19 @@ function BiLacFormLine({ players, matches, weekLabel }: { players: any[]; matche
   const xOf = (k: number) => padL + (NS <= 1 ? plotW / 2 : (k / (NS - 1)) * plotW);
   const yOf = (v: number) => midY - (v / maxAbs) * (plotH / 2);
   const [hover, setHover] = useState<number | null>(null);
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
 
   if (D === 0 || series.length === 0) {
     return <p className="text-xs text-stone-500 italic">Chưa có trận nào trong khung giờ 10–14h hoặc 16–23h.</p>;
   }
+
+  const shown = series.filter(s => !hidden.has(s.player.id));
+  const toggle = (pid: string) => setHidden(prev => {
+    const next = new Set(prev);
+    if (next.has(pid)) next.delete(pid); else next.add(pid);
+    return next;
+  });
+  const showAll = () => setHidden(new Set());
 
   const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -3122,6 +3131,9 @@ function BiLacFormLine({ players, matches, weekLabel }: { players: any[]; matche
 
   return (
     <div>
+      {shown.length === 0 && (
+        <p className="text-xs text-stone-400 italic mb-2">Đang ẩn tất cả — chọn ít nhất 1 người chơi bên dưới.</p>
+      )}
       <svg
         viewBox={`0 0 ${W} ${H}`}
         width="100%"
@@ -3141,14 +3153,14 @@ function BiLacFormLine({ players, matches, weekLabel }: { players: any[]; matche
         {days.map((_, di) => di === 0 ? null : (
           <line key={`sep-${di}`} x1={(xOf(di * 2 - 1) + xOf(di * 2)) / 2} x2={(xOf(di * 2 - 1) + xOf(di * 2)) / 2} y1={padT} y2={padT + plotH} stroke="#f5f5f4" strokeWidth={1} vectorEffect="non-scaling-stroke" />
         ))}
-        {/* one cumulative line per player */}
-        {series.map(s => (
+        {/* one cumulative line per shown player */}
+        {shown.map(s => (
           <polyline key={`cum-${s.player.id}`} points={pts(s)} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
         ))}
         {hover !== null && (
           <g>
             <line x1={xOf(hover)} x2={xOf(hover)} y1={padT} y2={padT + plotH} stroke="#a8a29e" strokeWidth={1} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
-            {series.map(s => (
+            {shown.map(s => (
               <circle key={`hc-${s.player.id}`} cx={xOf(hover)} cy={yOf(s.cum[hover])} r={3} fill="#fff" stroke={s.color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
             ))}
           </g>
@@ -3165,14 +3177,14 @@ function BiLacFormLine({ players, matches, weekLabel }: { players: any[]; matche
         })}
       </svg>
 
-      {hover !== null && (() => {
+      {hover !== null && shown.length > 0 && (() => {
         const di = Math.floor(hover / 2);
         const win = hover % 2 === 0 ? 'Sáng 10–14h' : 'Tối 16–23h';
         return (
           <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2 text-[11px]">
             <div className="font-semibold text-stone-600 mb-1">{weekdayVN(days[di])} {ddmm(days[di])} · {win}</div>
             <div className="flex flex-wrap gap-x-3 gap-y-1">
-              {series.map(s => (
+              {shown.map(s => (
                 <span key={s.player.id} className="inline-flex items-center gap-1">
                   <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
                   <span className="text-stone-700">{s.player.name}</span>
@@ -3184,14 +3196,29 @@ function BiLacFormLine({ players, matches, weekLabel }: { players: any[]; matche
         );
       })()}
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-        {series.map(s => (
-          <span key={s.player.id} className="inline-flex items-center gap-1 text-[11px]">
-            <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
-            <span className="text-stone-700">{s.player.name}</span>
-          </span>
-        ))}
-        <span className="text-[10px] text-stone-500 ml-2">Mỗi ngày 2 điểm (sáng ➔ tối) · Y = tổng hiệu số tích lũy</span>
+      <div className="mt-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 mr-1">Hiện:</span>
+          {series.map(s => {
+            const off = hidden.has(s.player.id);
+            return (
+              <button
+                key={s.player.id}
+                type="button"
+                onClick={() => toggle(s.player.id)}
+                title={(off ? 'Hiện' : 'Ẩn') + ' đường của ' + s.player.name}
+                className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-md border cursor-pointer transition-all ${off ? 'border-stone-200 bg-stone-50 opacity-50 hover:opacity-80' : 'border-stone-200 bg-white hover:border-stone-300'}`}
+              >
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: off ? '#d6d3d1' : s.color }} />
+                <span className={off ? 'line-through text-stone-400' : 'text-stone-700'}>{s.player.name}</span>
+              </button>
+            );
+          })}
+          {hidden.size > 0 && (
+            <button type="button" onClick={showAll} className="text-[10px] text-orange-600 hover:text-orange-700 underline cursor-pointer ml-1">Hiện tất cả</button>
+          )}
+        </div>
+        <p className="text-[10px] text-stone-400 mt-1.5">Click tên để ẩn/hiện · mỗi ngày 2 điểm (sáng ➔ tối) · Y = tổng hiệu số tích lũy</p>
       </div>
     </div>
   );
