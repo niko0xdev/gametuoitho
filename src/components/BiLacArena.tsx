@@ -26,7 +26,8 @@ import {
   Shield,
   LogIn,
   Pencil,
-  KeyRound
+  KeyRound,
+  TrendingUp
 } from 'lucide-react';
 import { BiLacPlayer, BiLacMatch, UserProfile } from '../types';
 import { UserSearchInput, type UserSearchResult } from './UserSearchInput';
@@ -2353,6 +2354,19 @@ export default function BiLacArena({
             </div>
           </div>
 
+          {/* PHONG ĐỘ (FORM) CHART — same weekly/all-time scope as the table below */}
+          <div className="mb-6">
+            <BiLacFormChart
+              players={players}
+              matches={
+                leaderboardTab === 'weekly'
+                  ? matches.filter(m => m.status === 'FINISHED' && m.weekLabel === bilacCurrentWeek().label)
+                  : matches.filter(m => m.status === 'FINISHED')
+              }
+              title={leaderboardTab === 'weekly' ? 'Phong độ — Giải tuần này' : 'Phong độ — Mọi mùa'}
+            />
+          </div>
+
           {/* LEADERBOARD TABLE */}
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs sm:text-sm">
@@ -2937,6 +2951,104 @@ function bilacCurrentWeek() {
   };
 }
 
+// Per-player "phong độ" (form): win-rate bar + last-5 W/D/L string. Caller
+// passes the already-scoped FINISHED matches (weekly or all-time), same W/D/L
+// logic as computeSeasonLeaderboard. Form reads oldest → newest (left → right).
+type FormResult = 'W' | 'D' | 'L';
+function computeFormRows(players: any[], matches: any[]) {
+  const teamArr = (t: any): string[] => {
+    if (Array.isArray(t)) return t;
+    try { const a = JSON.parse(t || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
+  };
+  const agg: Record<string, { player: any; played: number; wins: number; losses: number; log: FormResult[] }> = {};
+  players.forEach(p => { agg[p.id] = { player: p, played: 0, wins: 0, losses: 0, log: [] }; });
+  [...matches]
+    .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+    .forEach(m => {
+      const s1 = m.score1, s2 = m.score2;
+      const apply = (team: any, won: boolean, draw: boolean) =>
+        teamArr(team).forEach((pid: string) => {
+          const r = agg[pid]; if (!r) return;
+          r.played += 1;
+          if (won) { r.wins += 1; r.log.push('W'); }
+          else if (draw) { r.log.push('D'); }
+          else { r.losses += 1; r.log.push('L'); }
+        });
+      apply(m.team1, s1 > s2, s1 === s2);
+      apply(m.team2, s2 > s1, s1 === s2);
+    });
+  return Object.values(agg)
+    .filter(r => r.played > 0)
+    .map(r => ({
+      player: r.player,
+      matchesPlayed: r.played,
+      wins: r.wins,
+      losses: r.losses,
+      winRate: Math.round((r.wins / r.played) * 100),
+      form: r.log.slice(-5),
+    }))
+    .sort((a, b) => b.winRate - a.winRate || b.wins - a.wins || String(a.player.name).localeCompare(String(b.player.name)));
+}
+
+// "Phong độ" card: one horizontal win-rate bar per player + last-5 W/D/L chips.
+// Pure Tailwind, no chart lib. Shared by member leaderboard tab + view-only view.
+function BiLacFormChart({ players, matches, title = 'Phong độ', emptyHint }: {
+  players: any[];
+  matches: any[];
+  title?: string;
+  emptyHint?: string;
+}) {
+  const rows = computeFormRows(players, matches);
+  return (
+    <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm" id="bilac_form_chart">
+      <div className="flex items-center gap-2 mb-1">
+        <TrendingUp className="w-4 h-4 text-emerald-500" />
+        <h3 className="font-bold text-stone-900 text-sm">{title}</h3>
+      </div>
+      <p className="text-xs text-stone-500 mb-4">Tỷ lệ thắng + chuỗi 5 trận gần nhất (cũ ➔ mới).</p>
+      {rows.length === 0 ? (
+        <p className="text-xs text-stone-500 italic">{emptyHint || 'Chưa có trận đấu nào được ghi nhận.'}</p>
+      ) : (
+        <ul className="space-y-3">
+          {rows.map((r, i) => (
+            <li key={r.player.id} className="flex items-center gap-3">
+              <span className="w-4 text-center text-xs font-bold text-stone-400 shrink-0">{i + 1}</span>
+              {r.player.avatar && (
+                <img src={r.player.avatar} className="w-7 h-7 rounded-full border border-stone-200 bg-stone-100 shrink-0" alt="" />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="font-bold text-stone-900 text-sm truncate">{r.player.name}</span>
+                  <span className="font-mono text-xs font-bold text-emerald-600 shrink-0">{r.winRate}%</span>
+                </div>
+                <div className="h-2 rounded-full bg-stone-100 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600"
+                    style={{ width: `${r.winRate}%` }}
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-1 shrink-0" aria-label={`Form 5 trận gần nhất: ${r.form.join(' ')}`}>
+                {r.form.map((f, idx) => (
+                  <span
+                    key={idx}
+                    className={`w-5 h-5 rounded-md text-[10px] font-bold inline-flex items-center justify-center text-white ${
+                      f === 'W' ? 'bg-emerald-500' : f === 'D' ? 'bg-stone-400' : 'bg-red-500'
+                    }`}
+                    title={f === 'W' ? 'Thắng' : f === 'D' ? 'Hoà' : 'Thua'}
+                  >
+                    {f}
+                  </span>
+                ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // Standings for the current weekly "mùa" only. Same scoring/sort as the member
 // leaderboard (gd desc → wins desc — see calculateLeaderboards). team1/team2 may
 // arrive as arrays (express) or JSON strings (older worker) — coerce defensively.
@@ -3064,6 +3176,13 @@ function ViewOnlyTournamentView({ data }: { data: any }) {
           </div>
         )}
       </div>
+      {/* PHONG ĐỘ (FORM) — view-only, current season scope */}
+      <BiLacFormChart
+        players={data.players || []}
+        matches={(data.matches || []).filter((m: any) => m.status === 'FINISHED' && m.weekLabel === weekLabel)}
+        title="Phong độ — mùa này"
+      />
+
       <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm">
         <h3 className="font-bold text-stone-900 text-sm mb-3">Người chơi ({sortedPlayers.length})</h3>
         {sortedPlayers.length === 0 ? (
