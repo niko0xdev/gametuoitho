@@ -2990,24 +2990,194 @@ function computeFormRows(players: any[], matches: any[]) {
     .sort((a, b) => b.winRate - a.winRate || b.wins - a.wins || String(a.player.name).localeCompare(String(b.player.name)));
 }
 
-// "Phong độ" card: one horizontal win-rate bar per player + last-5 W/D/L chips.
-// Pure Tailwind, no chart lib. Shared by member leaderboard tab + view-only view.
+// Categorical series colors — validated (CVD ΔE 24.2 on white, see dataviz skill).
+// Color follows the entity (player), assigned by name-sorted index, never by rank.
+const FORM_COLORS = ['#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e34948', '#e87ba4', '#eb6834'];
+
+// Cumulative-points trajectory: one series per player over the chronological
+// sequence of FINISHED matches. Same W/D/L points (3/1/0) as the leaderboard.
+// points[] has n+1 entries (index 0 = before any match); every series advances
+// one tick per match so X is a shared timeline (carry-forward when benched).
+function computeTrajectory(players: any[], matches: any[]) {
+  const teamArr = (t: any): string[] => {
+    if (Array.isArray(t)) return t;
+    try { const a = JSON.parse(t || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
+  };
+  const finished = [...matches]
+    .filter((m: any) => m.status === 'FINISHED')
+    .sort((a: any, b: any) => (a.timestamp || 0) - (b.timestamp || 0));
+  const named = [...players].sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+  const series = named.map((p: any, i: number) => ({
+    player: p,
+    color: FORM_COLORS[i % FORM_COLORS.length],
+    points: [0] as number[],
+  }));
+  const byId: Record<string, typeof series[number]> = {};
+  series.forEach(s => { byId[s.player.id] = s; });
+  finished.forEach(m => {
+    const s1 = m.score1, s2 = m.score2;
+    const earned: Record<string, number> = {};
+    const award = (team: any, won: boolean, draw: boolean) =>
+      teamArr(team).forEach((pid: string) => {
+        if (!byId[pid]) return;
+        earned[pid] = (earned[pid] || 0) + (won ? 3 : draw ? 1 : 0);
+      });
+    award(m.team1, s1 > s2, s1 === s2);
+    award(m.team2, s2 > s1, s1 === s2);
+    series.forEach(s => {
+      const last = s.points[s.points.length - 1];
+      s.points.push(last + (earned[s.player.id] || 0));
+    });
+  });
+  const maxPoints = series.reduce((mx, s) => Math.max(mx, s.points[s.points.length - 1]), 0);
+  return { n: finished.length, maxPoints, series };
+}
+
+// Line chart: cumulative points per player over the match timeline. Hand-rolled
+// SVG (no chart lib). Crosshair + snapshot tooltip on hover; legend with final
+// points. Relief for sub-3:1 hues (aqua/yellow/magenta) is the name legend here.
+function BiLacFormLine({ players, matches }: { players: any[]; matches: any[] }) {
+  const { n, maxPoints, series } = computeTrajectory(players, matches);
+  const W = 640, H = 260, padL = 30, padR = 14, padT = 12, padB = 26;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const last = (s: { points: number[] }) => s.points[s.points.length - 1];
+  const xOf = (i: number) => padL + (n <= 0 ? 0 : (i / n) * plotW);
+  const yOf = (v: number) => padT + plotH - (maxPoints <= 0 ? 0 : (v / maxPoints) * plotH);
+  // render low→high so the top performer paints last (on top); legend high→low.
+  const ascending = [...series].sort((a, b) => last(a) - last(b));
+  const legend = [...series].sort((a, b) => last(b) - last(a));
+  const [hover, setHover] = useState<number | null>(null);
+  const ticks = Array.from(new Set([0, Math.round(maxPoints / 2), maxPoints])).filter(t => t >= 0);
+
+  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const rel = ((e.clientX - rect.left) / rect.width) * W;
+    let idx = n <= 0 ? 0 : Math.round(((rel - padL) / plotW) * n);
+    setHover(Math.max(0, Math.min(n, idx)));
+  };
+
+  return (
+    <div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        width="100%"
+        style={{ display: 'block', height: 'auto' }}
+        onMouseMove={onMove}
+        onMouseLeave={() => setHover(null)}
+        role="img"
+        aria-label="Đồ thị đà điểm tích lũy theo thứ tự trận"
+      >
+        {ticks.map(t => (
+          <g key={t}>
+            <line x1={padL} x2={W - padR} y1={yOf(t)} y2={yOf(t)} stroke="#f1f5f9" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+            <text x={padL - 6} y={yOf(t) + 3} textAnchor="end" fontSize="10" fill="#a8a29e">{t}</text>
+          </g>
+        ))}
+        <line x1={padL} x2={W - padR} y1={padT + plotH} y2={padT + plotH} stroke="#e7e5e4" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+        {ascending.map(s => (
+          <polyline
+            key={`line-${s.player.id}`}
+            points={s.points.map((v, i) => `${xOf(i)},${yOf(v)}`).join(' ')}
+            fill="none"
+            stroke={s.color}
+            strokeWidth={2}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+        {legend.slice(0, 3).map(s => (
+          <circle key={`dot-${s.player.id}`} cx={xOf(n)} cy={yOf(last(s))} r={3} fill={s.color} />
+        ))}
+        {hover !== null && (
+          <g>
+            <line x1={xOf(hover)} x2={xOf(hover)} y1={padT} y2={padT + plotH} stroke="#a8a29e" strokeWidth={1} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+            {series.map(s => (
+              <circle key={s.player.id} cx={xOf(hover)} cy={yOf(s.points[hover])} r={3} fill="#fff" stroke={s.color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+            ))}
+          </g>
+        )}
+        <text x={padL} y={H - 6} textAnchor="start" fontSize="10" fill="#a8a29e">Trận 1</text>
+        <text x={W - padR} y={H - 6} textAnchor="end" fontSize="10" fill="#a8a29e">Trận {n}</text>
+      </svg>
+
+      {hover !== null && (
+        <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2 text-[11px]">
+          <div className="font-semibold text-stone-600 mb-1">
+            {hover === 0 ? 'Mở đầu giải' : `Sau trận ${hover}/${n}`}
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {legend.map(s => (
+              <span key={s.player.id} className="inline-flex items-center gap-1">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
+                <span className="text-stone-700">{s.player.name}</span>
+                <span className="font-mono font-semibold text-stone-900">{s.points[hover]}đ</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1">
+        {legend.map(s => (
+          <span key={s.player.id} className="inline-flex items-center gap-1 text-[11px]">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
+            <span className="text-stone-700">{s.player.name}</span>
+            <span className="font-mono font-semibold text-stone-900">{last(s)}đ</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// "Phong độ" card with a Bar (win-rate + form string) / Line (cumulative-points
+// trajectory) toggle. Pure Tailwind + inline SVG, no chart lib. Shared by the
+// member leaderboard tab + the view-only view.
 function BiLacFormChart({ players, matches, title = 'Phong độ', emptyHint }: {
   players: any[];
   matches: any[];
   title?: string;
   emptyHint?: string;
 }) {
+  const [view, setView] = useState<'bar' | 'line'>('bar');
   const rows = computeFormRows(players, matches);
+  const hasData = rows.length > 0;
   return (
     <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm" id="bilac_form_chart">
       <div className="flex items-center gap-2 mb-1">
         <TrendingUp className="w-4 h-4 text-emerald-500" />
         <h3 className="font-bold text-stone-900 text-sm">{title}</h3>
+        <div className="ml-auto flex bg-stone-100 p-0.5 rounded-lg text-[11px] font-semibold shrink-0" role="tablist" aria-label="Kiểu biểu đồ phong độ">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'bar'}
+            onClick={() => setView('bar')}
+            className={`px-2.5 py-1 rounded-md cursor-pointer transition-all ${view === 'bar' ? 'bg-white text-stone-950 shadow-xs' : 'text-stone-500 hover:text-stone-800'}`}
+          >
+            Tỷ lệ thắng
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'line'}
+            onClick={() => setView('line')}
+            className={`px-2.5 py-1 rounded-md cursor-pointer transition-all ${view === 'line' ? 'bg-white text-stone-950 shadow-xs' : 'text-stone-500 hover:text-stone-800'}`}
+          >
+            Đà điểm
+          </button>
+        </div>
       </div>
-      <p className="text-xs text-stone-500 mb-4">Tỷ lệ thắng + chuỗi 5 trận gần nhất (cũ ➔ mới).</p>
-      {rows.length === 0 ? (
+      <p className="text-xs text-stone-500 mb-4">
+        {view === 'bar'
+          ? 'Tỷ lệ thắng + chuỗi 5 trận gần nhất (cũ ➔ mới).'
+          : 'Tổng điểm tích lũy (3 thắng / 1 hoà) qua từng trận — chuột vào để xem chi tiết.'}
+      </p>
+      {!hasData ? (
         <p className="text-xs text-stone-500 italic">{emptyHint || 'Chưa có trận đấu nào được ghi nhận.'}</p>
+      ) : view === 'line' ? (
+        <BiLacFormLine players={players} matches={matches} />
       ) : (
         <ul className="space-y-3">
           {rows.map((r, i) => (
