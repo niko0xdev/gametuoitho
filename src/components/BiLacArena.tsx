@@ -2364,6 +2364,7 @@ export default function BiLacArena({
                   : matches.filter(m => m.status === 'FINISHED')
               }
               title={leaderboardTab === 'weekly' ? 'Phong độ — Giải tuần này' : 'Phong độ — Mọi mùa'}
+              weekLabel={leaderboardTab === 'weekly' ? bilacCurrentWeek().label : undefined}
             />
           </div>
 
@@ -2999,12 +3000,36 @@ const FORM_COLORS = ['#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e3
 // outside both windows are ignored. Returns per-player day[] + evening[] arrays
 // over the sorted set of match days (0 when the player had no window matches
 // that day). Color is bound to the player by name-sorted index, never by rank.
-function computeDailyWinLoss(players: any[], matches: any[]) {
+// The 7 weekday dates (YYYY-MM-DD, VN calendar) of the Bi Lắc week encoded in
+// a "Tuần từ DD/MM/YYYY đến DD/MM/YYYY" label — Wed (start) → following Tue.
+function bilacWeekDaysFromLabel(label: string): string[] {
+  const m = label.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return [];
+  const start = Date.UTC(+m[3], +m[2] - 1, +m[1]);
+  const out: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start + i * 86400000);
+    out.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`);
+  }
+  return out;
+}
+const WEEKDAY_VN = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+function weekdayVN(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return WEEKDAY_VN[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+}
+
+// Cumulative thắng − thua (running season total) per player, over the days of
+// the scope. Each day has 2 slots — sáng 10–14h, tối 16–23h (Vietnam time);
+// matches outside both windows are ignored. For weekly mode (weekLabel given)
+// the X axis is the 7 weekdays of that mùa (days with no match stay flat via
+// carry-forward); for all-time it's the sorted distinct match-days. Color is
+// bound to the player by name-sorted index.
+function computeDailyWinLoss(players: any[], matches: any[], opts?: { weekLabel?: string }) {
   const teamArr = (t: any): string[] => {
     if (Array.isArray(t)) return t;
     try { const a = JSON.parse(t || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
   };
-  // Shift to UTC+7, then read hour/minute in that zone.
   const windowOf = (ts: number): 'day' | 'evening' | null => {
     const d = new Date(ts + 7 * 3600000);
     const min = d.getUTCHours() * 60 + d.getUTCMinutes();
@@ -3017,49 +3042,66 @@ function computeDailyWinLoss(players: any[], matches: any[]) {
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
   };
   const finished = [...matches].filter((m: any) => m.status === 'FINISHED');
-  const daySet = new Set<string>();
-  const agg: Record<string, number> = {}; // `${pid}|${window}|${ymd}` → thắng − thua
-  finished.forEach(m => {
-    const w = windowOf(m.timestamp || 0);
-    if (!w) return;
-    const ymd = ymdOf(m.timestamp || 0);
-    daySet.add(ymd);
-    const s1 = m.score1, s2 = m.score2;
-    const award = (team: any, won: boolean, lost: boolean) =>
-      teamArr(team).forEach((pid: string) => {
-        const delta = won ? 1 : lost ? -1 : 0;
-        if (delta === 0) return;
-        const k = `${pid}|${w}|${ymd}`;
-        agg[k] = (agg[k] || 0) + delta;
-      });
-    award(m.team1, s1 > s2, s1 < s2);
-    award(m.team2, s2 > s1, s1 > s2);
-  });
-  const days = [...daySet].sort();
+  let days: string[];
+  if (opts?.weekLabel) {
+    days = bilacWeekDaysFromLabel(opts.weekLabel);
+  } else {
+    const set = new Set<string>();
+    finished.forEach((m: any) => { if (windowOf(m.timestamp || 0)) set.add(ymdOf(m.timestamp || 0)); });
+    days = [...set].sort();
+  }
+  if (days.length === 0) return { days: [], slots: 0, series: [], maxAbs: 1 };
+  const dayIndexOf = (ymd: string) => days.indexOf(ymd);
+  const NS = days.length * 2; // 2 slots/day: index = dayIdx*2 + (day?0:1)
   const named = [...players].sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
   const series = named.map((p: any, i: number) => ({
     player: p,
     color: FORM_COLORS[i % FORM_COLORS.length],
-    day: days.map(d => agg[`${p.id}|day|${d}`] || 0),
-    evening: days.map(d => agg[`${p.id}|evening|${d}`] || 0),
+    delta: new Array(NS).fill(0) as number[],
   }));
-  // Keep only players who actually have a result in some window (signal).
-  const active = series.filter(s => s.day.some(v => v !== 0) || s.evening.some(v => v !== 0));
-  const maxAbs = Math.max(1, ...active.flatMap(s => [...s.day, ...s.evening].map(Math.abs)));
-  return { days, series: active, maxAbs };
+  const byId: Record<string, typeof series[number]> = {};
+  series.forEach(s => { byId[s.player.id] = s; });
+  finished.forEach(m => {
+    const w = windowOf(m.timestamp || 0);
+    if (!w) return;
+    let di = dayIndexOf(ymdOf(m.timestamp || 0));
+    if (di < 0) di = days.length - 1; // end-Wed morning sliver (inside the server week, outside the 7-day axis) → fold into Tue so the running total reconciles
+    const slot = di * 2 + (w === 'day' ? 0 : 1);
+    const s1 = m.score1, s2 = m.score2;
+    const award = (team: any, won: boolean, lost: boolean) =>
+      teamArr(team).forEach((pid: string) => {
+        const s = byId[pid]; if (!s) return;
+        const d = won ? 1 : lost ? -1 : 0;
+        if (d === 0) return;
+        s.delta[slot] += d;
+      });
+    award(m.team1, s1 > s2, s1 < s2);
+    award(m.team2, s2 > s1, s1 > s2);
+  });
+  // prefix-sum deltas → cumulative running total at each slot.
+  const cum = series.map(s => {
+    const arr = new Array<number>(NS);
+    let run = 0;
+    for (let k = 0; k < NS; k++) { run += s.delta[k]; arr[k] = run; }
+    return { player: s.player, color: s.color, delta: s.delta, cum: arr };
+  });
+  const active = cum.filter(s => s.delta.some(d => d !== 0));
+  const maxAbs = Math.max(1, ...active.flatMap(s => s.cum.map(Math.abs)));
+  return { days, slots: NS, series: active, maxAbs };
 }
 
-// Line chart: daily thắng − thua per player, split by window. Per player: two
-// lines — day window 10–14h (solid) + evening 16–23h (dashed) — sharing the
-// player's color. Y is diverging around 0. Crosshair + per-day tooltip on hover.
-// Relief for sub-3:1 hues (aqua/yellow/magenta) is the name legend + dash style.
-function BiLacFormLine({ players, matches }: { players: any[]; matches: any[] }) {
-  const { days, series, maxAbs } = computeDailyWinLoss(players, matches);
+// Line chart: cumulative thắng − thua (running season total) per player over the
+// days of the scope, 2 slots per day (sáng 10–14h, tối 16–23h). For weekly mode
+// the X axis is the 7 weekdays of the mùa. One line per player; Y diverging
+// around 0. Hand-rolled SVG (no chart lib). Relief for sub-3:1 hues = name legend.
+function BiLacFormLine({ players, matches, weekLabel }: { players: any[]; matches: any[]; weekLabel?: string }) {
+  const { days, slots, series, maxAbs } = computeDailyWinLoss(players, matches, { weekLabel });
   const D = days.length;
-  const W = 640, H = 280, padL = 34, padR = 14, padT = 14, padB = 38;
+  const NS = slots; // D * 2
+  const W = 640, H = 286, padL = 34, padR = 14, padT = 14, padB = 46;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const midY = padT + plotH / 2;
-  const xOf = (i: number) => padL + (D <= 1 ? plotW / 2 : (i / (D - 1)) * plotW);
+  const xOf = (k: number) => padL + (NS <= 1 ? plotW / 2 : (k / (NS - 1)) * plotW);
   const yOf = (v: number) => midY - (v / maxAbs) * (plotH / 2);
   const [hover, setHover] = useState<number | null>(null);
 
@@ -3070,14 +3112,13 @@ function BiLacFormLine({ players, matches }: { players: any[]; matches: any[] })
   const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const rel = ((e.clientX - rect.left) / rect.width) * W;
-    const idx = D <= 1 ? 0 : Math.round(((rel - padL) / plotW) * (D - 1));
-    setHover(Math.max(0, Math.min(D - 1, idx)));
+    const idx = NS <= 1 ? 0 : Math.round(((rel - padL) / plotW) * (NS - 1));
+    setHover(Math.max(0, Math.min(NS - 1, idx)));
   };
   const fmt = (v: number) => (v > 0 ? `+${v}` : `${v}`);
-  const labelOf = (ymd: string) => { const [, mm, dd] = ymd.split('-'); return `${dd}/${mm}`; };
-  const labelIdx = D <= 7 ? days.map((_, i) => i) : [0, Math.floor((D - 1) / 4), Math.floor((D - 1) / 2), Math.floor((3 * (D - 1)) / 4), D - 1].filter((v, i, a) => a.indexOf(v) === i);
+  const ddmm = (ymd: string) => { const [, mm, dd] = ymd.split('-'); return `${dd}/${mm}`; };
   const ticks = [-maxAbs, 0, maxAbs];
-  const pts = (arr: number[]) => arr.map((v, i) => `${xOf(i)},${yOf(v)}`).join(' ');
+  const pts = (s: { cum: number[] }) => s.cum.map((v, k) => `${xOf(k)},${yOf(v)}`).join(' ');
 
   return (
     <div>
@@ -3088,7 +3129,7 @@ function BiLacFormLine({ players, matches }: { players: any[]; matches: any[] })
         onMouseMove={onMove}
         onMouseLeave={() => setHover(null)}
         role="img"
-        aria-label="Đồ thị hiệu số thắng − thua theo ngày và khung giờ"
+        aria-label="Đồ thị hiệu số tổng tích lũy theo các ngày trong tuần"
       >
         {ticks.map(t => (
           <g key={`tk-${t}`}>
@@ -3096,38 +3137,52 @@ function BiLacFormLine({ players, matches }: { players: any[]; matches: any[] })
             <text x={padL - 6} y={yOf(t) + 3} textAnchor="end" fontSize="10" fill="#a8a29e">{fmt(t)}</text>
           </g>
         ))}
-        {series.flatMap(s => [
-          <polyline key={`day-${s.player.id}`} points={pts(s.day)} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />,
-          <polyline key={`eve-${s.player.id}`} points={pts(s.evening)} fill="none" stroke={s.color} strokeWidth={2} strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" opacity={0.8} vectorEffect="non-scaling-stroke" />,
-        ])}
-        {/* data-point markers (non-zero only) so sparse days still read */}
-        {series.flatMap(s => [
-          ...s.day.map((v, i) => v !== 0 ? [<circle key={`md-${s.player.id}-${i}`} cx={xOf(i)} cy={yOf(v)} r={2.5} fill={s.color} vectorEffect="non-scaling-stroke" />] : []),
-          ...s.evening.map((v, i) => v !== 0 ? [<circle key={`me-${s.player.id}-${i}`} cx={xOf(i)} cy={yOf(v)} r={2.5} fill="#fff" stroke={s.color} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />] : []),
-        ])}
-        {hover !== null && (
-          <line x1={xOf(hover)} x2={xOf(hover)} y1={padT} y2={padT + plotH} stroke="#a8a29e" strokeWidth={1} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
-        )}
-        {labelIdx.map(i => (
-          <text key={`lb-${i}`} x={xOf(i)} y={H - 10} textAnchor="middle" fontSize="10" fill="#a8a29e">{labelOf(days[i])}</text>
+        {/* day separators between groups of 2 slots */}
+        {days.map((_, di) => di === 0 ? null : (
+          <line key={`sep-${di}`} x1={(xOf(di * 2 - 1) + xOf(di * 2)) / 2} x2={(xOf(di * 2 - 1) + xOf(di * 2)) / 2} y1={padT} y2={padT + plotH} stroke="#f5f5f4" strokeWidth={1} vectorEffect="non-scaling-stroke" />
         ))}
+        {/* one cumulative line per player */}
+        {series.map(s => (
+          <polyline key={`cum-${s.player.id}`} points={pts(s)} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        ))}
+        {hover !== null && (
+          <g>
+            <line x1={xOf(hover)} x2={xOf(hover)} y1={padT} y2={padT + plotH} stroke="#a8a29e" strokeWidth={1} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+            {series.map(s => (
+              <circle key={`hc-${s.player.id}`} cx={xOf(hover)} cy={yOf(s.cum[hover])} r={3} fill="#fff" stroke={s.color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+            ))}
+          </g>
+        )}
+        {/* day-group labels: weekday + DD/MM, centered over each day's 2 slots */}
+        {days.map((ymd, di) => {
+          const cx = NS === 1 ? padL + plotW / 2 : (xOf(di * 2) + xOf(di * 2 + 1)) / 2;
+          return (
+            <g key={`dl-${di}`}>
+              <text x={cx} y={H - 24} textAnchor="middle" fontSize="10" fontWeight="600" fill="#78716c">{weekdayVN(ymd)}</text>
+              <text x={cx} y={H - 11} textAnchor="middle" fontSize="9" fill="#a8a29e">{ddmm(ymd)}</text>
+            </g>
+          );
+        })}
       </svg>
 
-      {hover !== null && (
-        <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2 text-[11px]">
-          <div className="font-semibold text-stone-600 mb-1">Ngày {labelOf(days[hover])}</div>
-          <div className="flex flex-wrap gap-x-3 gap-y-1">
-            {series.map(s => (
-              <span key={s.player.id} className="inline-flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
-                <span className="text-stone-700">{s.player.name}</span>
-                <span className="font-mono text-stone-500">sáng {fmt(s.day[hover])}</span>
-                <span className="font-mono font-semibold text-stone-900">tối {fmt(s.evening[hover])}</span>
-              </span>
-            ))}
+      {hover !== null && (() => {
+        const di = Math.floor(hover / 2);
+        const win = hover % 2 === 0 ? 'Sáng 10–14h' : 'Tối 16–23h';
+        return (
+          <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2 text-[11px]">
+            <div className="font-semibold text-stone-600 mb-1">{weekdayVN(days[di])} {ddmm(days[di])} · {win}</div>
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              {series.map(s => (
+                <span key={s.player.id} className="inline-flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
+                  <span className="text-stone-700">{s.player.name}</span>
+                  <span className="font-mono font-semibold text-stone-900">{fmt(s.cum[hover])}</span>
+                </span>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
         {series.map(s => (
@@ -3136,10 +3191,7 @@ function BiLacFormLine({ players, matches }: { players: any[]; matches: any[] })
             <span className="text-stone-700">{s.player.name}</span>
           </span>
         ))}
-        <span className="text-[10px] text-stone-500 ml-2 inline-flex items-center gap-3">
-          <span className="inline-flex items-center gap-1"><span className="inline-block w-4 h-[2px] bg-stone-400" />sáng 10–14h</span>
-          <span className="inline-flex items-center gap-1"><span className="inline-block w-4 border-t-2 border-dotted border-stone-400" />tối 16–23h</span>
-        </span>
+        <span className="text-[10px] text-stone-500 ml-2">Mỗi ngày 2 điểm (sáng ➔ tối) · Y = tổng hiệu số tích lũy</span>
       </div>
     </div>
   );
@@ -3148,13 +3200,14 @@ function BiLacFormLine({ players, matches }: { players: any[]; matches: any[] })
 // "Phong độ" card with a Bar (win-rate + form string) / Line (daily thắng−thua
 // by time-of-day window) toggle. Pure Tailwind + inline SVG, no chart lib.
 // Shared by the member leaderboard tab + the view-only view.
-function BiLacFormChart({ players, matches, title = 'Phong độ', emptyHint }: {
+function BiLacFormChart({ players, matches, title = 'Phong độ', emptyHint, weekLabel }: {
   players: any[];
   matches: any[];
   title?: string;
   emptyHint?: string;
+  weekLabel?: string;
 }) {
-  const [view, setView] = useState<'bar' | 'line'>('bar');
+  const [view, setView] = useState<'bar' | 'line'>('line');
   const rows = computeFormRows(players, matches);
   const hasData = rows.length > 0;
   return (
@@ -3166,32 +3219,32 @@ function BiLacFormChart({ players, matches, title = 'Phong độ', emptyHint }: 
           <button
             type="button"
             role="tab"
-            aria-selected={view === 'bar'}
-            onClick={() => setView('bar')}
-            className={`px-2.5 py-1 rounded-md cursor-pointer transition-all ${view === 'bar' ? 'bg-white text-stone-950 shadow-xs' : 'text-stone-500 hover:text-stone-800'}`}
-          >
-            Tỷ lệ thắng
-          </button>
-          <button
-            type="button"
-            role="tab"
             aria-selected={view === 'line'}
             onClick={() => setView('line')}
             className={`px-2.5 py-1 rounded-md cursor-pointer transition-all ${view === 'line' ? 'bg-white text-stone-950 shadow-xs' : 'text-stone-500 hover:text-stone-800'}`}
           >
             Thắng/thua
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'bar'}
+            onClick={() => setView('bar')}
+            className={`px-2.5 py-1 rounded-md cursor-pointer transition-all ${view === 'bar' ? 'bg-white text-stone-950 shadow-xs' : 'text-stone-500 hover:text-stone-800'}`}
+          >
+            Tỷ lệ thắng
+          </button>
         </div>
       </div>
       <p className="text-xs text-stone-500 mb-4">
         {view === 'bar'
           ? 'Tỷ lệ thắng + chuỗi 5 trận gần nhất (cũ ➔ mới).'
-          : 'Hiệu số thắng − thua theo ngày: sáng 10–14h (nét liền) và tối 16–23h (nét đứt).'}
+          : 'Tổng hiệu số thắng − thua tích lũy theo các ngày trong tuần — mỗi ngày 2 điểm (sáng 10–14h ➔ tối 16–23h).'}
       </p>
       {!hasData ? (
         <p className="text-xs text-stone-500 italic">{emptyHint || 'Chưa có trận đấu nào được ghi nhận.'}</p>
       ) : view === 'line' ? (
-        <BiLacFormLine players={players} matches={matches} />
+        <BiLacFormLine players={players} matches={matches} weekLabel={weekLabel} />
       ) : (
         <ul className="space-y-3">
           {rows.map((r, i) => (
@@ -3365,6 +3418,7 @@ function ViewOnlyTournamentView({ data }: { data: any }) {
         players={data.players || []}
         matches={(data.matches || []).filter((m: any) => m.status === 'FINISHED' && m.weekLabel === weekLabel)}
         title="Phong độ — mùa này"
+        weekLabel={weekLabel}
       />
 
       <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-sm">
