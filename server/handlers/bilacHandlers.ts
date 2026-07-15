@@ -363,87 +363,19 @@ export function handleCreateBilacMatch(req: Request, res: Response) {
 
   const allMatches = db.getAllBiLacMatches().filter(m => m.tournamentId === tournamentId);
 
-  const playerStatsWeekly: Record<string, { points: number; gd: number; wins: number; goals: number }> = {};
-  const playerStatsAllTime: Record<string, { points: number; gd: number; wins: number; goals: number }> = {};
-
-  allPlayers.forEach(p => {
-    playerStatsWeekly[p.id] = { points: 0, gd: 0, wins: 0, goals: 0 };
-    playerStatsAllTime[p.id] = { points: 0, gd: 0, wins: 0, goals: 0 };
+  // Rank players for team-balancing by CURRENT-SEASON (ongoing weekly window)
+  // goal difference ONLY — the leaderboard's primary key. No points/wins/goals,
+  // no all-time: those leaked skill from other weeks into the split.
+  const gdWeekly: Record<string, number> = {};
+  selectedPlayers.forEach(p => { gdWeekly[p.id] = 0; });
+  allMatches.filter(m => m.status === 'FINISHED' && m.weekLabel === weekLabel).forEach(m => {
+    const s1 = m.score1, s2 = m.score2;
+    m.team1.forEach((pid: string) => { if (pid in gdWeekly) gdWeekly[pid] += s1 - s2; });
+    m.team2.forEach((pid: string) => { if (pid in gdWeekly) gdWeekly[pid] += s2 - s1; });
   });
 
-  allMatches.filter(m => m.status === 'FINISHED').forEach(m => {
-    const s1 = m.score1;
-    const s2 = m.score2;
-    const t1 = m.team1;
-    const t2 = m.team2;
-    const isWeekly = m.weekLabel === weekLabel;
-
-    t1.forEach(pid => {
-      if (playerStatsAllTime[pid]) {
-        playerStatsAllTime[pid].goals += s1;
-        playerStatsAllTime[pid].gd += (s1 - s2);
-        if (s1 > s2) {
-          playerStatsAllTime[pid].points += 3;
-          playerStatsAllTime[pid].wins += 1;
-        } else if (s1 === s2) {
-          playerStatsAllTime[pid].points += 1;
-        }
-      }
-      if (isWeekly && playerStatsWeekly[pid]) {
-        playerStatsWeekly[pid].goals += s1;
-        playerStatsWeekly[pid].gd += (s1 - s2);
-        if (s1 > s2) {
-          playerStatsWeekly[pid].points += 3;
-          playerStatsWeekly[pid].wins += 1;
-        } else if (s1 === s2) {
-          playerStatsWeekly[pid].points += 1;
-        }
-      }
-    });
-
-    t2.forEach(pid => {
-      if (playerStatsAllTime[pid]) {
-        playerStatsAllTime[pid].goals += s2;
-        playerStatsAllTime[pid].gd += (s2 - s1);
-        if (s2 > s1) {
-          playerStatsAllTime[pid].points += 3;
-          playerStatsAllTime[pid].wins += 1;
-        } else if (s1 === s2) {
-          playerStatsAllTime[pid].points += 1;
-        }
-      }
-      if (isWeekly && playerStatsWeekly[pid]) {
-        playerStatsWeekly[pid].goals += s2;
-        playerStatsWeekly[pid].gd += (s2 - s1);
-        if (s2 > s1) {
-          playerStatsWeekly[pid].points += 3;
-          playerStatsWeekly[pid].wins += 1;
-        } else if (s1 === s2) {
-          playerStatsWeekly[pid].points += 1;
-        }
-      }
-    });
-  });
-
-  const sortedSelected = [...selectedPlayers].sort((a, b) => {
-    const wA = playerStatsWeekly[a.id] || { points: 0, gd: 0, wins: 0, goals: 0 };
-    const wB = playerStatsWeekly[b.id] || { points: 0, gd: 0, wins: 0, goals: 0 };
-
-    if (wB.points !== wA.points) return wB.points - wA.points;
-    if (wB.gd !== wA.gd) return wB.gd - wA.gd;
-    if (wB.wins !== wA.wins) return wB.wins - wA.wins;
-    if (wB.goals !== wA.goals) return wB.goals - wA.goals;
-
-    const aA = playerStatsAllTime[a.id] || { points: 0, gd: 0, wins: 0, goals: 0 };
-    const aB = playerStatsAllTime[b.id] || { points: 0, gd: 0, wins: 0, goals: 0 };
-
-    if (aB.points !== aA.points) return aB.points - aA.points;
-    if (aB.gd !== aA.gd) return aB.gd - aA.gd;
-    if (aB.wins !== aA.wins) return aB.wins - aA.wins;
-    if (aB.goals !== aA.goals) return aB.goals - aA.goals;
-
-    return b.id.localeCompare(a.id);
-  });
+  const sortedSelected = [...selectedPlayers].sort((a, b) =>
+    gdWeekly[b.id] - gdWeekly[a.id] || b.id.localeCompare(a.id));
 
   let participatingIds = sortedSelected.map(p => p.id);
   let benchedPlayerId: string | undefined = undefined;

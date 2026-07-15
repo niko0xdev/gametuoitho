@@ -384,36 +384,19 @@ bilacRoute.post('/matches', checkAccess, async (c: any) => {
   const interval = getBiLacWeeklyInterval(new Date());
   const matchesAll = await db.select().from(bilacMatchesTable).where(eq(bilacMatchesTable.tournamentId, tournamentId)).all();
 
-  const statsWeekly: Record<string, any> = {};
-  const statsAllTime: Record<string, any> = {};
-  selected.forEach((p: any) => { statsWeekly[p.id] = { points: 0, gd: 0, wins: 0, goals: 0 }; statsAllTime[p.id] = { points: 0, gd: 0, wins: 0, goals: 0 }; });
-
-  matchesAll.filter((m: any) => m.status === 'FINISHED').forEach((m: any) => {
+  // Rank players for team-balancing by CURRENT-SEASON (ongoing weekly window)
+  // goal difference ONLY — the leaderboard's primary key. No points/wins/goals,
+  // no all-time: those leaked skill from other weeks into the split.
+  const gdWeekly: Record<string, number> = {};
+  selected.forEach((p: any) => { gdWeekly[p.id] = 0; });
+  matchesAll.filter((m: any) => m.status === 'FINISHED' && m.weekLabel === interval.label).forEach((m: any) => {
     const s1 = m.score1, s2 = m.score2, t1 = JSON.parse(m.team1 || '[]'), t2 = JSON.parse(m.team2 || '[]');
-    const isWeekly = m.weekLabel === interval.label;
-    t1.forEach((pid: string) => {
-      if (statsAllTime[pid]) { statsAllTime[pid].goals += s1; statsAllTime[pid].gd += (s1 - s2); if (s1 > s2) { statsAllTime[pid].points += 3; statsAllTime[pid].wins += 1; } else if (s1 === s2) statsAllTime[pid].points += 1; }
-      if (isWeekly && statsWeekly[pid]) { statsWeekly[pid].goals += s1; statsWeekly[pid].gd += (s1 - s2); if (s1 > s2) { statsWeekly[pid].points += 3; statsWeekly[pid].wins += 1; } else if (s1 === s2) statsWeekly[pid].points += 1; }
-    });
-    t2.forEach((pid: string) => {
-      if (statsAllTime[pid]) { statsAllTime[pid].goals += s2; statsAllTime[pid].gd += (s2 - s1); if (s2 > s1) { statsAllTime[pid].points += 3; statsAllTime[pid].wins += 1; } else if (s1 === s2) statsAllTime[pid].points += 1; }
-      if (isWeekly && statsWeekly[pid]) { statsWeekly[pid].goals += s2; statsWeekly[pid].gd += (s2 - s1); if (s2 > s1) { statsWeekly[pid].points += 3; statsWeekly[pid].wins += 1; } else if (s1 === s2) statsWeekly[pid].points += 1; }
-    });
+    t1.forEach((pid: string) => { if (pid in gdWeekly) gdWeekly[pid] += s1 - s2; });
+    t2.forEach((pid: string) => { if (pid in gdWeekly) gdWeekly[pid] += s2 - s1; });
   });
 
-  const sorted = [...selected].sort((a: any, b: any) => {
-    const wA = statsWeekly[a.id], wB = statsWeekly[b.id];
-    if (wB.points !== wA.points) return wB.points - wA.points;
-    if (wB.gd !== wA.gd) return wB.gd - wA.gd;
-    if (wB.wins !== wA.wins) return wB.wins - wA.wins;
-    if (wB.goals !== wA.goals) return wB.goals - wA.goals;
-    const aA = statsAllTime[a.id], aB = statsAllTime[b.id];
-    if (aB.points !== aA.points) return aB.points - aA.points;
-    if (aB.gd !== aA.gd) return aB.gd - aA.gd;
-    if (aB.wins !== aA.wins) return aB.wins - aA.wins;
-    if (aB.goals !== aA.goals) return aB.goals - aA.goals;
-    return b.id.localeCompare(a.id);
-  });
+  const sorted = [...selected].sort((a: any, b: any) =>
+    gdWeekly[b.id] - gdWeekly[a.id] || b.id.localeCompare(a.id));
 
   let ids = sorted.map((p: any) => p.id);
   let benched: string | undefined;
