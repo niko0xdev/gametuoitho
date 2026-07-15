@@ -364,18 +364,18 @@ export function handleCreateBilacMatch(req: Request, res: Response) {
   const allMatches = db.getAllBiLacMatches().filter(m => m.tournamentId === tournamentId);
 
   // Rank players for team-balancing by CURRENT-SEASON (ongoing weekly window)
-  // goal difference ONLY — the leaderboard's primary key. No points/wins/goals,
-  // no all-time: those leaked skill from other weeks into the split.
-  const gdWeekly: Record<string, number> = {};
-  selectedPlayers.forEach(p => { gdWeekly[p.id] = 0; });
+  // form ONLY: wins − losses (draws count 0) — "hiệu số trận thắng/thua" from
+  // the ongoing leaderboard. NOT goal difference, not points.
+  const winDiff: Record<string, number> = {};
+  selectedPlayers.forEach(p => { winDiff[p.id] = 0; });
   allMatches.filter(m => m.status === 'FINISHED' && m.weekLabel === weekLabel).forEach(m => {
     const s1 = m.score1, s2 = m.score2;
-    m.team1.forEach((pid: string) => { if (pid in gdWeekly) gdWeekly[pid] += s1 - s2; });
-    m.team2.forEach((pid: string) => { if (pid in gdWeekly) gdWeekly[pid] += s2 - s1; });
+    m.team1.forEach((pid: string) => { if (pid in winDiff) winDiff[pid] += s1 > s2 ? 1 : s1 < s2 ? -1 : 0; });
+    m.team2.forEach((pid: string) => { if (pid in winDiff) winDiff[pid] += s2 > s1 ? 1 : s2 < s1 ? -1 : 0; });
   });
 
   const sortedSelected = [...selectedPlayers].sort((a, b) =>
-    gdWeekly[b.id] - gdWeekly[a.id] || b.id.localeCompare(a.id));
+    winDiff[b.id] - winDiff[a.id] || b.id.localeCompare(a.id));
 
   let participatingIds = sortedSelected.map(p => p.id);
   let benchedPlayerId: string | undefined = undefined;
