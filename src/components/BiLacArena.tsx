@@ -3000,8 +3000,8 @@ const FORM_COLORS = ['#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e3
 // outside both windows are ignored. Returns per-player day[] + evening[] arrays
 // over the sorted set of match days (0 when the player had no window matches
 // that day). Color is bound to the player by name-sorted index, never by rank.
-// The 7 weekday dates (YYYY-MM-DD, VN calendar) of the Bi Lắc week encoded in
-// a "Tuần từ DD/MM/YYYY đến DD/MM/YYYY" label — Wed (start) → following Tue.
+// The 5 weekday dates (Mon–Fri; Sat/Sun excluded) of the Bi Lắc week encoded
+// in a "Tuần từ DD/MM/YYYY đến DD/MM/YYYY" label — Wed (start) → following Tue.
 function bilacWeekDaysFromLabel(label: string): string[] {
   const m = label.match(/(\d{2})\/(\d{2})\/(\d{4})/);
   if (!m) return [];
@@ -3009,6 +3009,8 @@ function bilacWeekDaysFromLabel(label: string): string[] {
   const out: string[] = [];
   for (let i = 0; i < 7; i++) {
     const d = new Date(start + i * 86400000);
+    // Weekday-only X axis (T2–T6): skip CN (Sun=0) and T7 (Sat=6). Weekend matches fold into Tue via di<0.
+    if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
     out.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`);
   }
   return out;
@@ -3062,7 +3064,7 @@ function smoothPath(pts: [number, number][]): string {
 // Cumulative thắng − thua (running season total) per player, over the days of
 // the scope. Each day has 2 slots — sáng 10–14h, tối 16–23h (Vietnam time);
 // matches outside both windows are ignored. For weekly mode (weekLabel given)
-// the X axis is the 7 weekdays of that mùa (days with no match stay flat via
+// the X axis is the 5 weekdays (Mon–Fri) of that mùa (days with no match stay flat via
 // carry-forward); for all-time it's the sorted distinct match-days. Color is
 // bound to the player by name-sorted index.
 function computeDailyWinLoss(players: any[], matches: any[], opts?: { weekLabel?: string }) {
@@ -3105,7 +3107,7 @@ function computeDailyWinLoss(players: any[], matches: any[], opts?: { weekLabel?
     const w = windowOf(m.timestamp || 0);
     if (!w) return;
     let di = dayIndexOf(ymdOf(m.timestamp || 0));
-    if (di < 0) di = days.length - 1; // end-Wed morning sliver (inside the server week, outside the 7-day axis) → fold into Tue so the running total reconciles
+    if (di < 0) di = days.length - 1; // end-Wed morning sliver OR weekend day (inside the server week, outside the 5-weekday axis) → fold into Tue so the running total reconciles
     const slot = di * 2 + (w === 'day' ? 0 : 1);
     const s1 = m.score1, s2 = m.score2;
     const award = (team: any, won: boolean, lost: boolean) =>
@@ -3132,7 +3134,7 @@ function computeDailyWinLoss(players: any[], matches: any[], opts?: { weekLabel?
 
 // Line chart: cumulative thắng − thua (running season total) per player over the
 // days of the scope, 2 slots per day (sáng 10–14h, tối 16–23h). For weekly mode
-// the X axis is the 7 weekdays of the mùa. One line per player; Y diverging
+// the X axis is the 5 weekdays (Mon–Fri) of the mùa. One line per player; Y diverging
 // around 0. Hand-rolled SVG (no chart lib). Relief for sub-3:1 hues = name legend.
 function BiLacFormLine({ players, matches, weekLabel }: { players: any[]; matches: any[]; weekLabel?: string }) {
   const { days, slots, series, maxAbs } = computeDailyWinLoss(players, matches, { weekLabel });
