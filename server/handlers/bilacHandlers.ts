@@ -445,10 +445,6 @@ export function handleCreateBilacMatch(req: Request, res: Response) {
     participatingIds.splice(benchedIndex, 1);
   }
 
-  const teamSize = participatingIds.length / 2;
-  const highSeeds = participatingIds.slice(0, teamSize);
-  const lowSeeds = participatingIds.slice(teamSize);
-
   const shuffle = <T>(arr: T[]): T[] => {
     const a = [...arr];
     for (let i = a.length - 1; i > 0; i--) {
@@ -458,27 +454,19 @@ export function handleCreateBilacMatch(req: Request, res: Response) {
     return a;
   };
 
-  const shuffledHigh = shuffle(highSeeds);
-  const shuffledLow = shuffle(lowSeeds);
-
+  // Adjacent-pair random split: pair ranked neighbors and randomly assign one
+  // of each pair to each team. Balances total strength for ANY team size.
+  // (The prior high/low split stacked team2 whenever teamSize was odd —
+  // 3v3/5v5 came out team2-stronger ~85-89% of matches.)
   const team1: string[] = [];
   const team2: string[] = [];
-
-  const halfHigh = Math.floor(teamSize / 2);
-  for (let i = 0; i < shuffledHigh.length; i++) {
-    if (i < halfHigh) {
-      team1.push(shuffledHigh[i]);
+  for (let i = 0; i < participatingIds.length; i += 2) {
+    if (Math.random() < 0.5) {
+      team1.push(participatingIds[i]);
+      team2.push(participatingIds[i + 1]);
     } else {
-      team2.push(shuffledHigh[i]);
-    }
-  }
-
-  const neededLowForTeam1 = teamSize - team1.length;
-  for (let i = 0; i < shuffledLow.length; i++) {
-    if (i < neededLowForTeam1) {
-      team1.push(shuffledLow[i]);
-    } else {
-      team2.push(shuffledLow[i]);
+      team1.push(participatingIds[i + 1]);
+      team2.push(participatingIds[i]);
     }
   }
 
