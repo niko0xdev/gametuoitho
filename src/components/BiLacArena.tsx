@@ -1233,7 +1233,7 @@ export default function BiLacArena({
       losses: number;
       goalsScored: number;
       goalsConceded: number;
-      gd: number;
+      diff: number;
       points: number;
     }> = {};
 
@@ -1245,7 +1245,7 @@ export default function BiLacArena({
         losses: 0,
         goalsScored: 0,
         goalsConceded: 0,
-        gd: 0,
+        diff: 0,
         points: 0
       };
     });
@@ -1292,17 +1292,17 @@ export default function BiLacArena({
       });
     });
 
-    // Compute gd as real goal difference (scored − conceded), not wins − losses.
+    // Hiệu số = số trận thắng − số trận thua (match-level), NOT goal difference.
     players.forEach(p => {
       const stats = statsMap[p.id];
       if (stats) {
-        stats.gd = stats.goalsScored - stats.goalsConceded;
+        stats.diff = stats.wins - stats.losses;
       }
     });
 
     // Convert map to array and sort
     return Object.values(statsMap).sort((a, b) => {
-      if (b.gd !== a.gd) return b.gd - a.gd;
+      if (b.diff !== a.diff) return b.diff - a.diff;
       if (b.wins !== a.wins) return b.wins - a.wins;
       return 0;
     });
@@ -2408,8 +2408,8 @@ export default function BiLacArena({
                       <td className="py-3 px-4 text-center font-mono font-bold text-emerald-600">{item.wins}</td>
                       <td className="py-3 px-4 text-center font-mono text-stone-400">{item.losses}</td>
                       <td className="py-3 px-4 text-center font-mono font-bold">
-                        <span className={item.gd > 0 ? 'text-emerald-600' : item.gd < 0 ? 'text-red-600' : 'text-stone-400'}>
-                          {item.gd > 0 ? `+${item.gd}` : item.gd}
+                        <span className={item.diff > 0 ? 'text-emerald-600' : item.diff < 0 ? 'text-red-600' : 'text-stone-400'}>
+                          {item.diff > 0 ? `+${item.diff}` : item.diff}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-center font-mono font-bold text-blue-600">
@@ -3354,15 +3354,15 @@ function BiLacFormChart({ players, matches, title = 'Phong độ', emptyHint, we
 }
 
 // Standings for the current weekly "mùa" only. Same scoring/sort as the member
-// leaderboard (gd desc → wins desc — see calculateLeaderboards). team1/team2 may
+// leaderboard (diff desc → wins desc — see calculateLeaderboards). team1/team2 may
 // arrive as arrays (express) or JSON strings (older worker) — coerce defensively.
 function computeSeasonLeaderboard(players: any[], matches: any[], weekLabel: string) {
   const stats: Record<string, {
     player: any; matchesPlayed: number; wins: number; losses: number;
-    goalsScored: number; goalsConceded: number; gd: number; points: number;
+    goalsScored: number; goalsConceded: number; diff: number; points: number;
   }> = {};
   players.forEach(p => {
-    stats[p.id] = { player: p, matchesPlayed: 0, wins: 0, losses: 0, goalsScored: 0, goalsConceded: 0, gd: 0, points: 0 };
+    stats[p.id] = { player: p, matchesPlayed: 0, wins: 0, losses: 0, goalsScored: 0, goalsConceded: 0, diff: 0, points: 0 };
   });
   const teamArr = (t: any): string[] => {
     if (Array.isArray(t)) return t;
@@ -3383,8 +3383,8 @@ function computeSeasonLeaderboard(players: any[], matches: any[], weekLabel: str
       apply(m.team1, s1, s2, s1 > s2, s1 === s2);
       apply(m.team2, s2, s1, s2 > s1, s1 === s2);
     });
-  Object.values(stats).forEach((st: any) => { st.gd = st.goalsScored - st.goalsConceded; });
-  return Object.values(stats).sort((a: any, b: any) => b.gd - a.gd || b.wins - a.wins || 0);
+  Object.values(stats).forEach((st: any) => { st.diff = st.wins - st.losses; });
+  return Object.values(stats).sort((a: any, b: any) => b.diff - a.diff || b.wins - a.wins || 0);
 }
 
 function ViewOnlyTournamentView({ data }: { data: any }) {
@@ -3467,8 +3467,8 @@ function ViewOnlyTournamentView({ data }: { data: any }) {
                       <td className="py-2 px-2 text-center font-mono font-bold text-emerald-600">{item.wins}</td>
                       <td className="py-2 px-2 text-center font-mono text-stone-400">{item.losses}</td>
                       <td className="py-2 px-2 text-center font-mono font-bold">
-                        <span className={item.gd > 0 ? 'text-emerald-600' : item.gd < 0 ? 'text-red-600' : 'text-stone-400'}>
-                          {item.gd > 0 ? `+${item.gd}` : item.gd}
+                        <span className={item.diff > 0 ? 'text-emerald-600' : item.diff < 0 ? 'text-red-600' : 'text-stone-400'}>
+                          {item.diff > 0 ? `+${item.diff}` : item.diff}
                         </span>
                       </td>
                       <td className="py-2 px-2 text-center font-mono font-bold text-blue-600">{winRate}%</td>
