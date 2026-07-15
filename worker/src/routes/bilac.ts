@@ -422,16 +422,16 @@ bilacRoute.post('/matches', checkAccess, async (c: any) => {
     benched = ids[bi];
     ids.splice(bi, 1);
   }
-  const teamSize = ids.length / 2;
-  const high = ids.slice(0, teamSize);
-  const low = ids.slice(teamSize);
   const shuf = <T,>(arr: T[]): T[] => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-  const sh = shuf(high), sl = shuf(low);
+  // Adjacent-pair random split: pair ranked neighbors and randomly assign one
+  // of each pair to each team. Balances total strength for ANY team size.
+  // (The prior high/low split stacked team2 whenever teamSize was odd — 3v3/5v5
+  // came out team2-stronger ~85-89% of matches.)
   const t1: string[] = [], t2: string[] = [];
-  const halfHigh = Math.floor(teamSize / 2);
-  for (let i = 0; i < sh.length; i++) (i < halfHigh ? t1 : t2).push(sh[i]);
-  const needLowT1 = teamSize - t1.length;
-  for (let i = 0; i < sl.length; i++) (i < needLowT1 ? t1 : t2).push(sl[i]);
+  for (let i = 0; i < ids.length; i += 2) {
+    if (Math.random() < 0.5) { t1.push(ids[i]); t2.push(ids[i + 1]); }
+    else { t1.push(ids[i + 1]); t2.push(ids[i]); }
+  }
 
   const match = {
     id: 'match-' + Date.now(),
