@@ -108,17 +108,17 @@ export default function OAnQuanBoard({
       </div>
 
       {/* Actual Ô Ăn Quan Board */}
-      <div className="bg-amber-100 p-6 rounded-2xl border-4 border-amber-800 shadow-2xl w-[320px] sm:w-[540px] flex items-center justify-center relative">
-        <div className="flex items-center justify-center border-2 border-amber-900 rounded-xl relative overflow-hidden bg-amber-50">
-          
+      <div className="bg-amber-100 p-1 sm:p-6 rounded-2xl border-4 border-amber-800 shadow-2xl w-full max-w-[540px] flex items-center justify-center relative">
+        <div className="flex w-full sm:w-auto items-center justify-center border-2 border-amber-900 rounded-xl relative overflow-hidden bg-amber-50">
+
           {/* LEFT MANDARIN BOX (Index 10) */}
-          <div className="w-12 h-24 sm:w-20 sm:h-36 border-r border-amber-900 bg-amber-200/50 flex items-center justify-center relative">
+          <div className="w-9 h-24 sm:w-20 sm:h-36 border-r border-amber-900 bg-amber-200/50 flex items-center justify-center relative">
             <span className="absolute top-1 text-[8px] sm:text-xs font-serif font-bold text-amber-900/60 uppercase">QUAN TẢ</span>
             {renderStones(boxes[10], true)}
           </div>
 
           {/* MIDDLE DÂN GRID */}
-          <div className="flex flex-col w-[200px] sm:w-[320px]">
+          <div className="flex flex-1 flex-col sm:w-[320px]">
             {/* Top row: index 9 to 5 (Left to Right) */}
             <div className="flex border-b border-amber-900">
               {[9, 8, 7, 6, 5].map((idx) => {
@@ -130,7 +130,7 @@ export default function OAnQuanBoard({
                     id={`oaq-cell-${idx}`}
                     disabled={!isMyTurn || !isMySide || boxes[idx] === 0}
                     onClick={() => handleBoxSelect(idx)}
-                    className={`w-10 h-12 sm:w-16 sm:h-18 border-r border-amber-900 last:border-r-0 flex items-center justify-center relative cursor-pointer transition-colors
+                    className={`flex-1 h-12 sm:w-16 sm:h-18 border-r border-amber-900 last:border-r-0 flex items-center justify-center relative cursor-pointer transition-colors
                       ${isMyTurn && isMySide && boxes[idx] > 0 ? 'hover:bg-amber-200' : ''}
                       ${isSelected ? 'bg-amber-300 ring-2 ring-amber-600' : ''}
                     `}
@@ -152,7 +152,7 @@ export default function OAnQuanBoard({
                     id={`oaq-cell-${idx}`}
                     disabled={!isMyTurn || !isMySide || boxes[idx] === 0}
                     onClick={() => handleBoxSelect(idx)}
-                    className={`w-10 h-12 sm:w-16 sm:h-18 border-r border-amber-900 last:border-r-0 flex items-center justify-center relative cursor-pointer transition-colors
+                    className={`flex-1 h-12 sm:w-16 sm:h-18 border-r border-amber-900 last:border-r-0 flex items-center justify-center relative cursor-pointer transition-colors
                       ${isMyTurn && isMySide && boxes[idx] > 0 ? 'hover:bg-amber-200' : ''}
                       ${isSelected ? 'bg-amber-300 ring-2 ring-amber-600' : ''}
                     `}
@@ -165,7 +165,7 @@ export default function OAnQuanBoard({
           </div>
 
           {/* RIGHT MANDARIN BOX (Index 11) */}
-          <div className="w-12 h-24 sm:w-20 sm:h-36 border-l border-amber-900 bg-amber-200/50 flex items-center justify-center relative">
+          <div className="w-9 h-24 sm:w-20 sm:h-36 border-l border-amber-900 bg-amber-200/50 flex items-center justify-center relative">
             <span className="absolute top-1 text-[8px] sm:text-xs font-serif font-bold text-amber-900/60 uppercase">QUAN HỮU</span>
             {renderStones(boxes[11], true)}
           </div>

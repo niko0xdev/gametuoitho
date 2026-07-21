@@ -207,7 +207,7 @@ export default function GameBoard({
 
       {/* Disconnection Warning Banner */}
       {disconnectAlert && (
-        <div className="bg-amber-50 text-amber-800 p-3 rounded-lg text-xs font-semibold border border-amber-200 flex items-center gap-2 mb-4 animate-bounce">
+        <div role="alert" className="bg-amber-50 text-amber-800 p-3 rounded-lg text-xs font-semibold border border-amber-200 flex items-center gap-2 mb-4 animate-bounce">
           <ShieldAlert className="w-4 h-4 text-amber-600" /> {disconnectAlert}
         </div>
       )}
@@ -347,7 +347,7 @@ export default function GameBoard({
           {/* Console logger details */}
           <div className="bg-stone-900 border border-stone-800 p-4 rounded-xl flex-1 flex flex-col text-[10px] font-mono text-green-400 min-h-[160px] max-h-[220px] lg:max-h-none overflow-hidden">
             <span className="text-white font-bold border-b border-stone-800 pb-1 mb-2 uppercase tracking-wider text-[9px]">Lịch sử đấu trường</span>
-            <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-1.5 scrollbar-thin">
+            <div aria-live="polite" aria-atomic="false" className="flex-1 overflow-y-auto pr-1 flex flex-col gap-1.5 scrollbar-thin">
               {statusLog.map((log, i) => (
                 <div key={i} className="leading-relaxed">
                   &gt; {log}
