@@ -51,6 +51,14 @@ export default function Header({
   const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem('sound_enabled') !== 'false');
   const [showEloResetConfirm, setShowEloResetConfirm] = useState(false);
   const [copiedUserId, setCopiedUserId] = useState(false);
+  const mobileMenuTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const mobileMenuRef = React.useRef<HTMLDivElement>(null);
+  const restoreMobileMenuFocusRef = React.useRef(false);
+
+  const closeMobileMenu = () => {
+    restoreMobileMenuFocusRef.current = true;
+    setIsMenuOpen(false);
+  };
 
   const copyUserId = () => {
     if (!profile?.id) return;
@@ -69,6 +77,46 @@ export default function Header({
       setEditName(profile.displayName);
     }
   }, [profile?.displayName]);
+
+  React.useEffect(() => {
+    if (!isMenuOpen) {
+      if (restoreMobileMenuFocusRef.current) {
+        mobileMenuTriggerRef.current?.focus();
+        restoreMobileMenuFocusRef.current = false;
+      }
+      return;
+    }
+
+    const menu = mobileMenuRef.current;
+    if (!menu) return;
+    const selector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusable = () => [...menu.querySelectorAll<HTMLElement>(selector)].filter((element) => !element.hasAttribute('hidden'));
+    const focusFirst = window.setTimeout(() => focusable()[0]?.focus(), 0);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeMobileMenu();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const elements = focusable();
+      if (!elements.length) return;
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.clearTimeout(focusFirst);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isMenuOpen]);
 
   const handleToggleSound = () => {
     const nextSoundState = !soundEnabled;
@@ -109,11 +157,12 @@ export default function Header({
   const handleTabClick = (view: typeof NAVIGATION_ITEMS[number]['id']) => {
     onViewChange(view);
     playRetroBeep(330, 'sine', 0.05);
-    setIsMenuOpen(false); // Close menu on selection
+    closeMobileMenu();
   };
 
   const toggleMenu = () => {
-    setIsMenuOpen(!isMenuOpen);
+    if (isMenuOpen) closeMobileMenu();
+    else setIsMenuOpen(true);
     playRetroBeep(440, 'sine', 0.05);
   };
 
@@ -416,6 +465,7 @@ export default function Header({
           )}
 
           <button
+            ref={mobileMenuTriggerRef}
             onClick={toggleMenu}
             id="mobile-menu-hamburger"
             aria-label={isMenuOpen ? 'Đóng điều hướng' : 'Mở điều hướng'}
@@ -462,7 +512,7 @@ export default function Header({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => { playRetroBeep(440, 'sine', 0.05); setIsMenuOpen(false); }}
+              onClick={() => { playRetroBeep(440, 'sine', 0.05); closeMobileMenu(); }}
               className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 md:hidden"
             />
 
@@ -473,7 +523,9 @@ export default function Header({
               exit={{ y: -15, opacity: 0 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
               id="mobile-menu"
-              role="navigation"
+              ref={mobileMenuRef}
+              role="dialog"
+              aria-modal="true"
               aria-label="Điều hướng chính"
               className="md:hidden absolute top-full left-0 w-full bg-stone-900 border-b-4 border-stone-800 shadow-2xl overflow-y-auto max-h-[80vh] z-50"
             >
@@ -512,7 +564,7 @@ export default function Header({
                     <span className="text-[11px] font-mono text-stone-400 uppercase tracking-widest block">Thiết lập tài khoản</span>
                     <button
                       onClick={() => {
-                        setIsMenuOpen(false);
+                        closeMobileMenu();
                         if (profile) {
                           onSignOut?.();
                         } else {
