@@ -205,6 +205,12 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
+  const requestNotificationPermission = () => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      void Notification.requestPermission();
+    }
+  };
+
   const sendBrowserNotification = (title: string, body: string) => {
     if ('Notification' in window) {
       if (Notification.permission === 'granted') {
@@ -222,13 +228,6 @@ export default function App() {
       }
     }
   };
-
-  // Request browser Notification permission on mount
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
 
   // Poll online users when hosting a private room
   useEffect(() => {
@@ -420,6 +419,7 @@ export default function App() {
 
   // 3. Matchmaking Operations
   const handleJoinMatchmaking = (gameId: string) => {
+    requestNotificationPermission();
     setErrorLocal(null);
     if (lobbyWsRef.current && lobbyWsRef.current.readyState === WebSocket.OPEN) {
       lobbyWsRef.current.send(JSON.stringify({
@@ -440,6 +440,7 @@ export default function App() {
   };
 
   const handleCreatePrivateRoom = (gameId: string) => {
+    requestNotificationPermission();
     setErrorLocal(null);
     setPrivateRoomGameId(gameId);
     if (lobbyWsRef.current && lobbyWsRef.current.readyState === WebSocket.OPEN) {
@@ -451,6 +452,7 @@ export default function App() {
   };
 
   const handleJoinPrivateRoom = (code: string) => {
+    requestNotificationPermission();
     setErrorLocal(null);
     if (lobbyWsRef.current && lobbyWsRef.current.readyState === WebSocket.OPEN) {
       lobbyWsRef.current.send(JSON.stringify({
@@ -502,7 +504,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-stone-100 flex flex-col font-sans select-none text-stone-800">
+    <div className="min-h-screen bg-stone-100 flex flex-col font-sans text-stone-800">
       
       {/* Retros Header bar with integrated responsive navigation and settings */}
       <Header
@@ -583,21 +585,23 @@ export default function App() {
 
       {/* Main Arena Route Selector */}
       {activeMatchId ? (
-        <GameBoard
-          matchId={activeMatchId}
-          userId={userId || ''}
-          userProfile={profile!}
-          onExit={() => {
-            setActiveMatchId(null);
-            setSpectateMode(false);
-            playRetroBeep(400, 'triangle', 0.1);
-          }}
-          spectateMode={spectateMode}
-        />
+        <main id="main-content" tabIndex={-1} className="flex-1">
+          <GameBoard
+            matchId={activeMatchId}
+            userId={userId || ''}
+            userProfile={profile!}
+            onExit={() => {
+              setActiveMatchId(null);
+              setSpectateMode(false);
+              playRetroBeep(400, 'triangle', 0.1);
+            }}
+            spectateMode={spectateMode}
+          />
+        </main>
       ) : (
         <>
           {/* Render Active view content */}
-          <main className="flex-1">
+          <main id="main-content" tabIndex={-1} className="flex-1">
             {activeView === 'catalog' && (
               <Catalog
                 onStartSolo={(gameId) => {
@@ -687,7 +691,7 @@ export default function App() {
       />
 
       {/* Dynamic Floating Toast Overlay Container */}
-      <div className="fixed top-4 right-4 z-50 flex flex-col gap-3 w-full max-w-sm pointer-events-none px-4 sm:px-0">
+      <div aria-live="polite" aria-atomic="false" className="fixed top-4 right-4 z-50 flex flex-col gap-3 w-full max-w-sm pointer-events-none px-4 sm:px-0">
         <AnimatePresence>
           {toasts.map((toast) => (
             <motion.div

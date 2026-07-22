@@ -3,6 +3,7 @@ import { GAMES, SOLO_GAMES } from '../gamesData.ts';
 import { Game } from '../types.ts';
 import { Sparkles, Users, Award, Play, Swords, LogIn } from 'lucide-react';
 import { playRetroBeep } from './games/CaroBoard.tsx';
+import { isValidRoomCode, normalizeRoomCode } from '../lib/roomCode.ts';
 
 interface CatalogProps {
   onStartSolo: (gameId: string) => void;
@@ -51,10 +52,9 @@ export default function Catalog({
 
   const handleJoinPrivate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (roomCodeInput.trim()) {
-      onJoinPrivateRoom(roomCodeInput.trim().toUpperCase());
-      setRoomCodeInput('');
-    }
+    if (!isValidRoomCode(roomCodeInput)) return;
+    onJoinPrivateRoom(roomCodeInput);
+    setRoomCodeInput('');
   };
 
   return (
@@ -124,21 +124,21 @@ export default function Catalog({
           <label htmlFor="room-code-direct" className="text-xs font-bold text-stone-700 flex items-center gap-1">
             <LogIn className="w-3.5 h-3.5 text-orange-500" /> VÀO PHÒNG BẰNG MÃ
           </label>
-          <span className="text-[10px] sm:text-[9px] text-stone-500 leading-tight">Nhập hoặc dán mã phòng đấu 6 ký tự để vào chơi đấu trí</span>
+          <span id="room-code-help" className="text-[10px] sm:text-[9px] text-stone-500 leading-tight">Nhập hoặc dán mã phòng đấu 6 ký tự để vào chơi đấu trí</span>
         </div>
         <form onSubmit={handleJoinPrivate} className="flex gap-2 w-full sm:w-auto items-stretch">
           <div className="relative flex-1 sm:flex-initial">
             <input
               type="text"
               id="room-code-direct"
-              maxLength={12} // Allow wider limit for copy-paste space tolerances, sanitized below
+              maxLength={12}
               placeholder="MÃ PHÒNG"
               value={roomCodeInput}
-              onChange={(e) => {
-                // Remove whitespaces and format to uppercase, slice to max 6
-                const sanitized = e.target.value.replace(/\s+/g, '').toUpperCase().slice(0, 6);
-                setRoomCodeInput(sanitized);
-              }}
+              onChange={(e) => setRoomCodeInput(normalizeRoomCode(e.target.value))}
+              required
+              pattern="[A-Z0-9]{6}"
+              autoCapitalize="characters"
+              aria-describedby="room-code-help"
               className="bg-white border border-stone-300 rounded-xl text-xs py-2.5 px-3.5 text-center uppercase tracking-widest font-extrabold w-full sm:w-36 focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 focus:outline-none"
             />
           </div>

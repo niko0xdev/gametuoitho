@@ -119,6 +119,9 @@ export default function Header({
 
   return (
     <header className="bg-stone-900 text-stone-100 border-b-4 border-stone-800 shadow-md relative z-50">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-[101] focus:rounded-lg focus:bg-white focus:px-3 focus:py-2 focus:text-stone-900 focus:outline-none focus:ring-2 focus:ring-orange-400">
+        Bỏ qua điều hướng
+      </a>
       {/* Upper Navigation Row */}
       <div className="max-w-7xl mx-auto py-3.5 px-4 sm:px-6 flex items-center justify-between gap-4">
         {/* Title / Logo */}
@@ -415,7 +418,10 @@ export default function Header({
           <button
             onClick={toggleMenu}
             id="mobile-menu-hamburger"
-            className="p-2 text-stone-400 hover:text-white bg-stone-800 hover:bg-stone-700 rounded-xl transition-all border border-stone-700 focus:outline-none cursor-pointer"
+            aria-label={isMenuOpen ? 'Đóng điều hướng' : 'Mở điều hướng'}
+            aria-expanded={isMenuOpen}
+            aria-controls="mobile-menu"
+            className="p-2 text-stone-400 hover:text-white bg-stone-800 hover:bg-stone-700 rounded-xl transition-all border border-stone-700 focus:outline-none focus:ring-2 focus:ring-orange-400 cursor-pointer"
           >
             {isMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
@@ -423,7 +429,7 @@ export default function Header({
       </div>
 
       {/* Desktop & Tablet: Sticky Navigation Tab Rail */}
-      <nav className="hidden md:flex justify-center bg-white border-t border-stone-200 py-2 px-4 gap-1 sm:gap-2 lg:gap-4 overflow-x-auto sticky top-0 z-40 shadow-xs">
+      <nav aria-label="Điều hướng chính" className="hidden md:flex justify-center bg-white border-t border-stone-200 py-2 px-4 gap-1 sm:gap-2 lg:gap-4 overflow-x-auto sticky top-0 z-40 shadow-xs">
         {NAVIGATION_ITEMS.map((item) => {
           const isActive = activeView === item.id;
           const IconComponent = item.icon;
@@ -432,8 +438,9 @@ export default function Header({
               key={item.id}
               id={`tab-${item.id}`}
               onClick={() => handleTabClick(item.id)}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap
-                ${isActive 
+              aria-current={isActive ? 'page' : undefined}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500
+                ${isActive
                   ? 'bg-orange-500 text-white shadow-sm' 
                   : 'text-stone-500 hover:text-stone-800 hover:bg-stone-50'
                 }
@@ -465,6 +472,9 @@ export default function Header({
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: -15, opacity: 0 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
+              id="mobile-menu"
+              role="navigation"
+              aria-label="Điều hướng chính"
               className="md:hidden absolute top-full left-0 w-full bg-stone-900 border-b-4 border-stone-800 shadow-2xl overflow-y-auto max-h-[80vh] z-50"
             >
               <div className="px-5 py-6 flex flex-col gap-6">
@@ -478,6 +488,7 @@ export default function Header({
                       <button
                         key={item.id}
                         onClick={() => handleTabClick(item.id)}
+                        aria-current={isActive ? 'page' : undefined}
                         className={`flex items-center justify-between px-4 py-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer text-left
                           ${isActive 
                             ? 'bg-orange-500 text-white' 
@@ -609,6 +620,7 @@ export default function Header({
                   setIsDropdownOpen(false);
                   playRetroBeep(440, 'sine', 0.05);
                 }}
+                aria-label="Đóng thiết lập tài khoản"
                 className="absolute top-4 right-4 p-1.5 rounded-full bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-white transition-colors"
               >
                 <X className="w-5 h-5" />
