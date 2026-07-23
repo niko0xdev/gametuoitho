@@ -28,22 +28,37 @@ export function pairPlayers<P extends Player>(
     for (let i = 0; i < n; i++) {
       if (i !== idx) remaining.push(ranked[i]);
     }
-    return { ...pairEven(remaining), sittingOut };
+    return { ...pairEven(remaining, rng), sittingOut };
   }
 
-  return pairEven(ranked);
+  return pairEven(ranked, rng);
 }
 
-// Sort by rank (rank 1 = ranked[0], rank N = ranked[n-1]).
-// Cặp (1,N), (2,N-1), (3,N-2)... cặp 0,2,4...→A; cặp 1,3,5...→B
-function pairEven<P extends Player>(ranked: readonly P[]): PairResult<P> {
+// Pair cặp ngoài cùng (1,N)→A, (2,N-1)→B, (3,N-2)→A, ...
+// Cặp giữa (n/2, n/2+1) random team để tránh deterministic unfair.
+function pairEven<P extends Player>(ranked: readonly P[], rng: Rng): PairResult<P> {
   const n = ranked.length;
   const teamA: P[] = [];
   const teamB: P[] = [];
-  for (let i = 0; i < n / 2; i++) {
+  const half = Math.floor(n / 2);
+  for (let i = 0; i < half; i++) {
     const lo = ranked[i];
     const hi = ranked[n - 1 - i];
-    if (i % 2 === 0) {
+    // Cặp ngoài cùng tuân theo alternating strict: i chẵn → A, i lẻ → B.
+    // Cặp giữa (i = half - 1): random, NHƯNG nếu chỉ có 2 cặp (N=4) thì phải đi
+    // ngược cặp ngoài để đảm bảo mỗi team có ít nhất 1 người.
+    const isMiddle = i === half - 1;
+    let goToA: boolean;
+    if (isMiddle && half === 2) {
+      // N=4: 2 cặp. Ép cặp giữa đi team ngược lại cặp ngoài.
+      // Cặp ngoài i=0: i%2===0 → A. Vậy cặp giữa i=1 phải đi B.
+      goToA = false;
+    } else if (isMiddle) {
+      goToA = rng() < 0.5;
+    } else {
+      goToA = i % 2 === 0;
+    }
+    if (goToA) {
       teamA.push(lo, hi);
     } else {
       teamB.push(lo, hi);
