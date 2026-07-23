@@ -39,19 +39,19 @@ function pairEven<P extends Player>(ranked: readonly P[], rng: Rng): PairResult<
   const teamA: P[] = [];
   const teamB: P[] = [];
   const half = Math.floor(n / 2);
+  const splitMiddle = half % 2 === 1;
   for (let i = 0; i < half; i++) {
     const lo = ranked[i];
     const hi = ranked[n - 1 - i];
-    const isMiddle = i === half - 1;
-    let goToA: boolean;
-    if (isMiddle && half === 2) {
-      goToA = false;
-    } else if (isMiddle) {
-      goToA = rng() < 0.5;
-    } else {
-      goToA = i % 2 === 0;
-    }
-    if (goToA) {
+    if (splitMiddle && i === half - 1) {
+      if (rng() < 0.5) {
+        teamA.push(lo);
+        teamB.push(hi);
+      } else {
+        teamA.push(hi);
+        teamB.push(lo);
+      }
+    } else if (i % 2 === 0) {
       teamA.push(lo, hi);
     } else {
       teamB.push(lo, hi);

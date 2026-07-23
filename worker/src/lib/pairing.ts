@@ -35,30 +35,26 @@ export function pairPlayers<P extends Player>(
 }
 
 // Pair cặp ngoài cùng (1,N)→A, (2,N-1)→B, (3,N-2)→A, ...
-// Cặp giữa (n/2, n/2+1) random team để tránh deterministic unfair.
+// half chẵn: push nguyên hết, alternating tự cân bằng N/2 mỗi team.
+// half lẻ: alternating hết trừ cặp giữa, cặp giữa split 1-1 random để bù lệch.
 function pairEven<P extends Player>(ranked: readonly P[], rng: Rng): PairResult<P> {
   const n = ranked.length;
   const teamA: P[] = [];
   const teamB: P[] = [];
   const half = Math.floor(n / 2);
+  const splitMiddle = half % 2 === 1;
   for (let i = 0; i < half; i++) {
     const lo = ranked[i];
     const hi = ranked[n - 1 - i];
-    // Cặp ngoài cùng tuân theo alternating strict: i chẵn → A, i lẻ → B.
-    // Cặp giữa (i = half - 1): random, NHƯNG nếu chỉ có 2 cặp (N=4) thì phải đi
-    // ngược cặp ngoài để đảm bảo mỗi team có ít nhất 1 người.
-    const isMiddle = i === half - 1;
-    let goToA: boolean;
-    if (isMiddle && half === 2) {
-      // N=4: 2 cặp. Ép cặp giữa đi team ngược lại cặp ngoài.
-      // Cặp ngoài i=0: i%2===0 → A. Vậy cặp giữa i=1 phải đi B.
-      goToA = false;
-    } else if (isMiddle) {
-      goToA = rng() < 0.5;
-    } else {
-      goToA = i % 2 === 0;
-    }
-    if (goToA) {
+    if (splitMiddle && i === half - 1) {
+      if (rng() < 0.5) {
+        teamA.push(lo);
+        teamB.push(hi);
+      } else {
+        teamA.push(hi);
+        teamB.push(lo);
+      }
+    } else if (i % 2 === 0) {
       teamA.push(lo, hi);
     } else {
       teamB.push(lo, hi);
