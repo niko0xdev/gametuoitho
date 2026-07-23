@@ -463,14 +463,11 @@ bilacRoute.delete('/matches/:id', checkAccess, async (c: any) => {
   const m = rows[0];
   if (!m) return c.json({ error: 'Không tìm thấy trận đấu!' }, 404);
   if ((m as any).tournamentId !== tournamentId) return c.json({ error: 'Bạn không có quyền xóa trận đấu của giải đấu này!' }, 403);
-  // Finished results are ranking-authoritative — only the owner may delete them.
-  // In-progress matches may be cancelled by any member.
-  if ((m as any).status === 'FINISHED') {
-    const uid = c.req.header('x-user-id');
-    const members = await db.select().from(bilacTournamentMembersTable).where(eq(bilacTournamentMembersTable.tournamentId, tournamentId)).all();
-    const isOwner = !!members.find((mm: any) => mm.userId === uid && mm.role === 'owner');
-    if (!isOwner) return c.json({ error: 'Chỉ chủ giải đấu mới được xoá kết quả trận đã ghi. Hãy nhờ chủ giải xoá giúp.' }, 403);
-  }
+  // Owner-only: chỉ chủ giải mới được xoá trận đấu ở mọi trạng thái (FINISHED lẫn PLAYING).
+  const uid = c.req.header('x-user-id');
+  const members = await db.select().from(bilacTournamentMembersTable).where(eq(bilacTournamentMembersTable.tournamentId, tournamentId)).all();
+  const isOwner = !!members.find((mm: any) => mm.userId === uid && mm.role === 'owner');
+  if (!isOwner) return c.json({ error: 'Chỉ chủ giải đấu mới được xoá trận đấu. Hãy nhờ chủ giải xoá giúp.' }, 403);
   await db.delete(bilacMatchesTable).where(eq(bilacMatchesTable.id, matchId));
   return c.json({ success: true });
 });

@@ -452,10 +452,9 @@ export function handleDeleteBilacMatch(req: Request, res: Response) {
     return res.status(403).json({ error: 'Bạn không có quyền xóa trận đấu của giải đấu này!' });
   }
 
-  // Finished results are ranking-authoritative — only the owner may delete them.
-  // In-progress matches may be cancelled by any member (the creator abandons).
-  if (match.status === 'FINISHED' && !db.isBiLacTournamentOwner(tournamentId, uid)) {
-    return res.status(403).json({ error: 'Chỉ chủ giải đấu mới được xoá kết quả trận đã ghi. Hãy nhờ chủ giải xoá giúp.' });
+  // Owner-only: chỉ chủ giải mới được xoá trận đấu ở mọi trạng thái (FINISHED lẫn PLAYING).
+  if (!db.isBiLacTournamentOwner(tournamentId, uid)) {
+    return res.status(403).json({ error: 'Chỉ chủ giải đấu mới được xoá trận đấu. Hãy nhờ chủ giải xoá giúp.' });
   }
 
   db.deleteBiLacMatch(req.params.id);

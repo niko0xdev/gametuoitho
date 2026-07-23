@@ -2026,13 +2026,15 @@ export default function BiLacArena({
 
                 {/* Score Controls / End Match */}
                 <div className="mt-8 pt-6 border-t border-stone-800 flex flex-wrap items-center justify-between gap-4">
-                  <button
-                    onClick={() => handleCancelMatch(ongoingMatch.id)}
-                    className="px-4 py-2 bg-transparent hover:bg-red-500/10 text-red-400 hover:text-red-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border border-red-500/20 cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    Hủy bỏ trận đấu
-                  </button>
+                  {myMemberRole === 'owner' && (
+                    <button
+                      onClick={() => handleCancelMatch(ongoingMatch.id)}
+                      className="px-4 py-2 bg-transparent hover:bg-red-500/10 text-red-400 hover:text-red-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border border-red-500/20 cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Hủy bỏ trận đấu
+                    </button>
+                  )}
 
                   <button
                     onClick={() => handleFinishMatch(ongoingMatch.id)}
@@ -2512,34 +2514,36 @@ export default function BiLacArena({
                     </div>
                   )}
 
-                  {/* Option to delete match (Admin feature for cleanup) */}
-                  <div className="mt-4 pt-3 border-t border-stone-200/50 flex justify-end">
-                    <button
-                      onClick={async () => {
-                        if (!window.confirm('Xoá kết quả trận đấu này? Bảng xếp hạng sẽ được tính lại.')) return;
-                        try {
-                          const res = await bilacFetch(`/api/bilac/matches/${m.id}`, { method: 'DELETE' });
-                          if (res.ok) {
-                            setMatches(prev => prev.filter(item => item.id !== m.id));
-                            playBeep(150, 'sawtooth', 0.2);
-                            setSuccessMsg('Đã xóa trận đấu thành công.');
-                            setTimeout(() => setSuccessMsg(null), 3000);
-                          } else {
-                            const d = await res.json().catch(() => ({}));
-                            setError(d.error || 'Không xoá được kết quả. Có thể bạn cần là chủ giải đấu.');
-                            playBeep(180, 'sawtooth', 0.2);
+                  {/* Option to delete match — owner-only (chỉ chủ giải mới được xoá) */}
+                  {myMemberRole === 'owner' && (
+                    <div className="mt-4 pt-3 border-t border-stone-200/50 flex justify-end">
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm('Xoá kết quả trận đấu này? Bảng xếp hạng sẽ được tính lại.')) return;
+                          try {
+                            const res = await bilacFetch(`/api/bilac/matches/${m.id}`, { method: 'DELETE' });
+                            if (res.ok) {
+                              setMatches(prev => prev.filter(item => item.id !== m.id));
+                              playBeep(150, 'sawtooth', 0.2);
+                              setSuccessMsg('Đã xóa trận đấu thành công.');
+                              setTimeout(() => setSuccessMsg(null), 3000);
+                            } else {
+                              const d = await res.json().catch(() => ({}));
+                              setError(d.error || 'Không xoá được kết quả. Có thể bạn cần là chủ giải đấu.');
+                              playBeep(180, 'sawtooth', 0.2);
+                            }
+                          } catch (e) {
+                            console.error(e);
+                            setError('Lỗi kết nối khi xoá trận đấu.');
                           }
-                        } catch (e) {
-                          console.error(e);
-                          setError('Lỗi kết nối khi xoá trận đấu.');
-                        }
-                      }}
-                      className="text-stone-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer border border-transparent hover:border-red-100"
-                    >
+                        }}
+                        className="text-stone-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer border border-transparent hover:border-red-100"
+                      >
                       <Trash2 className="w-3.5 h-3.5" />
-                      Xóa kết quả
-                    </button>
-                  </div>
+                        Xóa kết quả
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
