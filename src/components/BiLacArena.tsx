@@ -145,8 +145,10 @@ export default function BiLacArena({
   const [editTourDesc, setEditTourDesc] = useState('');
   const [renamingPlayerId, setRenamingPlayerId] = useState<string | null>(null);
   const [renamePlayerName, setRenamePlayerName] = useState('');
-  // Drag-and-drop team swap: the player row currently being dragged within the
-  // ongoing match scoreboard. Null when nothing is held.
+  // Team swap: the player row currently held (desktop HTML5 drag) or picked
+  // (mobile tap-to-swap — iOS/Android don't fire native drag events on plain
+  // elements). Same state drives both: tap once to pick, tap another player
+  // to swap, tap the same one again to release. Null when nothing is held.
   const [draggedPlayer, setDraggedPlayer] = useState<{ matchId: string; playerId: string } | null>(null);
 
   // Portal tabs: 'all' = default; 'joined' = chỉ giải user là thành viên.
@@ -1340,12 +1342,25 @@ export default function BiLacArena({
           setDraggedPlayer(null);
         }}
         onDragEnd={() => setDraggedPlayer(null)}
-        className={`flex items-center gap-2 p-2 rounded-xl border select-none transition-all cursor-grab active:cursor-grabbing ${
+        // Tap-to-swap: iOS Safari / Android Chrome don't fire native drag events on
+        // plain elements, so mobile needs its own path. Tap picks a player, tapping
+        // another (either team) swaps them; tapping the same player again releases.
+        onClick={() => {
+          if (!draggedPlayer) {
+            setDraggedPlayer({ matchId: ongoingMatch!.id, playerId: pId });
+          } else if (draggedPlayer.playerId === pId) {
+            setDraggedPlayer(null);
+          } else {
+            handleSwapPlayers(ongoingMatch!.id, draggedPlayer.playerId, pId);
+            setDraggedPlayer(null);
+          }
+        }}
+        className={`flex items-center gap-2 p-2 rounded-xl border select-none transition-all cursor-grab active:cursor-grabbing touch-manipulation ${
           isDragging
             ? 'opacity-40 border-orange-500/60 bg-stone-800/30'
             : 'bg-stone-800/60 border-stone-700/50 hover:border-orange-500/50'
         }`}
-        title="Kéo thả sang đội kia để đổi đội"
+        title="Kéo thả (hoặc chạm 2 người) để đổi đội"
       >
         <img src={player?.avatar} className="w-7 h-7 rounded-full bg-stone-700 border border-stone-600" alt="Avatar" />
         <span className="text-xs font-semibold truncate text-stone-200 flex-1">{player?.name || 'Vô danh'}</span>
