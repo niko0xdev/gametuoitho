@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { db } from '../db.ts';
 import { requireLoggedIn } from './_middleware.ts';
+import { pairPlayers } from '../lib/pairing.ts';
 
 export function handleListBilacTournaments(req: Request, res: Response) {
   const uid = requireLoggedIn(req, res);
@@ -377,46 +378,18 @@ export function handleCreateBilacMatch(req: Request, res: Response) {
   const sortedSelected = [...selectedPlayers].sort((a, b) =>
     winDiff[b.id] - winDiff[a.id] || b.id.localeCompare(a.id));
 
-  let participatingIds = sortedSelected.map(p => p.id);
-  let benchedPlayerId: string | undefined = undefined;
-
-  if (participatingIds.length % 2 !== 0) {
-    const benchedIndex = Math.floor(Math.random() * participatingIds.length);
-    benchedPlayerId = participatingIds[benchedIndex];
-    participatingIds.splice(benchedIndex, 1);
-  }
-
-  const shuffle = <T>(arr: T[]): T[] => {
-    const a = [...arr];
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-  };
-
-  // Adjacent-pair random split: pair ranked neighbors and randomly assign one
-  // of each pair to each team. Balances total strength for ANY team size.
-  // (The prior high/low split stacked team2 whenever teamSize was odd —
-  // 3v3/5v5 came out team2-stronger ~85-89% of matches.)
-  const team1: string[] = [];
-  const team2: string[] = [];
-  for (let i = 0; i < participatingIds.length; i += 2) {
-    if (Math.random() < 0.5) {
-      team1.push(participatingIds[i]);
-      team2.push(participatingIds[i + 1]);
-    } else {
-      team1.push(participatingIds[i + 1]);
-      team2.push(participatingIds[i]);
-    }
-  }
+  const rankedIds = sortedSelected.map(p => ({ id: p.id }));
+  const { teamA, teamB, sittingOut } = pairPlayers(rankedIds);
+  const team1 = teamA.map(p => p.id);
+  const team2 = teamB.map(p => p.id);
+  const benchedPlayerId: string | undefined = sittingOut?.id;
 
   const match = {
     id: 'match-' + Date.now(),
     timestamp: Date.now(),
     weekLabel,
-    team1: shuffle(team1),
-    team2: shuffle(team2),
+    team1,
+    team2,
     score1: 0,
     score2: 0,
     status: 'PLAYING' as const,

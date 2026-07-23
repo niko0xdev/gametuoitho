@@ -7,6 +7,7 @@ import {
   bilacTournamentsTable, bilacPlayersTable, bilacMatchesTable, bilacTournamentMembersTable, usersTable,
 } from '../schema';
 import { requireLoggedIn } from '../lib/auth';
+import { pairPlayers } from '../lib/pairing';
 
 export const bilacRoute = new Hono<{ Bindings: Bindings }>();
 
@@ -398,30 +399,18 @@ bilacRoute.post('/matches', checkAccess, async (c: any) => {
   const sorted = [...selected].sort((a: any, b: any) =>
     winDiff[b.id] - winDiff[a.id] || b.id.localeCompare(a.id));
 
-  let ids = sorted.map((p: any) => p.id);
-  let benched: string | undefined;
-  if (ids.length % 2 !== 0) {
-    const bi = Math.floor(Math.random() * ids.length);
-    benched = ids[bi];
-    ids.splice(bi, 1);
-  }
-  const shuf = <T,>(arr: T[]): T[] => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-  // Adjacent-pair random split: pair ranked neighbors and randomly assign one
-  // of each pair to each team. Balances total strength for ANY team size.
-  // (The prior high/low split stacked team2 whenever teamSize was odd — 3v3/5v5
-  // came out team2-stronger ~85-89% of matches.)
-  const t1: string[] = [], t2: string[] = [];
-  for (let i = 0; i < ids.length; i += 2) {
-    if (Math.random() < 0.5) { t1.push(ids[i]); t2.push(ids[i + 1]); }
-    else { t1.push(ids[i + 1]); t2.push(ids[i]); }
-  }
+  const rankedIds = sorted.map((p: any) => ({ id: p.id }));
+  const { teamA, teamB, sittingOut } = pairPlayers(rankedIds);
+  const t1 = teamA.map(p => p.id);
+  const t2 = teamB.map(p => p.id);
+  const benched: string | undefined = sittingOut?.id;
 
   const match = {
     id: 'match-' + Date.now(),
     timestamp: Date.now(),
     weekLabel: interval.label,
-    team1: JSON.stringify(shuf(t1)),
-    team2: JSON.stringify(shuf(t2)),
+    team1: JSON.stringify(t1),
+    team2: JSON.stringify(t2),
     score1: 0, score2: 0,
     status: 'PLAYING',
     benched: benched ?? null,
