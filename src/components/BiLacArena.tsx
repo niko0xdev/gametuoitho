@@ -136,6 +136,9 @@ export default function BiLacArena({
   const [members, setMembers] = useState<Array<{ userId: string; username: string; displayName: string; role: 'owner' | 'member'; joinedAt: number }>>([]);
   const [inviteUsername, setInviteUsername] = useState<string>('');
   const [myMemberRole, setMyMemberRole] = useState<'owner' | 'member' | null>(null);
+  // Match id pending user confirmation to cancel — see handleCancelMatch note on why
+  // this replaces window.confirm.
+  const [cancelMatchConfirmId, setCancelMatchConfirmId] = useState<string | null>(null);
   // Edit/delete tournament (owner) + rename player (member) UI state.
   const [editTournamentOpen, setEditTournamentOpen] = useState(false);
   const [editTourName, setEditTourName] = useState('');
@@ -1092,8 +1095,10 @@ export default function BiLacArena({
     }
   };
 
+  // Some in-app browsers (Zalo, Messenger, Facebook webview) no-op window.confirm —
+  // it resolves false instantly with no prompt shown, so the button looks "unresponsive"
+  // on mobile. Route through our own modal instead of the native confirm dialog.
   const handleCancelMatch = async (matchId: string) => {
-    if (!window.confirm('Hủy bỏ trận đấu này? Điểm số hiện tại sẽ bị xoá và không thể khôi phục.')) return;
     try {
       const res = await bilacFetch(`/api/bilac/matches/${matchId}`, { method: 'DELETE' });
       if (res.ok) {
@@ -2028,7 +2033,7 @@ export default function BiLacArena({
                 <div className="mt-8 pt-6 border-t border-stone-800 flex flex-wrap items-center justify-between gap-4">
                   {myMemberRole === 'owner' && (
                     <button
-                      onClick={() => handleCancelMatch(ongoingMatch.id)}
+                      onClick={() => setCancelMatchConfirmId(ongoingMatch.id)}
                       className="px-4 py-2 bg-transparent hover:bg-red-500/10 text-red-400 hover:text-red-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border border-red-500/20 cursor-pointer"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -2826,6 +2831,55 @@ export default function BiLacArena({
           </p>
         </div>
       )}
+
+      {/* CANCEL MATCH CONFIRM MODAL — custom, not window.confirm (see handleCancelMatch note) */}
+      <AnimatePresence>
+        {cancelMatchConfirmId && (
+          <motion.div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setCancelMatchConfirmId(null)}
+          >
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="cancel_match_title"
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md"
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+            >
+              <h3 id="cancel_match_title" className="text-lg font-extrabold text-stone-900 flex items-center gap-2 mb-2">
+                <Trash2 className="w-5 h-5 text-red-600" /> Hủy bỏ trận đấu
+              </h3>
+              <p className="text-sm text-stone-600 mb-5">
+                Điểm số hiện tại sẽ bị xoá và không thể khôi phục.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    const id = cancelMatchConfirmId;
+                    setCancelMatchConfirmId(null);
+                    handleCancelMatch(id);
+                  }}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white text-sm font-bold py-2.5 rounded-lg cursor-pointer transition-colors flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" /> Hủy bỏ trận đấu
+                </button>
+                <button
+                  onClick={() => setCancelMatchConfirmId(null)}
+                  className="px-4 bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm font-bold py-2.5 rounded-lg cursor-pointer transition-colors"
+                >
+                  Đóng
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* EDIT TOURNAMENT MODAL (owner) */}
       <AnimatePresence>
