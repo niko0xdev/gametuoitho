@@ -1351,7 +1351,6 @@ export default function BiLacArena({
     ]);
     return currentLeaderboard.filter(item => ids.has(item.player.id));
   }, [ongoingMatch, currentLeaderboard]);
-  const ongoingMatch = matches.find(m => m.status === 'PLAYING');
 
   // Render a single player row inside the ongoing-match scoreboard. Each row is
   // both a drag source and a drop target — dropping player A onto player B swaps
@@ -1954,6 +1953,7 @@ export default function BiLacArena({
             
             {/* ACTIVE PLAYING SCOREBOARD */}
             {ongoingMatch ? (
+              <>
               <div className="bg-stone-900 text-stone-100 p-6 sm:p-8 rounded-2xl border-4 border-orange-500 shadow-2xl relative overflow-hidden" id="ongoing_match_panel">
                 {/* Decorative retro stripes */}
                 <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-500" />
@@ -2091,6 +2091,7 @@ export default function BiLacArena({
                   </ol>
                 )}
               </div>
+              </>
             ) : (
               /* MATCH SETUP & MATCHMAKING WINDOW */
               <div className="bg-white p-6 sm:p-8 rounded-2xl border border-stone-200 shadow-md">
