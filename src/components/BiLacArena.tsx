@@ -1988,13 +1988,13 @@ export default function BiLacArena({
                       onClick={() => handleQuickWinTap(1)}
                       className={
                         pendingConfirmTeam === 1
-                          ? 'w-full mb-4 py-4 px-6 bg-amber-100 text-amber-700 border border-amber-300 rounded-2xl text-base sm:text-lg font-extrabold transition-all cursor-pointer text-center block shadow-xl'
-                          : 'w-full mb-4 py-4 px-6 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl text-base sm:text-lg font-extrabold transition-all cursor-pointer text-center block shadow-xl hover:shadow-2xl hover:scale-105'
+                          ? 'w-full mb-4 py-4 px-6 bg-blue-100 text-blue-700 border border-blue-300 rounded-2xl text-sm sm:text-base font-extrabold transition-all cursor-pointer text-center block shadow-xl'
+                          : 'w-full mb-4 py-4 px-6 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl text-sm sm:text-base font-extrabold transition-all cursor-pointer text-center block shadow-xl hover:shadow-2xl hover:scale-105'
                       }
                     >
                       {pendingConfirmTeam === 1 ? '⚠️ Bấm lại lần nữa để xác nhận Xanh thắng' : '🏆 Xanh Thắng (7-6)'}
                     </button>
-                    <h3 className="text-xs sm:text-sm font-bold text-amber-400 uppercase tracking-wide mb-1">Đội Xanh</h3>
+                    <h3 className="text-xs sm:text-sm font-bold text-blue-400 uppercase tracking-wide mb-1">Đội Xanh</h3>
                     {/* Players in Team 1 */}
                     <div className="mt-6 space-y-2.5 text-left">
                       {ongoingMatch.team1.map(pId => renderTeamPlayer(pId))}
@@ -2014,13 +2014,13 @@ export default function BiLacArena({
                       onClick={() => handleQuickWinTap(2)}
                       className={
                         pendingConfirmTeam === 2
-                          ? 'w-full mb-4 py-4 px-6 bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-2xl text-base sm:text-lg font-extrabold transition-all cursor-pointer text-center block shadow-xl'
-                          : 'w-full mb-4 py-4 px-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-base sm:text-lg font-extrabold transition-all cursor-pointer text-center block shadow-xl hover:shadow-2xl hover:scale-105'
+                          ? 'w-full mb-4 py-4 px-6 bg-red-100 text-red-700 border border-red-300 rounded-2xl text-sm sm:text-base font-extrabold transition-all cursor-pointer text-center block shadow-xl'
+                          : 'w-full mb-4 py-4 px-6 bg-red-600 hover:bg-red-500 text-white rounded-2xl text-sm sm:text-base font-extrabold transition-all cursor-pointer text-center block shadow-xl hover:shadow-2xl hover:scale-105'
                       }
                     >
                       {pendingConfirmTeam === 2 ? '⚠️ Bấm lại lần nữa để xác nhận Đỏ thắng' : '🏆 Đỏ Thắng (7-6)'}
                     </button>
-                    <h3 className="text-xs sm:text-sm font-bold text-emerald-400 uppercase tracking-wide mb-1">Đội Đỏ</h3>
+                    <h3 className="text-xs sm:text-sm font-bold text-red-400 uppercase tracking-wide mb-1">Đội Đỏ</h3>
                     {/* Players in Team 2 */}
                     <div className="mt-6 space-y-2.5 text-left">
                       {ongoingMatch.team2.map(pId => renderTeamPlayer(pId))}
