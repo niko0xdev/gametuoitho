@@ -5,6 +5,8 @@ import {
   UserPlus,
   Swords,
   Trophy,
+  Medal,
+  Handshake,
   Calendar,
   History,
   Plus,
@@ -2397,11 +2399,11 @@ export default function BiLacArena({
                 <tr className="border-b border-stone-200 text-stone-500 font-bold">
                   <th className="py-3 px-4 text-center w-12">Hạng</th>
                   <th className="py-3 px-4">Đấu thủ</th>
-                  <th className="py-3 px-4 text-center">Trận</th>
+                  <th className="py-3 px-4 text-center">Hiệu số thắng/bại (W−L)</th>
                   <th className="py-3 px-4 text-center">Thắng</th>
                   <th className="py-3 px-4 text-center">Thua</th>
-                  <th className="py-3 px-4 text-center">Hiệu số (HS)</th>
                   <th className="py-3 px-4 text-center">Tỷ lệ thắng (%)</th>
+                  <th className="py-3 px-4 text-center">Tổng số trận</th>
                 </tr>
               </thead>
               <tbody>
@@ -2412,31 +2414,47 @@ export default function BiLacArena({
                   if (index === 2) rankStyle = "bg-amber-600 text-white font-bold";
 
                   const winRate = item.matchesPlayed > 0 ? Math.round((item.wins / item.matchesPlayed) * 100) : 0;
+                  const N = currentLeaderboard.length;
+                  const isLast3 = N >= 3 && index >= N - 3;
 
                   return (
                     <tr key={item.player.id} className="border-b border-stone-100 hover:bg-stone-50 transition-colors">
                       <td className="py-3 px-4 text-center font-bold">
                         <span className={`w-6 h-6 rounded-full inline-flex items-center justify-center text-xs ${rankStyle}`}>
-                          {index + 1}
+                          {index === 0 ? (
+                            <Trophy className="w-3.5 h-3.5" />
+                          ) : index === 1 ? (
+                            <Medal className="w-3.5 h-3.5" />
+                          ) : index === 2 ? (
+                            <Medal className="w-3.5 h-3.5" />
+                          ) : (
+                            index + 1
+                          )}
                         </span>
                       </td>
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-3">
                           <img src={item.player.avatar} className="w-8 h-8 rounded-full border border-stone-200 bg-stone-100" alt="Avatar" />
                           <span className="font-bold text-stone-900">{item.player.name}</span>
+                          {isLast3 && (
+                            <Handshake
+                              className="w-4 h-4 text-orange-500 shrink-0"
+                              title="Được nhà tài trợ hỗ trợ tinh thần"
+                            />
+                          )}
                         </div>
                       </td>
-                      <td className="py-3 px-4 text-center font-mono font-semibold">{item.matchesPlayed}</td>
-                      <td className="py-3 px-4 text-center font-mono font-bold text-emerald-600">{item.wins}</td>
-                      <td className="py-3 px-4 text-center font-mono text-stone-400">{item.losses}</td>
                       <td className="py-3 px-4 text-center font-mono font-bold">
                         <span className={item.diff > 0 ? 'text-emerald-600' : item.diff < 0 ? 'text-red-600' : 'text-stone-400'}>
                           {item.diff > 0 ? `+${item.diff}` : item.diff}
                         </span>
                       </td>
+                      <td className="py-3 px-4 text-center font-mono font-bold text-emerald-600">{item.wins}</td>
+                      <td className="py-3 px-4 text-center font-mono text-stone-400">{item.losses}</td>
                       <td className="py-3 px-4 text-center font-mono font-bold text-blue-600">
                         {winRate}%
                       </td>
+                      <td className="py-3 px-4 text-center font-mono font-semibold text-stone-700">{item.matchesPlayed}</td>
                     </tr>
                   );
                 })}
