@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Users,
@@ -1320,6 +1320,39 @@ export default function BiLacArena({
   const currentLeaderboard = calculateLeaderboards();
   const ongoingMatch = matches.find(m => m.status === 'PLAYING');
 
+  // 2-tap confirm for Quick Win buttons — first tap arms, second tap (within 5s) triggers.
+  const [pendingConfirmTeam, setPendingConfirmTeam] = useState<1 | 2 | null>(null);
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleQuickWinTap = (team: 1 | 2) => {
+    if (pendingConfirmTeam === team) {
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+      setPendingConfirmTeam(null);
+      handleQuickFinish(ongoingMatch!.id, team);
+    } else {
+      setPendingConfirmTeam(team);
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+      confirmTimerRef.current = setTimeout(() => setPendingConfirmTeam(null), 5000);
+    }
+  };
+  // Cleanup pending-confirm timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    };
+  }, []);
+
+  // Mini leaderboard — weekly ranking filtered to participants of the ongoing match.
+  const ongoingMatchPlayerRanking = useMemo(() => {
+    if (!ongoingMatch) return [];
+    const ids = new Set<string>([
+      ...ongoingMatch.team1,
+      ...ongoingMatch.team2,
+      ...(ongoingMatch.benched ? [ongoingMatch.benched] : []),
+    ]);
+    return currentLeaderboard.filter(item => ids.has(item.player.id));
+  }, [ongoingMatch, currentLeaderboard]);
+  const ongoingMatch = matches.find(m => m.status === 'PLAYING');
+
   // Render a single player row inside the ongoing-match scoreboard. Each row is
   // both a drag source and a drop target — dropping player A onto player B swaps
   // their teams (see handleSwapPlayers). Native HTML5 DnD, no library.
@@ -1952,32 +1985,16 @@ export default function BiLacArena({
                   <div className="col-span-3 text-center">
                     <button
                       id="btn_quick_win_blue"
-                      onClick={() => handleQuickFinish(ongoingMatch.id, 1)}
-                      className="w-full mb-3 px-2 py-1.5 bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30 rounded-xl text-[11px] font-bold transition-all cursor-pointer text-center block"
+                      onClick={() => handleQuickWinTap(1)}
+                      className={
+                        pendingConfirmTeam === 1
+                          ? 'w-full mb-4 py-4 px-6 bg-amber-100 text-amber-700 border border-amber-300 rounded-2xl text-base sm:text-lg font-extrabold transition-all cursor-pointer text-center block shadow-xl'
+                          : 'w-full mb-4 py-4 px-6 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl text-base sm:text-lg font-extrabold transition-all cursor-pointer text-center block shadow-xl hover:shadow-2xl hover:scale-105'
+                      }
                     >
-                      🏆 Xanh Thắng (7-6)
+                      {pendingConfirmTeam === 1 ? '⚠️ Bấm lại lần nữa để xác nhận Xanh thắng' : '🏆 Xanh Thắng (7-6)'}
                     </button>
                     <h3 className="text-xs sm:text-sm font-bold text-amber-400 uppercase tracking-wide mb-1">Đội Xanh</h3>
-                    <div className="flex items-center justify-center gap-1.5">
-                      <button
-                        onClick={() => handleUpdateScore(ongoingMatch.id, 1, -1)}
-                        className="w-8 h-8 rounded-full border border-stone-700 bg-stone-800 hover:bg-stone-700 flex items-center justify-center text-stone-300 font-bold hover:text-white cursor-pointer transition-all"
-                        title="Giảm 1 bàn"
-                      >
-                        <Minus className="w-4 h-4" />
-                      </button>
-                      <span className="text-4xl sm:text-6xl font-black font-mono tracking-tight text-white px-2">
-                        {ongoingMatch.score1}
-                      </span>
-                      <button
-                        onClick={() => handleUpdateScore(ongoingMatch.id, 1, 1)}
-                        className="w-8 h-8 rounded-full border border-stone-700 bg-stone-800 hover:bg-stone-700 flex items-center justify-center text-stone-300 font-bold hover:text-white cursor-pointer transition-all"
-                        title="Tăng 1 bàn"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </button>
-                    </div>
-
                     {/* Players in Team 1 */}
                     <div className="mt-6 space-y-2.5 text-left">
                       {ongoingMatch.team1.map(pId => renderTeamPlayer(pId))}
@@ -1994,32 +2011,16 @@ export default function BiLacArena({
                   <div className="col-span-3 text-center">
                     <button
                       id="btn_quick_win_red"
-                      onClick={() => handleQuickFinish(ongoingMatch.id, 2)}
-                      className="w-full mb-3 px-2 py-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 rounded-xl text-[11px] font-bold transition-all cursor-pointer text-center block"
+                      onClick={() => handleQuickWinTap(2)}
+                      className={
+                        pendingConfirmTeam === 2
+                          ? 'w-full mb-4 py-4 px-6 bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-2xl text-base sm:text-lg font-extrabold transition-all cursor-pointer text-center block shadow-xl'
+                          : 'w-full mb-4 py-4 px-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-base sm:text-lg font-extrabold transition-all cursor-pointer text-center block shadow-xl hover:shadow-2xl hover:scale-105'
+                      }
                     >
-                      🏆 Đỏ Thắng (7-6)
+                      {pendingConfirmTeam === 2 ? '⚠️ Bấm lại lần nữa để xác nhận Đỏ thắng' : '🏆 Đỏ Thắng (7-6)'}
                     </button>
                     <h3 className="text-xs sm:text-sm font-bold text-emerald-400 uppercase tracking-wide mb-1">Đội Đỏ</h3>
-                    <div className="flex items-center justify-center gap-1.5">
-                      <button
-                        onClick={() => handleUpdateScore(ongoingMatch.id, 2, -1)}
-                        className="w-8 h-8 rounded-full border border-stone-700 bg-stone-800 hover:bg-stone-700 flex items-center justify-center text-stone-300 font-bold hover:text-white cursor-pointer transition-all"
-                        title="Giảm 1 bàn"
-                      >
-                        <Minus className="w-4 h-4" />
-                      </button>
-                      <span className="text-4xl sm:text-6xl font-black font-mono tracking-tight text-white px-2">
-                        {ongoingMatch.score2}
-                      </span>
-                      <button
-                        onClick={() => handleUpdateScore(ongoingMatch.id, 2, 1)}
-                        className="w-8 h-8 rounded-full border border-stone-700 bg-stone-800 hover:bg-stone-700 flex items-center justify-center text-stone-300 font-bold hover:text-white cursor-pointer transition-all"
-                        title="Tăng 1 bàn"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </button>
-                    </div>
-
                     {/* Players in Team 2 */}
                     <div className="mt-6 space-y-2.5 text-left">
                       {ongoingMatch.team2.map(pId => renderTeamPlayer(pId))}
@@ -2057,15 +2058,38 @@ export default function BiLacArena({
                       Hủy bỏ trận đấu
                     </button>
                   )}
-
-                  <button
-                    onClick={() => handleFinishMatch(ongoingMatch.id)}
-                    className="px-6 py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-xl text-xs font-bold tracking-wider uppercase flex items-center gap-2 cursor-pointer shadow-lg hover:shadow-xl hover:scale-102 transform active:scale-98 transition-all"
-                  >
-                    <Check className="w-5 h-5 font-bold" />
-                    Xác nhận kết thúc đấu trí
-                  </button>
                 </div>
+              </div>
+
+              {/* Mini leaderboard — participants of the ongoing match */}
+              <div className="bg-white p-6 sm:p-8 rounded-2xl border border-stone-200 shadow-md mt-6" id="ongoing_match_players_ranking">
+                <h3 className="text-base font-bold text-stone-900 flex items-center gap-1.5 mb-3">
+                  <Trophy className="w-4 h-4 text-orange-500" />
+                  Bảng xếp hạng tuần — Thành viên trận này
+                </h3>
+                <p className="text-xs text-stone-500 mb-4">
+                  Thứ hạng của {ongoingMatchPlayerRanking.length} thành viên đang thi đấu trong tuần này.
+                </p>
+                {ongoingMatchPlayerRanking.length === 0 ? (
+                  <p className="text-xs text-stone-400 italic">Chưa có dữ liệu thứ hạng tuần cho các thành viên này.</p>
+                ) : (
+                  <ol className="space-y-2">
+                    {ongoingMatchPlayerRanking.map((p, idx) => (
+                      <li key={p.player.id} className="flex items-center gap-3 p-3 bg-stone-50 rounded-xl border border-stone-200">
+                        <span className="w-7 h-7 rounded-full bg-orange-100 text-orange-700 font-bold flex items-center justify-center text-xs">
+                          {idx + 1}
+                        </span>
+                        <img src={p.player.avatar} className="w-8 h-8 rounded-full border border-stone-200" alt="" />
+                        <span className="font-bold text-sm text-stone-900 flex-1">{p.player.name}</span>
+                        <span className="text-xs font-mono text-emerald-600 font-bold">{p.wins}T</span>
+                        <span className="text-xs font-mono text-stone-400">{p.losses}B</span>
+                        <span className={`text-xs font-mono font-bold ${p.diff > 0 ? 'text-emerald-600' : p.diff < 0 ? 'text-red-600' : 'text-stone-400'}`}>
+                          {p.diff > 0 ? `+${p.diff}` : p.diff}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
               </div>
             ) : (
               /* MATCH SETUP & MATCHMAKING WINDOW */
