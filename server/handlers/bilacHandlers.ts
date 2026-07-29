@@ -402,7 +402,7 @@ export function handleCreateBilacMatch(req: Request, res: Response) {
 }
 
 export function handleUpdateBilacMatch(req: Request, res: Response) {
-  const { score1, score2, status, team1, team2 } = req.body;
+  const { score1, score2, status, team1, team2, benched } = req.body;
   const match = db.getBiLacMatch(req.params.id);
   if (!match) {
     return res.status(404).json({ error: 'Không tìm thấy trận đấu!' });
@@ -419,21 +419,25 @@ export function handleUpdateBilacMatch(req: Request, res: Response) {
   if (typeof score2 === 'number') match.score2 = score2;
   if (status) match.status = status;
 
-  // Drag-and-drop team swap: both arrays must be present and contain only strings.
+  // Drag-and-drop swap: both teams plus bench form one immutable roster.
   const isStrArray = (v: any) => Array.isArray(v) && v.every((x: any) => typeof x === 'string');
-  if (isStrArray(team1) && isStrArray(team2)) {
+  const hasRosterFields = team1 !== undefined || team2 !== undefined || benched !== undefined;
+  if (hasRosterFields) {
+    if (!isStrArray(team1) || !isStrArray(team2) || (benched !== undefined && benched !== null && typeof benched !== 'string')) {
+      return res.status(400).json({ error: 'Đội hình hoặc người dự bị không hợp lệ!' });
+    }
     if (!wasPlaying) {
       return res.status(400).json({ error: 'Chỉ có thể đổi đội khi trận đang diễn ra!' });
     }
-    // Must be a pure rearrangement of the existing roster — same multiset of ids,
-    // no add/drop/phantom — so a code-holder can't wipe or corrupt the teams.
-    const oldSorted = [...match.team1, ...match.team2].sort();
-    const newSorted = [...team1, ...team2].sort();
+    const nextBenched = benched === undefined ? match.benched ?? null : benched;
+    const oldSorted = [...match.team1, ...match.team2, ...(match.benched ? [match.benched] : [])].sort();
+    const newSorted = [...team1, ...team2, ...(nextBenched ? [nextBenched] : [])].sort();
     if (oldSorted.length !== newSorted.length || oldSorted.some((id: string, i: number) => id !== newSorted[i])) {
       return res.status(400).json({ error: 'Đội hình chỉ được hoán đổi thành viên hiện có — không thêm, bớt hay đặt người lạ!' });
     }
     match.team1 = team1;
     match.team2 = team2;
+    match.benched = nextBenched;
   }
 
   db.saveBiLacMatch(match);
@@ -452,9 +456,9 @@ export function handleDeleteBilacMatch(req: Request, res: Response) {
     return res.status(403).json({ error: 'Bạn không có quyền xóa trận đấu của giải đấu này!' });
   }
 
-  // Owner-only: chỉ chủ giải mới được xoá trận đấu ở mọi trạng thái (FINISHED lẫn PLAYING).
-  if (!db.isBiLacTournamentOwner(tournamentId, uid)) {
-    return res.status(403).json({ error: 'Chỉ chủ giải đấu mới được xoá trận đấu. Hãy nhờ chủ giải xoá giúp.' });
+  // Members may cancel a live match; history remains owner-only.
+  if (match.status === 'FINISHED' && !db.isBiLacTournamentOwner(tournamentId, uid)) {
+    return res.status(403).json({ error: 'Chỉ chủ giải đấu mới được xoá trận đã kết thúc. Hãy nhờ chủ giải xoá giúp.' });
   }
 
   db.deleteBiLacMatch(req.params.id);
