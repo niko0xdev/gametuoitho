@@ -423,7 +423,7 @@ bilacRoute.post('/matches', checkAccess, async (c: any) => {
 bilacRoute.post('/matches/:id/update', checkAccess, async (c: any) => {
   const matchId = c.req.param('id');
   const tournamentId = c.get('tournamentId');
-  const { score1, score2, status, team1, team2 } = await c.req.json();
+  const { score1, score2, status, team1, team2, benched } = await c.req.json();
   const db = createDb(c.env);
   const rows = await db.select().from(bilacMatchesTable).where(eq(bilacMatchesTable.id, matchId)).all();
   const m = rows[0];
@@ -437,19 +437,25 @@ bilacRoute.post('/matches/:id/update', checkAccess, async (c: any) => {
   if (typeof score1 === 'number') patch.score1 = score1;
   if (typeof score2 === 'number') patch.score2 = score2;
   if (status) patch.status = status;
-  // Drag-and-drop team swap. Must be a pure rearrangement of the existing roster
-  // (same multiset of ids — no add/drop/phantom) and only while the match is live.
+  // Drag-and-drop swap: both teams plus bench form one immutable roster.
   const isStrArray = (v: any) => Array.isArray(v) && v.every((x: any) => typeof x === 'string');
-  if (isStrArray(team1) && isStrArray(team2)) {
+  const hasRosterFields = team1 !== undefined || team2 !== undefined || benched !== undefined;
+  if (hasRosterFields) {
+    if (!isStrArray(team1) || !isStrArray(team2) || (benched !== undefined && benched !== null && typeof benched !== 'string')) {
+      return c.json({ error: 'Đội hình hoặc người dự bị không hợp lệ!' }, 400);
+    }
     if ((m as any).status !== 'PLAYING') return c.json({ error: 'Chỉ có thể đổi đội khi trận đang diễn ra!' }, 400);
     const parse = (v: any) => { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
-    const oldSorted = [...parse((m as any).team1), ...parse((m as any).team2)].sort();
-    const newSorted = [...team1, ...team2].sort();
+    const nextBenched = benched === undefined ? (m as any).benched ?? null : benched;
+    const oldBenched = typeof (m as any).benched === 'string' ? [(m as any).benched] : [];
+    const oldSorted = [...parse((m as any).team1), ...parse((m as any).team2), ...oldBenched].sort();
+    const newSorted = [...team1, ...team2, ...(nextBenched ? [nextBenched] : [])].sort();
     if (oldSorted.length !== newSorted.length || oldSorted.some((id: string, i: number) => id !== newSorted[i])) {
       return c.json({ error: 'Đội hình chỉ được hoán đổi thành viên hiện có — không thêm, bớt hay đặt người lạ!' }, 400);
     }
     patch.team1 = JSON.stringify(team1);
     patch.team2 = JSON.stringify(team2);
+    patch.benched = nextBenched;
   }
   await db.update(bilacMatchesTable).set(patch).where(eq(bilacMatchesTable.id, matchId));
   return c.json(serializeMatch({ ...m, ...patch }));
@@ -463,11 +469,13 @@ bilacRoute.delete('/matches/:id', checkAccess, async (c: any) => {
   const m = rows[0];
   if (!m) return c.json({ error: 'Không tìm thấy trận đấu!' }, 404);
   if ((m as any).tournamentId !== tournamentId) return c.json({ error: 'Bạn không có quyền xóa trận đấu của giải đấu này!' }, 403);
-  // Owner-only: chỉ chủ giải mới được xoá trận đấu ở mọi trạng thái (FINISHED lẫn PLAYING).
-  const uid = c.req.header('x-user-id');
-  const members = await db.select().from(bilacTournamentMembersTable).where(eq(bilacTournamentMembersTable.tournamentId, tournamentId)).all();
-  const isOwner = !!members.find((mm: any) => mm.userId === uid && mm.role === 'owner');
-  if (!isOwner) return c.json({ error: 'Chỉ chủ giải đấu mới được xoá trận đấu. Hãy nhờ chủ giải xoá giúp.' }, 403);
+  // Members may cancel a live match; history remains owner-only.
+  if ((m as any).status === 'FINISHED') {
+    const uid = c.req.header('x-user-id');
+    const members = await db.select().from(bilacTournamentMembersTable).where(eq(bilacTournamentMembersTable.tournamentId, tournamentId)).all();
+    const isOwner = !!members.find((mm: any) => mm.userId === uid && mm.role === 'owner');
+    if (!isOwner) return c.json({ error: 'Chỉ chủ giải đấu mới được xoá trận đã kết thúc. Hãy nhờ chủ giải xoá giúp.' }, 403);
+  }
   await db.delete(bilacMatchesTable).where(eq(bilacMatchesTable.id, matchId));
   return c.json({ success: true });
 });

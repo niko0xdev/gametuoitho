@@ -552,6 +552,32 @@ describe('POST /api/bilac/matches/:id/update', () => {
     assert.equal(res.body.score1, 3);
     assert.equal(res.body.status, 'FINISHED');
   });
+  it('persists a team-to-bench swap', async () => {
+    const owner = uniq('upBench');
+    const { id, code } = await setupTournament(owner);
+    db.saveBiLacMatch({
+      id: 'up_bench', timestamp: Date.now(), weekLabel: 'w', tournamentId: id,
+      team1: ['a', 'b'], team2: ['c', 'd'], benched: 'e', score1: 0, score2: 0, status: 'PLAYING'
+    });
+    const res = await request(getApp()).post('/api/bilac/matches/up_bench/update', {
+      team1: ['e', 'b'], team2: ['c', 'd'], benched: 'a'
+    }, { 'x-user-id': owner, 'x-tournament-id': id, 'x-tournament-code': code });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.team1, ['e', 'b']);
+    assert.equal(res.body.benched, 'a');
+  });
+  it('400s when bench swap changes the roster', async () => {
+    const owner = uniq('upBenchBad');
+    const { id, code } = await setupTournament(owner);
+    db.saveBiLacMatch({
+      id: 'up_bench_bad', timestamp: Date.now(), weekLabel: 'w', tournamentId: id,
+      team1: ['a'], team2: ['b'], benched: 'c', score1: 0, score2: 0, status: 'PLAYING'
+    });
+    const res = await request(getApp()).post('/api/bilac/matches/up_bench_bad/update', {
+      team1: ['x'], team2: ['b'], benched: 'c'
+    }, { 'x-user-id': owner, 'x-tournament-id': id, 'x-tournament-code': code });
+    assert.equal(res.status, 400);
+  });
 });
 
 describe('DELETE /api/bilac/matches/:id', () => {
@@ -617,7 +643,7 @@ describe('DELETE /api/bilac/matches/:id', () => {
     });
     assert.equal(res.status, 200);
   });
-  it('403s for non-owner member cancelling (deleting) a PLAYING match', async () => {
+  it('200s for member cancelling a PLAYING match', async () => {
     const owner = uniq('delOwn3');
     const member = uniq('delMem3');
     await makeUser(member, member);
@@ -633,8 +659,8 @@ describe('DELETE /api/bilac/matches/:id', () => {
     const res = await request(getApp()).delete('/api/bilac/matches/del_play', undefined, {
       'x-user-id': member, 'x-tournament-id': id, 'x-tournament-code': code
     });
-    // Owner-only: member (kể cả với trận PLAYING) bị từ chối 403.
-    assert.equal(res.status, 403);
+    assert.equal(res.status, 200);
+    assert.equal(db.getBiLacMatch('del_play'), undefined);
   });
 });
 
@@ -731,8 +757,8 @@ describe('PUT /api/bilac/players/:id', () => {
   });
 });
 
-describe('DELETE /api/bilac/matches/:id (owner-only)', () => {
-  // Add a non-owner member to the tournament so we can test the 403 path.
+describe('DELETE /api/bilac/matches/:id', () => {
+  // Add a non-owner member to exercise live cancellation and protected history.
   async function addMemberHelper(tournamentId: string, memberId: string) {
     await makeUser(memberId, memberId);
     db.saveBiLacTournamentMember({
@@ -786,7 +812,7 @@ describe('DELETE /api/bilac/matches/:id (owner-only)', () => {
     assert.equal(db.getBiLacMatch('m_own_play'), undefined);
   });
 
-  it('403s when non-owner member tries to cancel a PLAYING match', async () => {
+  it('200s when non-owner member cancels a PLAYING match', async () => {
     const owner = uniq('delMemPlay');
     const member = uniq('delMemPlay_m');
     const { id, code } = await setupTournament(owner);
@@ -798,7 +824,7 @@ describe('DELETE /api/bilac/matches/:id (owner-only)', () => {
     const res = await request(getApp()).delete('/api/bilac/matches/m_mem_play', undefined, {
       'x-user-id': member, 'x-tournament-id': id, 'x-tournament-code': code
     });
-    assert.equal(res.status, 403);
-    assert.ok(db.getBiLacMatch('m_mem_play'));
+    assert.equal(res.status, 200);
+    assert.equal(db.getBiLacMatch('m_mem_play'), undefined);
   });
 });

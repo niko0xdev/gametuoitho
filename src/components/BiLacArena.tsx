@@ -1120,23 +1120,28 @@ export default function BiLacArena({
     }
   };
 
-  // Drag-and-drop: swap a player from one team with a player on the other team
-  // of the same ongoing match. Keeps both teams the same size — no orphans.
-  // Each id lives in exactly one team, so exchanging the pair in both arrays only
-  // moves the relevant ids. Backend re-asserts PLAYING-only; bail locally too.
+  // Drag-and-drop: exchange players across teams or with the odd-player bench.
+  // Backend re-asserts the complete roster and PLAYING-only state.
   const handleSwapPlayers = async (matchId: string, dragPlayerId: string, dropPlayerId: string) => {
     const match = matches.find(m => m.id === matchId);
     if (!match || match.status !== 'PLAYING' || dragPlayerId === dropPlayerId) return;
-    const onSameSide = match.team1.includes(dragPlayerId) === match.team1.includes(dropPlayerId);
-    if (onSameSide) return; // same team (or unknown) — nothing to swap
+    const dragInTeam1 = match.team1.includes(dragPlayerId);
+    const dropInTeam1 = match.team1.includes(dropPlayerId);
+    const dragInTeam2 = match.team2.includes(dragPlayerId);
+    const dropInTeam2 = match.team2.includes(dropPlayerId);
+    const dragIsBenched = match.benched === dragPlayerId;
+    const dropIsBenched = match.benched === dropPlayerId;
+    if ((!dragInTeam1 && !dragInTeam2 && !dragIsBenched) || (!dropInTeam1 && !dropInTeam2 && !dropIsBenched)) return;
+    if ((dragInTeam1 && dropInTeam1) || (dragInTeam2 && dropInTeam2) || (dragIsBenched && dropIsBenched)) return;
     const exchange = (arr: string[]) => arr.map(id => (id === dragPlayerId ? dropPlayerId : id === dropPlayerId ? dragPlayerId : id));
     const team1 = exchange(match.team1);
     const team2 = exchange(match.team2);
+    const benched = dragIsBenched ? dropPlayerId : dropIsBenched ? dragPlayerId : match.benched ?? null;
     try {
       const res = await bilacFetch(`/api/bilac/matches/${matchId}/update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ team1, team2 })
+        body: JSON.stringify({ team1, team2, benched })
       });
       if (res.ok) {
         const updated = await res.json();
@@ -1318,10 +1323,9 @@ export default function BiLacArena({
   const currentLeaderboard = calculateLeaderboards();
   const ongoingMatch = matches.find(m => m.status === 'PLAYING');
 
-  // Render a single player row inside the ongoing-match scoreboard. Each row is
-  // both a drag source and a drop target — dropping player A onto player B swaps
-  // their teams (see handleSwapPlayers). Native HTML5 DnD, no library.
-  const renderTeamPlayer = (pId: string) => {
+  // Render a single player row inside the ongoing-match scoreboard or bench.
+  // Each row is a drag source/drop target; mobile uses the same tap-pick path.
+  const renderTeamPlayer = (pId: string, benched = false) => {
     const player = players.find(p => p.id === pId);
     const isDragging = draggedPlayer?.playerId === pId;
     return (
@@ -1358,9 +1362,11 @@ export default function BiLacArena({
         className={`flex items-center gap-2 p-2 rounded-xl border select-none transition-all cursor-grab active:cursor-grabbing touch-manipulation ${
           isDragging
             ? 'opacity-40 border-orange-500/60 bg-stone-800/30'
-            : 'bg-stone-800/60 border-stone-700/50 hover:border-orange-500/50'
+            : benched
+              ? 'bg-stone-800/40 border-stone-700/50 hover:border-orange-500/50'
+              : 'bg-stone-800/60 border-stone-700/50 hover:border-orange-500/50'
         }`}
-        title="Kéo thả (hoặc chạm 2 người) để đổi đội"
+        title="Kéo thả (hoặc chạm 2 người) để đổi vị trí"
       >
         <img src={player?.avatar} className="w-7 h-7 rounded-full bg-stone-700 border border-stone-600" alt="Avatar" />
         <span className="text-xs font-semibold truncate text-stone-200 flex-1">{player?.name || 'Vô danh'}</span>
@@ -2029,32 +2035,28 @@ export default function BiLacArena({
 
                 {/* Benched Player (if odd) */}
                 {ongoingMatch.benched && (
-                  <div className="mt-6 bg-stone-800/50 p-3 rounded-xl border border-stone-800 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                  <div className="mt-6 bg-stone-800/50 p-3 rounded-xl border border-stone-800">
+                    <div className="flex items-center justify-between gap-2 mb-2">
                       <span className="px-2 py-0.5 bg-stone-700 text-stone-300 text-[10px] font-bold rounded">
                         NGƯỜI LẺ DỰ BỊ
                       </span>
-                      <span className="text-xs text-stone-300 font-medium">
-                        {players.find(p => p.id === ongoingMatch.benched)?.name}
+                      <span className="text-[10px] text-stone-400 italic text-right">
+                        Kéo thả hoặc chạm 2 người để đổi vị trí
                       </span>
                     </div>
-                    <span className="text-[10px] text-stone-400 italic">
-                      Tự động ngồi dự bị trận này để đảm bảo cân bằng
-                    </span>
+                    {renderTeamPlayer(ongoingMatch.benched, true)}
                   </div>
                 )}
 
                 {/* Score Controls / End Match */}
                 <div className="mt-8 pt-6 border-t border-stone-800 flex flex-wrap items-center justify-between gap-4">
-                  {myMemberRole === 'owner' && (
-                    <button
-                      onClick={() => setCancelMatchConfirmId(ongoingMatch.id)}
-                      className="px-4 py-2 bg-transparent hover:bg-red-500/10 text-red-400 hover:text-red-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border border-red-500/20 cursor-pointer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      Hủy bỏ trận đấu
-                    </button>
-                  )}
+                  <button
+                    onClick={() => setCancelMatchConfirmId(ongoingMatch.id)}
+                    className="px-4 py-2 bg-transparent hover:bg-red-500/10 text-red-400 hover:text-red-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border border-red-500/20 cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Hủy bỏ trận đấu
+                  </button>
 
                   <button
                     onClick={() => handleFinishMatch(ongoingMatch.id)}
