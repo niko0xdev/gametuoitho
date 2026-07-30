@@ -2548,7 +2548,7 @@ export default function BiLacArena({
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-7 items-center gap-2">
+                  <div className="grid grid-cols-8 items-center gap-2">
                     {/* Team 1 */}
                     <div className="col-span-3 text-right">
                       <div className="flex flex-wrap justify-end gap-1 mb-2">
@@ -2562,7 +2562,7 @@ export default function BiLacArena({
                     </div>
 
                     {/* Score Center */}
-                    <div className="col-span-1 text-center">
+                    <div className="col-span-2 text-center">
                       <span className="text-base sm:text-2xl font-black font-mono tracking-tight text-stone-900 whitespace-nowrap">
                         {m.score1} : {m.score2}
                       </span>
