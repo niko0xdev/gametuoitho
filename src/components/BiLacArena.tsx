@@ -2523,6 +2523,7 @@ export default function BiLacArena({
           <div className="space-y-4" id="history_matches_list">
             {matches.map(m => {
               const isFinished = m.status === 'FINISHED';
+              const winner = isFinished && m.score1 !== m.score2 ? (m.score1 > m.score2 ? 1 : 2) : 0;
               return (
                 <div 
                   key={m.id} 
@@ -2550,34 +2551,34 @@ export default function BiLacArena({
 
                   <div className="grid grid-cols-8 items-center gap-2">
                     {/* Team 1 */}
-                    <div className="col-span-3 text-right">
+                    <div className={`col-span-3 text-right rounded-xl p-2 -m-2 ${winner === 1 ? 'bg-blue-50' : ''}`}>
                       <div className="flex flex-wrap justify-end gap-1 mb-2">
                         {m.team1.map(pId => (
-                          <span key={pId} className="px-2 py-1 bg-white border border-stone-200 text-[11px] font-semibold rounded-lg shadow-2xs">
+                          <span key={pId} className={`px-2 py-1 border text-[11px] font-semibold rounded-lg shadow-2xs ${winner === 1 ? 'border-blue-300 bg-blue-50/50 text-blue-900' : 'bg-white border-stone-200 text-stone-900'}`}>
                             {players.find(p => p.id === pId)?.name || 'Vô danh'}
                           </span>
                         ))}
                       </div>
-                      <span className="text-[11px] font-bold text-stone-400 uppercase tracking-wider block">ĐỘI XANH</span>
+                      <span className={`text-[11px] font-bold uppercase tracking-wider block ${winner === 1 ? 'text-blue-700' : 'text-stone-400'}`}>ĐỘI XANH</span>
                     </div>
 
                     {/* Score Center */}
                     <div className="col-span-2 text-center">
-                      <span className="text-base sm:text-2xl font-black font-mono tracking-tight text-stone-900 whitespace-nowrap">
+                      <span className={`text-base sm:text-2xl font-black font-mono tracking-tight whitespace-nowrap ${winner === 1 ? 'text-blue-700' : winner === 2 ? 'text-red-700' : 'text-stone-900'}`}>
                         {m.score1} : {m.score2}
                       </span>
                     </div>
 
                     {/* Team 2 */}
-                    <div className="col-span-3 text-left">
+                    <div className={`col-span-3 text-left rounded-xl p-2 -m-2 ${winner === 2 ? 'bg-red-50' : ''}`}>
                       <div className="flex flex-wrap justify-start gap-1 mb-2">
                         {m.team2.map(pId => (
-                          <span key={pId} className="px-2 py-1 bg-white border border-stone-200 text-[11px] font-semibold rounded-lg shadow-2xs">
+                          <span key={pId} className={`px-2 py-1 border text-[11px] font-semibold rounded-lg shadow-2xs ${winner === 2 ? 'border-red-300 bg-red-50/50 text-red-900' : 'bg-white border-stone-200 text-stone-900'}`}>
                             {players.find(p => p.id === pId)?.name || 'Vô danh'}
                           </span>
                         ))}
                       </div>
-                      <span className="text-[11px] font-bold text-stone-400 uppercase tracking-wider block">ĐỘI ĐỎ</span>
+                      <span className={`text-[11px] font-bold uppercase tracking-wider block ${winner === 2 ? 'text-red-700' : 'text-stone-400'}`}>ĐỘI ĐỎ</span>
                     </div>
                   </div>
 
