@@ -2563,7 +2563,7 @@ export default function BiLacArena({
 
                     {/* Score Center */}
                     <div className="col-span-1 text-center">
-                      <span className="text-xl sm:text-2xl font-black font-mono tracking-tight text-stone-900">
+                      <span className="text-base sm:text-2xl font-black font-mono tracking-tight text-stone-900 whitespace-nowrap">
                         {m.score1} : {m.score2}
                       </span>
                     </div>
