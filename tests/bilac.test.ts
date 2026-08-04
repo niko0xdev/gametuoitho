@@ -433,7 +433,7 @@ describe('POST /api/bilac/matches (auto team balancing)', () => {
     assert.equal(res.body.tournament.description, '');
   });
 
-  it('sort comparator falls through to all-time stats and id', async () => {
+  it('creates match when players have no weekly history (random pairing)', async () => {
     const owner = uniq('cmSort');
     const { id, code } = await setupTournament(owner);
     // 4 players, no history → tied on points/gd/wins/goals → falls to id sort
@@ -473,7 +473,7 @@ describe('POST /api/bilac/matches (auto team balancing)', () => {
     }
   });
 
-  it('uses weekly/all-time stats to seed teams', async () => {
+  it('creates match regardless of weekly history (random pairing ignores stats)', async () => {
     const owner = uniq('cmStats');
     const { id, code } = await setupTournament(owner);
     db.saveBiLacPlayer({ id: 'cs_a', name: 'A', avatar: 'a', tournamentId: id });

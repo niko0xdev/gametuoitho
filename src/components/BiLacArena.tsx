@@ -2120,7 +2120,7 @@ export default function BiLacArena({
                       Thiết lập trận đấu mới
                     </h2>
                     <p className="text-stone-500 text-xs mt-0.5">
-                      Chọn các thành viên có mặt tại bàn đấu để thuật toán tự động chia đội hạt giống.
+                      Chọn các thành viên có mặt tại bàn đấu để thuật toán tự động chia đội random.
                     </p>
                   </div>
 
@@ -2173,7 +2173,7 @@ export default function BiLacArena({
                   <ul className="list-disc pl-4 space-y-1 text-[11px] text-stone-500">
                     <li>Nếu số người lẻ (ví dụ 7), hệ thống sẽ chọn ngẫu nhiên 1 người ngồi dự bị trận này.</li>
                     <li>
-                      <strong>Cơ chế hạt giống:</strong> Hệ thống chia người tham gia làm 2 nhóm (hạt giống cao và thấp dựa trên bảng xếp hạng tuần), sau đó phân phối đều vào 2 đội để đảm bảo tính công bằng cao nhất.
+                      <strong>Cơ chế random thuần:</strong> Xáo trộn đều tất cả người chơi rồi chia đôi — không cân bằng trình độ, đảm bảo may rủi công bằng.
                     </li>
                   </ul>
                 </div>

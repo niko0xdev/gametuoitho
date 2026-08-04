@@ -362,24 +362,8 @@ export function handleCreateBilacMatch(req: Request, res: Response) {
   const interval = getBiLacWeeklyInterval(now);
   const weekLabel = interval.label;
 
-  const allMatches = db.getAllBiLacMatches().filter(m => m.tournamentId === tournamentId);
-
-  // Rank players for team-balancing by CURRENT-SEASON (ongoing weekly window)
-  // form ONLY: wins − losses (draws count 0) — "hiệu số trận thắng/thua" from
-  // the ongoing leaderboard. NOT goal difference, not points.
-  const winDiff: Record<string, number> = {};
-  selectedPlayers.forEach(p => { winDiff[p.id] = 0; });
-  allMatches.filter(m => m.status === 'FINISHED' && m.weekLabel === weekLabel).forEach(m => {
-    const s1 = m.score1, s2 = m.score2;
-    m.team1.forEach((pid: string) => { if (pid in winDiff) winDiff[pid] += s1 > s2 ? 1 : s1 < s2 ? -1 : 0; });
-    m.team2.forEach((pid: string) => { if (pid in winDiff) winDiff[pid] += s2 > s1 ? 1 : s2 < s1 ? -1 : 0; });
-  });
-
-  const sortedSelected = [...selectedPlayers].sort((a, b) =>
-    winDiff[b.id] - winDiff[a.id] || b.id.localeCompare(a.id));
-
-  const rankedIds = sortedSelected.map(p => ({ id: p.id }));
-  const { teamA, teamB, sittingOut } = pairPlayers(rankedIds);
+  // Chia đội random thuần — không đọc ELO / bảng xếp hạng tuần.
+  const { teamA, teamB, sittingOut } = pairPlayers(selectedPlayers.map(p => ({ id: p.id })));
   const team1 = teamA.map(p => p.id);
   const team2 = teamB.map(p => p.id);
   const benchedPlayerId: string | undefined = sittingOut?.id;
