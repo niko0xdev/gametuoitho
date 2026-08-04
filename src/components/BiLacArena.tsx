@@ -1245,6 +1245,7 @@ export default function BiLacArena({
       matchesPlayed: number;
       wins: number;
       losses: number;
+      draws: number;
       goalsScored: number;
       goalsConceded: number;
       diff: number;
@@ -1257,6 +1258,7 @@ export default function BiLacArena({
         matchesPlayed: 0,
         wins: 0,
         losses: 0,
+        draws: 0,
         goalsScored: 0,
         goalsConceded: 0,
         diff: 0,
@@ -1269,38 +1271,44 @@ export default function BiLacArena({
       const score1 = m.score1;
       const score2 = m.score2;
 
-      // Update team 1
+      const isDraw = score1 === score2;
+
+      // Update team 1 — tổng số trận chỉ tính thắng/thua, không tính hoà
       m.team1.forEach(pId => {
         const stats = statsMap[pId];
         if (stats) {
-          stats.matchesPlayed += 1;
           stats.goalsScored += score1;
           stats.goalsConceded += score2;
           if (score1 > score2) {
             stats.wins += 1;
             stats.points += 3;
-          } else if (score1 === score2) {
+            stats.matchesPlayed += 1;
+          } else if (isDraw) {
+            stats.draws += 1;
             stats.points += 1;
           } else {
             stats.losses += 1;
+            stats.matchesPlayed += 1;
           }
         }
       });
 
-      // Update team 2
+      // Update team 2 — tổng số trận chỉ tính thắng/thua, không tính hoà
       m.team2.forEach(pId => {
         const stats = statsMap[pId];
         if (stats) {
-          stats.matchesPlayed += 1;
           stats.goalsScored += score2;
           stats.goalsConceded += score1;
           if (score2 > score1) {
             stats.wins += 1;
             stats.points += 3;
-          } else if (score1 === score2) {
+            stats.matchesPlayed += 1;
+          } else if (isDraw) {
+            stats.draws += 1;
             stats.points += 1;
           } else {
             stats.losses += 1;
+            stats.matchesPlayed += 1;
           }
         }
       });
@@ -2438,7 +2446,7 @@ export default function BiLacArena({
                   <th className="py-3 px-4 text-center">Thắng</th>
                   <th className="py-3 px-4 text-center">Thua</th>
                   <th className="py-3 px-4 text-center">Tỷ lệ thắng (%)</th>
-                  <th className="py-3 px-4 text-center">Tổng số trận</th>
+                  <th className="py-3 px-4 text-center">Tổng trận (T+B)</th>
                 </tr>
               </thead>
               <tbody>
@@ -2448,6 +2456,7 @@ export default function BiLacArena({
                   if (index === 1) rankStyle = "bg-slate-300 text-slate-800 font-bold";
                   if (index === 2) rankStyle = "bg-amber-600 text-white font-bold";
 
+                  // matchesPlayed = thắng + thua (không tính hoà) → winRate nhất quán với cột Tổng trận (T+B)
                   const winRate = item.matchesPlayed > 0 ? Math.round((item.wins / item.matchesPlayed) * 100) : 0;
                   const N = currentLeaderboard.length;
                   const isLast3 = N >= 3 && index >= N - 3;
