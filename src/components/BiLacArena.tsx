@@ -3305,7 +3305,15 @@ function BiLacFormLine({ players, matches, weekLabel }: { players: any[]; matche
   const fmt = (v: number) => (v > 0 ? `+${v}` : `${v}`);
   const ddmm = (ymd: string) => { const [, mm, dd] = ymd.split('-'); return `${dd}/${mm}`; };
   const ticks = [-maxAbs, 0, maxAbs];
-  const pathD = (s: { cum: number[] }) => smoothPath(s.cum.map((v, k) => [xOf(k), yOf(v)] as [number, number]));
+  // Anchor every cumulative line at (x0, 0) on the left of the plot so each
+  // player line visually starts from the Y=0 baseline, regardless of the
+  // delta at their first match — improves readability when several lines
+  // begin at different heights. Skipped for empty series.
+  const pathD = (s: { cum: number[] }) => {
+    if (s.cum.length === 0) return '';
+    const pts: [number, number][] = [[padL - 8, midY], ...s.cum.map((v, k) => [xOf(k), yOf(v)] as [number, number])];
+    return smoothPath(pts);
+  };
 
   return (
     <div>
