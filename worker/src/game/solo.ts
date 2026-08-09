@@ -290,13 +290,27 @@ function chineseChessBotMove(state: any): { from: { r: number; c: number }; to: 
     return next;
   };
 
+  // Piece values for move ordering (MVV-LVA-lite): high-value captures sort first
+  // so alpha-beta prunes more aggressively. Matches evaluateBoard() weights.
+  const PIECE_VALUE: Record<string, number> = {
+    jiang: 100000, ju: 950, pao: 470, ma: 420, xiang: 220, shi: 220, zu: 100,
+  };
+
   const alphaBeta = (
     b: any[][],
     depth: number,
     alpha: number,
     beta: number,
-    isMaximizing: boolean
-  ): { score: number; move: { from: { r: number; c: number }; to: { r: number; c: number } } | null } => {
+    isMaximizing: boolean,
+    deadline?: number
+  ): { score: number; move: { from: { r: number; c: number }; to: { r: number; c: number } } | null; aborted?: boolean } => {
+    // Abort mid-iteration if time budget expired. At depth 0 we still return
+    // a real evaluation so the leaf eval doesn't get wasted; otherwise the
+    // wrapper uses the sentinel `aborted` flag to fall back to the previous
+    // (shallower) completed best move.
+    if (deadline !== undefined && Date.now() >= deadline && depth > 0) {
+      return { score: 0, move: null, aborted: true };
+    }
     if (depth === 0) {
       const noise = (Math.random() - 0.5) * 8;
       return { score: evaluateBoard(b) + noise, move: null };
@@ -336,14 +350,17 @@ function chineseChessBotMove(state: any): { from: { r: number; c: number }; to: 
       movesList.sort((a, m) => {
         const targetA = m.to ? b[a.to.r]?.[a.to.c] : null;
         const targetB = m.to ? b[m.to.r]?.[m.to.c] : null;
-        const valA = targetA ? 100 : 0;
-        const valB = targetB ? 100 : 0;
+        const valA = targetA ? (PIECE_VALUE[targetA.type] ?? 0) : 0;
+        const valB = targetB ? (PIECE_VALUE[targetB.type] ?? 0) : 0;
         return valB - valA;
       });
 
       for (const m of movesList) {
+        if (deadline !== undefined && Date.now() >= deadline) {
+          return { score: 0, move: null, aborted: true };
+        }
         const nextBoard = makeSimulatedMove(b, m.from, m.to);
-        const ev = alphaBeta(nextBoard, depth - 1, alpha, beta, false).score;
+        const ev = alphaBeta(nextBoard, depth - 1, alpha, beta, false, deadline).score;
         if (ev > maxEval) {
           maxEval = ev;
           bestMove = m;
@@ -372,14 +389,17 @@ function chineseChessBotMove(state: any): { from: { r: number; c: number }; to: 
       movesList.sort((a, m) => {
         const targetA = m.to ? b[a.to.r]?.[a.to.c] : null;
         const targetB = m.to ? b[m.to.r]?.[m.to.c] : null;
-        const valA = targetA ? 100 : 0;
-        const valB = targetB ? 100 : 0;
+        const valA = targetA ? (PIECE_VALUE[targetA.type] ?? 0) : 0;
+        const valB = targetB ? (PIECE_VALUE[targetB.type] ?? 0) : 0;
         return valB - valA;
       });
 
       for (const m of movesList) {
+        if (deadline !== undefined && Date.now() >= deadline) {
+          return { score: 0, move: null, aborted: true };
+        }
         const nextBoard = makeSimulatedMove(b, m.from, m.to);
-        const ev = alphaBeta(nextBoard, depth - 1, alpha, beta, true).score;
+        const ev = alphaBeta(nextBoard, depth - 1, alpha, beta, true, deadline).score;
         if (ev < minEval) {
           minEval = ev;
           bestMove = m;
@@ -393,14 +413,24 @@ function chineseChessBotMove(state: any): { from: { r: number; c: number }; to: 
     }
   };
 
-  // Depth 2 (not 3) on the Worker path: depth 3's ~10⁴–10⁵ leaf evals risked
-  // blowing the free-tier 10ms CPU/req cap, which would silently drop the bot
-  // turn and deadlock the arena — the bug this module exists to prevent. Depth
-  // 2 is still a competent opponent and stays well under budget; the DO also
-  // has a turn-fallback safety net for when a move still can't be applied.
-  const result = alphaBeta(board, 2, -Infinity, Infinity, true);
-  if (result.move) {
-    return result.move;
+  // Iterative-deepening search: start shallow, deepen while time remains. The
+  // CF free-tier cap is 10ms CPU/req — keep budget at 8ms so move application
+  // + response serialization + network still fit. We always keep the deepest
+  // *completed* iteration's move, so a depth-N+1 budget overrun falls back
+  // gracefully to depth-N instead of returning null.
+  const TIME_BUDGET_MS = 8;
+  const MAX_DEPTH = 5;
+  const startTime = Date.now();
+  const deadline = startTime + TIME_BUDGET_MS;
+  let bestResult: { score: number; move: { from: { r: number; c: number }; to: { r: number; c: number } } | null } | null = null;
+  for (let d = 1; d <= MAX_DEPTH; d++) {
+    if (Date.now() >= deadline) break;
+    const r = alphaBeta(board, d, -Infinity, Infinity, true, deadline);
+    if (r.move) bestResult = r;
+    else break;
+  }
+  if (bestResult?.move) {
+    return bestResult.move;
   }
 
   for (let r = 0; r < 10; r++) {

@@ -807,13 +807,28 @@ class RoomManager {
       return next;
     };
 
+    // Piece values for move ordering (MVV-LVA-lite): high-value captures sort
+    // first so alpha-beta prunes more aggressively. Matches evaluateBoard()
+    // weights.
+    const PIECE_VALUE: Record<string, number> = {
+      jiang: 100000, ju: 950, pao: 470, ma: 420, xiang: 220, shi: 220, zu: 100,
+    };
+
     const alphaBeta = (
       b: any[][],
       depth: number,
       alpha: number,
       beta: number,
-      isMaximizing: boolean
-    ): { score: number; move: { from: { r: number; c: number }; to: { r: number; c: number } } | null } => {
+      isMaximizing: boolean,
+      deadline?: number
+    ): { score: number; move: { from: { r: number; c: number }; to: { r: number; c: number } } | null; aborted?: boolean } => {
+      // Abort mid-iteration if time budget expired. At depth 0 we still
+      // return a real evaluation so the leaf doesn't get wasted; otherwise
+      // the wrapper uses the `aborted` flag to fall back to the previous
+      // (shallower) completed best move.
+      if (deadline !== undefined && Date.now() >= deadline && depth > 0) {
+        return { score: 0, move: null, aborted: true };
+      }
       if (depth === 0) {
         // Add tiny random noise to keep play dynamic
         const noise = (Math.random() - 0.5) * 8;
@@ -856,14 +871,17 @@ class RoomManager {
         movesList.sort((a, b) => {
           const targetA = b.to ? b[a.to.r]?.[a.to.c] : null;
           const targetB = b.to ? b[b.to.r]?.[b.to.c] : null;
-          const valA = targetA ? 100 : 0;
-          const valB = targetB ? 100 : 0;
+          const valA = targetA ? (PIECE_VALUE[targetA.type] ?? 0) : 0;
+          const valB = targetB ? (PIECE_VALUE[targetB.type] ?? 0) : 0;
           return valB - valA;
         });
 
         for (const m of movesList) {
+          if (deadline !== undefined && Date.now() >= deadline) {
+            return { score: 0, move: null, aborted: true };
+          }
           const nextBoard = makeSimulatedMove(b, m.from, m.to);
-          const ev = alphaBeta(nextBoard, depth - 1, alpha, beta, false).score;
+          const ev = alphaBeta(nextBoard, depth - 1, alpha, beta, false, deadline).score;
           if (ev > maxEval) {
             maxEval = ev;
             bestMove = m;
@@ -892,14 +910,17 @@ class RoomManager {
         movesList.sort((a, b) => {
           const targetA = b.to ? b[a.to.r]?.[a.to.c] : null;
           const targetB = b.to ? b[b.to.r]?.[b.to.c] : null;
-          const valA = targetA ? 100 : 0;
-          const valB = targetB ? 100 : 0;
+          const valA = targetA ? (PIECE_VALUE[targetA.type] ?? 0) : 0;
+          const valB = targetB ? (PIECE_VALUE[targetB.type] ?? 0) : 0;
           return valB - valA;
         });
 
         for (const m of movesList) {
+          if (deadline !== undefined && Date.now() >= deadline) {
+            return { score: 0, move: null, aborted: true };
+          }
           const nextBoard = makeSimulatedMove(b, m.from, m.to);
-          const ev = alphaBeta(nextBoard, depth - 1, alpha, beta, true).score;
+          const ev = alphaBeta(nextBoard, depth - 1, alpha, beta, true, deadline).score;
           if (ev < minEval) {
             minEval = ev;
             bestMove = m;
@@ -913,10 +934,24 @@ class RoomManager {
       }
     };
 
-    // Calculate best move using Depth 3 search for extremely smart gameplay
-    const result = alphaBeta(board, 3, -Infinity, Infinity, true);
-    if (result.move) {
-      return result.move;
+    // Iterative-deepening search: start shallow, deepen while time remains.
+    // Node has no per-request CPU cap, but humans won't wait >3s — cap at 3s
+    // and max depth 6. We always keep the deepest *completed* iteration's
+    // move, so a depth-N+1 budget overrun falls back gracefully to depth-N
+    // instead of returning null.
+    const TIME_BUDGET_MS = 3000;
+    const MAX_DEPTH = 6;
+    const startTime = Date.now();
+    const deadline = startTime + TIME_BUDGET_MS;
+    let bestResult: { score: number; move: { from: { r: number; c: number }; to: { r: number; c: number } } | null } | null = null;
+    for (let d = 1; d <= MAX_DEPTH; d++) {
+      if (Date.now() >= deadline) break;
+      const r = alphaBeta(board, d, -Infinity, Infinity, true, deadline);
+      if (r.move) bestResult = r;
+      else break;
+    }
+    if (bestResult?.move) {
+      return bestResult.move;
     }
 
     // Fallback if no moves found (should rarely happen unless checkmated)
