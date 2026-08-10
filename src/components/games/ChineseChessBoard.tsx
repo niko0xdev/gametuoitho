@@ -824,7 +824,7 @@ export default function ChineseChessBoard({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 w-full max-w-4xl px-2">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 w-full max-w-5xl px-2">
         
         {/* Left Side: Opponent (Black) Card and Captured trophies */}
         <div className="md:col-span-1 flex md:flex-col justify-between md:justify-start gap-4 p-3 bg-stone-50 border border-stone-200 rounded-2xl shadow-sm">
@@ -873,9 +873,9 @@ export default function ChineseChessBoard({
 
         {/* Center Side: Chinese Chess Board (9x10 layout) */}
         <div className="md:col-span-3 flex flex-col items-center justify-center bg-[#deae78] p-3 sm:p-5 rounded-3xl border-8 border-[#a06b3e] shadow-xl relative">
-          
+
           {/* Wood texture layers & grid intersections design */}
-          <div className="bg-[#ebd2a9] border-4 border-[#7b4d24] p-4 sm:p-6 relative w-[310px] h-[350px] sm:w-[460px] sm:h-[510px] shadow-inner">
+          <div className="bg-[#ebd2a9] border-4 border-[#7b4d24] p-4 sm:p-6 relative w-[400px] h-[450px] sm:w-[600px] sm:h-[670px] shadow-inner">
             <div className="relative w-full h-full">
               
               {/* 10 horizontal lines */}
@@ -1003,7 +1003,7 @@ export default function ChineseChessBoard({
                       >
                         {cell ? (
                           <div
-                            className={`w-8 h-8 sm:w-11 sm:h-11 rounded-full border-2 flex flex-col items-center justify-center font-serif font-extrabold select-none transition-all shadow-md transform hover:scale-105
+                            className={`w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 flex flex-col items-center justify-center font-serif font-extrabold select-none transition-all shadow-md transform hover:scale-105
                               ${cell.color === 'R'
                                 ? 'bg-[#fdfbf7] border-red-800 text-red-700 shadow-red-900/30'
                                 : 'bg-[#222222] border-stone-900 text-stone-100 shadow-black/60'
@@ -1015,7 +1015,7 @@ export default function ChineseChessBoard({
                             <div className={`w-[85%] h-[85%] rounded-full border border-dashed flex flex-col items-center justify-center relative
                               ${cell.color === 'R' ? 'border-red-700/40' : 'border-stone-700/50'}
                             `}>
-                              <span className="text-base sm:text-xl font-black leading-none">{character}</span>
+                              <span className="text-lg sm:text-2xl font-black leading-none">{character}</span>
                             </div>
                           </div>
                         ) : (
@@ -1023,8 +1023,8 @@ export default function ChineseChessBoard({
                             {/* Empty square but legal move indicator */}
                             {isLegalTarget ? (
                               <div className="relative flex items-center justify-center w-full h-full">
-                                <div className="absolute w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 rounded-full bg-emerald-500 opacity-80 animate-ping" />
-                                <div className="absolute w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 rounded-full bg-emerald-500 border border-emerald-400 shadow-md shadow-emerald-500/50" />
+                                <div className="absolute w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-emerald-500 opacity-80 animate-ping" />
+                                <div className="absolute w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-emerald-500 border border-emerald-400 shadow-md shadow-emerald-500/50" />
                               </div>
                             ) : (
                               // Micro dot indicators
@@ -1044,7 +1044,14 @@ export default function ChineseChessBoard({
           {/* End-Game Overlay */}
           {status === 'ENDED' && (
             <div className="absolute inset-0 bg-stone-950/85 backdrop-blur-md z-50 rounded-2xl flex flex-col items-center justify-center p-6 text-center animate-fade-in">
-              {isSpectator ? (
+              {!winner ? (
+                <div className="flex flex-col items-center">
+                  <div className="w-10 h-10 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mb-4" />
+                  <h3 className="text-xl font-serif font-bold text-stone-200 uppercase tracking-widest">
+                    Đang tổng kết trận đấu...
+                  </h3>
+                </div>
+              ) : isSpectator ? (
                 <div className="flex flex-col items-center animate-pulse">
                   <div className="w-16 h-16 bg-amber-500/20 border border-amber-400 rounded-full flex items-center justify-center text-amber-400 mb-4 shadow-lg shadow-amber-500/20">
                     <Trophy className="w-8 h-8" />
@@ -1159,21 +1166,7 @@ export default function ChineseChessBoard({
 
       </div>
 
-      {/* Rules Info Guide */}
-      <div className="mt-6 p-4 max-w-2xl bg-stone-50 border border-stone-200 rounded-2xl text-[11px] leading-relaxed text-stone-600 shadow-sm">
-        <h4 className="font-serif font-bold text-stone-800 text-xs mb-1.5 flex items-center gap-1.5 uppercase tracking-wider border-b border-stone-200 pb-1">
-          <Trophy className="w-4 h-4 text-orange-500" /> Hướng dẫn chơi Cờ Tướng:
-        </h4>
-        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 list-disc list-inside">
-          <li><b>Tướng (帥/將)</b>: Đi ngang dọc 1 ô trong cung điện.</li>
-          <li><b>Sĩ (仕/士)</b>: Đi chéo 1 ô bên trong cung điện.</li>
-          <li><b>Tượng (相/象)</b>: Đi chéo 2 ô, không qua sông, bị cản mắt.</li>
-          <li><b>Mã (傌/馬)</b>: Đi hình chữ L (2-1), bị cản chân mã.</li>
-          <li><b>Xe (車)</b>: Đi ngang dọc thẳng tắp, không nhảy qua quân.</li>
-          <li><b>Pháo (炮/砲)</b>: Đi thẳng, muốn ăn quân phải nhảy qua 1 quân.</li>
-          <li><b>Tốt (兵/卒)</b>: Đi thẳng 1 ô. Qua sông đi được cả ngang.</li>
-        </ul>
-      </div>
+      {/* Rules Info Guide — removed per UI cleanup (hướng dẫn chơi) */}
 
     </div>
   );

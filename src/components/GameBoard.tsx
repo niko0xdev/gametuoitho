@@ -327,7 +327,7 @@ export default function GameBoard({
 
         {/* Right 1 col: Opponent Card & Console History log */}
         <div className="flex flex-col gap-4">
-          
+
           {/* Opponent Display card */}
           {!spectateMode && opponent && (
             <div className="bg-stone-50 border border-stone-200 p-4 rounded-xl flex items-center gap-3">
@@ -344,17 +344,19 @@ export default function GameBoard({
             </div>
           )}
 
-          {/* Console logger details */}
-          <div className="bg-stone-900 border border-stone-800 p-4 rounded-xl flex-1 flex flex-col text-[10px] font-mono text-green-400 min-h-[160px] max-h-[220px] lg:max-h-none overflow-hidden">
-            <span className="text-white font-bold border-b border-stone-800 pb-1 mb-2 uppercase tracking-wider text-[9px]">Lịch sử đấu trường</span>
-            <div aria-live="polite" aria-atomic="false" className="flex-1 overflow-y-auto pr-1 flex flex-col gap-1.5 scrollbar-thin">
-              {statusLog.map((log, i) => (
-                <div key={i} className="leading-relaxed">
-                  &gt; {log}
-                </div>
-              ))}
+          {/* Console logger details — hidden for Chinese Chess per UI cleanup */}
+          {match.gameId !== 'co_tuong' && (
+            <div className="bg-stone-900 border border-stone-800 p-4 rounded-xl flex-1 flex flex-col text-[10px] font-mono text-green-400 min-h-[160px] max-h-[220px] lg:max-h-none overflow-hidden">
+              <span className="text-white font-bold border-b border-stone-800 pb-1 mb-2 uppercase tracking-wider text-[9px]">Lịch sử đấu trường</span>
+              <div aria-live="polite" aria-atomic="false" className="flex-1 overflow-y-auto pr-1 flex flex-col gap-1.5 scrollbar-thin">
+                {statusLog.map((log, i) => (
+                  <div key={i} className="leading-relaxed">
+                    &gt; {log}
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Resign action */}
           {!spectateMode && match.status === 'PLAYING' && (
