@@ -90,6 +90,192 @@ export const caroEngine: RuleEngine = {
 };
 
 // 2. CHINESE CHESS ENGINE (CO TUONG)
+
+// Does any piece of `attackerColor` attack the square (r, c)?
+// Mirrors standard xiangqi attack rules (see https://play.xiangqi.com/).
+export function isChineseChessSquareAttacked(
+  board: any[][],
+  r: number,
+  c: number,
+  attackerColor: 'R' | 'B'
+): boolean {
+  const inBounds = (rr: number, cc: number) => rr >= 0 && rr < 10 && cc >= 0 && cc < 9;
+
+  // 1) Ju (chariot) — straight lines
+  const lineDirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  for (const [dr, dc] of lineDirs) {
+    let nr = r + dr;
+    let nc = c + dc;
+    while (inBounds(nr, nc)) {
+      const p = board[nr][nc];
+      if (p) {
+        if (p.color === attackerColor && p.type === 'ju') return true;
+        break;
+      }
+      nr += dr;
+      nc += dc;
+    }
+  }
+
+  // 2) Pao (cannon) — straight lines with exactly 1 screen
+  for (const [dr, dc] of lineDirs) {
+    let nr = r + dr;
+    let nc = c + dc;
+    let jumped = false;
+    while (inBounds(nr, nc)) {
+      const p = board[nr][nc];
+      if (!jumped) {
+        if (p) jumped = true;
+      } else {
+        if (p) {
+          if (p.color === attackerColor && p.type === 'pao') return true;
+          break;
+        }
+      }
+      nr += dr;
+      nc += dc;
+    }
+  }
+
+  // 3) Ma (horse) — L-shape, blocked by adjacent piece
+  const horseAttacks = [
+    { dr: -2, dc: -1, br: -1, bc: 0 },
+    { dr: -2, dc: 1, br: -1, bc: 0 },
+    { dr: 2, dc: -1, br: 1, bc: 0 },
+    { dr: 2, dc: 1, br: 1, bc: 0 },
+    { dr: -1, dc: -2, br: 0, bc: -1 },
+    { dr: -1, dc: 2, br: 0, bc: 1 },
+    { dr: 1, dc: -2, br: 0, bc: -1 },
+    { dr: 1, dc: 2, br: 0, bc: 1 }
+  ];
+  for (const m of horseAttacks) {
+    const nr = r + m.dr;
+    const nc = c + m.dc;
+    const br = r + m.br;
+    const bc = c + m.bc;
+    if (inBounds(nr, nc) && inBounds(br, bc)) {
+      if (board[br][bc] === null) {
+        const p = board[nr][nc];
+        if (p && p.color === attackerColor && p.type === 'ma') return true;
+      }
+    }
+  }
+
+  // 4) Xiang (elephant) — diagonal 2, can't cross river, blocked by center
+  const elephantAttacks = [
+    { dr: -2, dc: -2, mr: -1, mc: -1 },
+    { dr: -2, dc: 2, mr: -1, mc: 1 },
+    { dr: 2, dc: -2, mr: 1, mc: -1 },
+    { dr: 2, dc: 2, mr: 1, mc: 1 }
+  ];
+  for (const e of elephantAttacks) {
+    const nr = r + e.dr;
+    const nc = c + e.dc;
+    const mr = r + e.mr;
+    const mc = c + e.mc;
+    if (inBounds(nr, nc) && inBounds(mr, mc)) {
+      const sameSide = attackerColor === 'B' ? (nr <= 4) : (nr >= 5);
+      if (sameSide && board[mr][mc] === null) {
+        const p = board[nr][nc];
+        if (p && p.color === attackerColor && p.type === 'xiang') return true;
+      }
+    }
+  }
+
+  // 5) Shi (advisor) — 1 diagonal step inside palace
+  const shiDirs = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+  for (const [dr, dc] of shiDirs) {
+    const nr = r + dr;
+    const nc = c + dc;
+    if (inBounds(nr, nc)) {
+      const inPalace = (nc >= 3 && nc <= 5) && ((nr >= 0 && nr <= 2) || (nr >= 7 && nr <= 9));
+      if (inPalace) {
+        const p = board[nr][nc];
+        if (p && p.color === attackerColor && p.type === 'shi') return true;
+      }
+    }
+  }
+
+  // 6) Jiang (general) — 1 orthogonal step inside palace OR flying general
+  const jiangDirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  for (const [dr, dc] of jiangDirs) {
+    const nr = r + dr;
+    const nc = c + dc;
+    if (inBounds(nr, nc)) {
+      const inPalace = (nc >= 3 && nc <= 5) && ((nr >= 0 && nr <= 2) || (nr >= 7 && nr <= 9));
+      if (inPalace) {
+        const p = board[nr][nc];
+        if (p && p.color === attackerColor && p.type === 'jiang') return true;
+      }
+    }
+  }
+  for (let row = 0; row < 10; row++) {
+    const p = board[row][c];
+    if (p && p.type === 'jiang' && p.color === attackerColor) {
+      const startRow = Math.min(r, row) + 1;
+      const endRow = Math.max(r, row);
+      let blocked = false;
+      for (let rr = startRow; rr < endRow; rr++) {
+        if (board[rr][c] !== null) {
+          blocked = true;
+          break;
+        }
+      }
+      if (!blocked) return true;
+      break;
+    }
+  }
+
+  // 7) Zu (pawn) — 1 step forward, sideways after crossing river
+  const forwardDr = attackerColor === 'R' ? -1 : 1;
+  const fr = r + forwardDr;
+  if (inBounds(fr, c)) {
+    const p = board[fr][c];
+    if (p && p.color === attackerColor && p.type === 'zu') return true;
+  }
+  const crossedRiver = attackerColor === 'R' ? (r <= 4) : (r >= 5);
+  if (crossedRiver) {
+    for (const dc of [-1, 1]) {
+      const nc = c + dc;
+      if (inBounds(r, nc)) {
+        const p = board[r][nc];
+        if (p && p.color === attackerColor && p.type === 'zu') return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+// Simulate a move and return whether the moving side's general is in check afterwards.
+function wouldLeaveGeneralInCheck(
+  board: any[][],
+  fromR: number,
+  fromC: number,
+  toR: number,
+  toC: number,
+  movingColor: 'R' | 'B'
+): boolean {
+  const newBoard = board.map((row: any[]) => [...row]);
+  newBoard[fromR][fromC] = null;
+  newBoard[toR][toC] = { type: board[fromR][fromC].type, color: movingColor };
+  // Find moving side's general on the new board
+  let genPos: { r: number; c: number } | null = null;
+  for (let r = 0; r < 10; r++) {
+    for (let c = 0; c < 9; c++) {
+      const p = newBoard[r]?.[c];
+      if (p && p.type === 'jiang' && p.color === movingColor) {
+        genPos = { r, c };
+        break;
+      }
+    }
+    if (genPos) break;
+  }
+  if (!genPos) return true; // General captured — illegal position
+  const opponentColor = movingColor === 'R' ? 'B' : 'R';
+  return isChineseChessSquareAttacked(newBoard, genPos.r, genPos.c, opponentColor);
+}
+
 export function getChineseChessLegalMoves(
   r: number,
   c: number,
@@ -373,6 +559,11 @@ export const coTuongEngine: RuleEngine = {
     newBoard[from.r][from.c] = null;
     newBoard[to.r][to.c] = piece;
 
+    // Reject moves that leave your own general in check (xiangqi rule)
+    if (wouldLeaveGeneralInCheck(state.board, from.r, from.c, to.r, to.c, correctColor)) {
+      return { valid: false, error: 'Nước đi này khiến Tướng bị chiếu — không hợp lệ!' };
+    }
+
     // If opponent's general is captured, game ends
     let isTerminal = false;
     let winner = undefined;
@@ -400,6 +591,25 @@ export const coTuongEngine: RuleEngine = {
       winner = player;
     }
 
+    // Checkmate detection: after our move, opponent has no legal move that
+    // doesn't leave their own general in check. If opponent is also in check
+    // and has no safe moves, the moving player wins by checkmate.
+    if (!isTerminal) {
+      const opponentHasSafeMove = hasAnySafeMove(newBoard, opponentColor);
+      if (!opponentHasSafeMove) {
+        // Opponent is checkmated (or stalemated — treat as opponent loss since
+        // they have no legal move at all).
+        isTerminal = true;
+        winner = player;
+      }
+    }
+
+    // Compute inCheck flag for the opponent's general on the new board
+    const oppGenPos = findGeneralPos(newBoard, opponentColor);
+    const opponentInCheck = oppGenPos
+      ? isChineseChessSquareAttacked(newBoard, oppGenPos.r, oppGenPos.c, correctColor)
+      : false;
+
     const nextTurnIndex = (state.turnIndex + 1) % players.length;
 
     return {
@@ -408,13 +618,44 @@ export const coTuongEngine: RuleEngine = {
         ...state,
         board: newBoard,
         turnIndex: isTerminal ? state.turnIndex : nextTurnIndex,
-        winner: isTerminal ? player : null
+        winner: isTerminal ? player : null,
+        inCheck: opponentInCheck
       },
       isTerminal,
       winner
     };
   }
 };
+
+// Does the given side have any safe move on the board?
+function hasAnySafeMove(board: any[][], color: 'R' | 'B'): boolean {
+  for (let r = 0; r < 10; r++) {
+    for (let c = 0; c < 9; c++) {
+      const piece = board[r]?.[c];
+      if (piece && piece.color === color) {
+        const moves = getChineseChessLegalMoves(r, c, board);
+        for (const m of moves) {
+          if (!wouldLeaveGeneralInCheck(board, r, c, m.r, m.c, color)) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function findGeneralPos(board: any[][], color: 'R' | 'B'): { r: number; c: number } | null {
+  for (let r = 0; r < 10; r++) {
+    for (let c = 0; c < 9; c++) {
+      const p = board[r]?.[c];
+      if (p && p.type === 'jiang' && p.color === color) {
+        return { r, c };
+      }
+    }
+  }
+  return null;
+}
 
 // 3. CHESS ENGINE (CO VUA)
 export const coVuaEngine: RuleEngine = {

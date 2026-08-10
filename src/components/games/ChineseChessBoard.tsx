@@ -256,6 +256,165 @@ export function getChineseChessLegalMoves(
   return moves;
 }
 
+// Does any piece of `attackerColor` attack the square (r, c)?
+// Used to detect check / checkmate. Mirrors standard xiangqi attack rules
+// (referenced against https://play.xiangqi.com/ behavior).
+export function isSquareAttacked(
+  board: any[][],
+  r: number,
+  c: number,
+  attackerColor: 'R' | 'B'
+): boolean {
+  const inBounds = (rr: number, cc: number) => rr >= 0 && rr < 10 && cc >= 0 && cc < 9;
+
+  // 1) Ju (chariot) — straight lines
+  const lineDirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  for (const [dr, dc] of lineDirs) {
+    let nr = r + dr;
+    let nc = c + dc;
+    while (inBounds(nr, nc)) {
+      const p = board[nr][nc];
+      if (p) {
+        if (p.color === attackerColor && p.type === 'ju') return true;
+        break;
+      }
+      nr += dr;
+      nc += dc;
+    }
+  }
+
+  // 2) Pao (cannon) — straight lines with exactly 1 screen then capture
+  for (const [dr, dc] of lineDirs) {
+    let nr = r + dr;
+    let nc = c + dc;
+    let jumped = false;
+    while (inBounds(nr, nc)) {
+      const p = board[nr][nc];
+      if (!jumped) {
+        if (p) jumped = true;
+      } else {
+        if (p) {
+          if (p.color === attackerColor && p.type === 'pao') return true;
+          break;
+        }
+      }
+      nr += dr;
+      nc += dc;
+    }
+  }
+
+  // 3) Ma (horse) — L-shape, blocked by adjacent piece ("cản chân mã")
+  const horseAttacks = [
+    { dr: -2, dc: -1, br: -1, bc: 0 },
+    { dr: -2, dc: 1, br: -1, bc: 0 },
+    { dr: 2, dc: -1, br: 1, bc: 0 },
+    { dr: 2, dc: 1, br: 1, bc: 0 },
+    { dr: -1, dc: -2, br: 0, bc: -1 },
+    { dr: -1, dc: 2, br: 0, bc: 1 },
+    { dr: 1, dc: -2, br: 0, bc: -1 },
+    { dr: 1, dc: 2, br: 0, bc: 1 }
+  ];
+  for (const m of horseAttacks) {
+    const nr = r + m.dr;
+    const nc = c + m.dc;
+    const br = r + m.br;
+    const bc = c + m.bc;
+    if (inBounds(nr, nc) && inBounds(br, bc)) {
+      if (board[br][bc] === null) {
+        const p = board[nr][nc];
+        if (p && p.color === attackerColor && p.type === 'ma') return true;
+      }
+    }
+  }
+
+  // 4) Xiang (elephant) — diagonal 2, can't cross river, blocked by center piece
+  const elephantAttacks = [
+    { dr: -2, dc: -2, mr: -1, mc: -1 },
+    { dr: -2, dc: 2, mr: -1, mc: 1 },
+    { dr: 2, dc: -2, mr: 1, mc: -1 },
+    { dr: 2, dc: 2, mr: 1, mc: 1 }
+  ];
+  for (const e of elephantAttacks) {
+    const nr = r + e.dr;
+    const nc = c + e.dc;
+    const mr = r + e.mr;
+    const mc = c + e.mc;
+    if (inBounds(nr, nc) && inBounds(mr, mc)) {
+      const sameSide = attackerColor === 'B' ? (nr <= 4) : (nr >= 5);
+      if (sameSide && board[mr][mc] === null) {
+        const p = board[nr][nc];
+        if (p && p.color === attackerColor && p.type === 'xiang') return true;
+      }
+    }
+  }
+
+  // 5) Shi (advisor) — 1 diagonal step inside palace
+  const shiDirs = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+  for (const [dr, dc] of shiDirs) {
+    const nr = r + dr;
+    const nc = c + dc;
+    if (inBounds(nr, nc)) {
+      const inPalace = (nc >= 3 && nc <= 5) && ((nr >= 0 && nr <= 2) || (nr >= 7 && nr <= 9));
+      if (inPalace) {
+        const p = board[nr][nc];
+        if (p && p.color === attackerColor && p.type === 'shi') return true;
+      }
+    }
+  }
+
+  // 6) Jiang (general) — 1 orthogonal step inside palace, OR "flying general" same column
+  const jiangDirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  for (const [dr, dc] of jiangDirs) {
+    const nr = r + dr;
+    const nc = c + dc;
+    if (inBounds(nr, nc)) {
+      const inPalace = (nc >= 3 && nc <= 5) && ((nr >= 0 && nr <= 2) || (nr >= 7 && nr <= 9));
+      if (inPalace) {
+        const p = board[nr][nc];
+        if (p && p.color === attackerColor && p.type === 'jiang') return true;
+      }
+    }
+  }
+  // Flying general: opposing generals on same column with no pieces between
+  // Find opposing general
+  for (let row = 0; row < 10; row++) {
+    const p = board[row][c];
+    if (p && p.type === 'jiang' && p.color === attackerColor) {
+      const startRow = Math.min(r, row) + 1;
+      const endRow = Math.max(r, row);
+      let blocked = false;
+      for (let rr = startRow; rr < endRow; rr++) {
+        if (board[rr][c] !== null) {
+          blocked = true;
+          break;
+        }
+      }
+      if (!blocked) return true;
+      break;
+    }
+  }
+
+  // 7) Zu (pawn) — 1 step forward, sideways after crossing river
+  const forwardDr = attackerColor === 'R' ? -1 : 1;
+  const fr = r + forwardDr;
+  if (inBounds(fr, c)) {
+    const p = board[fr][c];
+    if (p && p.color === attackerColor && p.type === 'zu') return true;
+  }
+  const crossedRiver = attackerColor === 'R' ? (r <= 4) : (r >= 5);
+  if (crossedRiver) {
+    for (const dc of [-1, 1]) {
+      const nc = c + dc;
+      if (inBounds(r, nc)) {
+        const p = board[r][nc];
+        if (p && p.color === attackerColor && p.type === 'zu') return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 export default function ChineseChessBoard({
   board,
   turn,
@@ -496,6 +655,58 @@ export default function ChineseChessBoard({
     'B_jiang': 1, 'B_shi': 2, 'B_xiang': 2, 'B_ma': 2, 'B_ju': 2, 'B_pao': 2, 'B_zu': 5,
   };
 
+  // Find current general position for my color (used by isInCheck + checkmate detection)
+  const myGeneralPos = (() => {
+    if (!myColor) return null;
+    for (let r = 0; r < 10; r++) {
+      for (let c = 0; c < 9; c++) {
+        const p = board[r]?.[c];
+        if (p && p.type === 'jiang' && p.color === myColor) {
+          return { r, c };
+        }
+      }
+    }
+    return null;
+  })();
+
+  // Is my general currently under attack? (= in check)
+  const isInCheck = (() => {
+    if (!myGeneralPos || !myColor) return false;
+    return isSquareAttacked(board, myGeneralPos.r, myGeneralPos.c, myColor === 'R' ? 'B' : 'R');
+  })();
+
+  // Filter a move list so that any move leaving my general in check is removed.
+  // Returns ONLY moves that are legal AND safe.
+  const filterSafeMoves = (
+    pieceColor: 'R' | 'B',
+    moves: { r: number; c: number }[],
+    fromR: number,
+    fromC: number,
+    currentBoard: any[][]
+  ): { r: number; c: number }[] => {
+    return moves.filter((m) => {
+      // Simulate move
+      const newBoard = currentBoard.map((row: any[]) => [...row]);
+      newBoard[fromR][fromC] = null;
+      newBoard[m.r][m.c] = { type: currentBoard[fromR][fromC].type, color: pieceColor };
+      // Find my general on the new board
+      let genPos: { r: number; c: number } | null = null;
+      for (let r = 0; r < 10; r++) {
+        for (let c = 0; c < 9; c++) {
+          const p = newBoard[r]?.[c];
+          if (p && p.type === 'jiang' && p.color === pieceColor) {
+            genPos = { r, c };
+            break;
+          }
+        }
+        if (genPos) break;
+      }
+      if (!genPos) return false; // Should not happen — would mean we captured our own general
+      const opponentColor = pieceColor === 'R' ? 'B' : 'R';
+      return !isSquareAttacked(newBoard, genPos.r, genPos.c, opponentColor);
+    });
+  };
+
   const activeCount: Record<string, number> = {};
   for (let r = 0; r < 10; r++) {
     for (let c = 0; c < 9; c++) {
@@ -543,8 +754,10 @@ export default function ChineseChessBoard({
 
       // If clicked on own color piece, switch selection
       if (piece && piece.color === myColor) {
+        const rawMoves = getChineseChessLegalMoves(r, c, board);
+        const safe = filterSafeMoves(myColor!, rawMoves, r, c, board);
         setSelected({ r, c });
-        setLegalTargets(getChineseChessLegalMoves(r, c, board));
+        setLegalTargets(safe);
         playChessSound('select');
         return;
       }
@@ -567,8 +780,10 @@ export default function ChineseChessBoard({
           playRetroBeep(180, 'square', 0.1);
           return;
         }
+        const rawMoves = getChineseChessLegalMoves(r, c, board);
+        const safe = filterSafeMoves(myColor!, rawMoves, r, c, board);
         setSelected({ r, c });
-        setLegalTargets(getChineseChessLegalMoves(r, c, board));
+        setLegalTargets(safe);
         playChessSound('select');
       }
     }
@@ -586,6 +801,11 @@ export default function ChineseChessBoard({
         <div className="flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full bg-orange-500 animate-pulse" />
           <span className="text-xs font-serif font-bold text-stone-700">Cờ Tướng Trí Tuệ</span>
+          {isInCheck && status !== 'ENDED' && (
+            <span className="ml-2 px-2 py-0.5 bg-red-600 text-white text-[10px] font-serif font-extrabold uppercase rounded animate-pulse shadow-md shadow-red-500/50 tracking-wider flex items-center gap-1">
+              <Swords className="w-3 h-3" /> CHIẾU TƯỚNG
+            </span>
+          )}
         </div>
         <div>
           {isSpectator ? (
@@ -771,12 +991,13 @@ export default function ChineseChessBoard({
                         className={`absolute flex items-center justify-center cursor-pointer group outline-none rounded-full transition-all duration-300
                           ${isLastMoveFrom ? 'bg-amber-400/25 ring-2 ring-dashed ring-amber-400' : ''}
                           ${isLastMoveTo ? 'bg-amber-400/35 ring-2 ring-amber-500 animate-pulse' : ''}
+                          ${isInCheck && cell && cell.type === 'jiang' && cell.color === myColor ? 'ring-4 ring-red-500 animate-pulse bg-red-500/20 shadow-lg shadow-red-500/60' : ''}
                         `}
                         style={{
                           left: `${(c / 8) * 100}%`,
                           top: `${(r / 9) * 100}%`,
-                          width: '12%',
-                          height: '11%',
+                          width: '11%',
+                          height: '10%',
                           transform: 'translate(-50%, -50%)'
                         }}
                       >
