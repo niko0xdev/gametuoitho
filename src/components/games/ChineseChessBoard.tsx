@@ -12,6 +12,7 @@ interface ChineseChessBoardProps {
   winner?: string | null;
   status?: string;
   onExit?: () => void;
+  botIsThinking?: boolean;
 }
 
 const PIECE_NAMES: Record<string, { label: string; full: string }> = {
@@ -33,6 +34,25 @@ const RED_CHARS: Record<string, string> = {
   pao: '炮',
   zu: '兵'
 };
+
+// Pure helper: seed piece-id map from the initial board so the first
+// paint already shows every piece at its starting cell (no flash).
+function buildInitialPiecePositions(b: any[][] | null | undefined): Map<string, { r: number; c: number }> {
+  const map = new Map<string, { r: number; c: number }>();
+  if (!b) return map;
+  const seqByKey = new Map<string, number>();
+  for (let r = 0; r < 10; r++) {
+    for (let c = 0; c < 9; c++) {
+      const p = b[r]?.[c];
+      if (!p) continue;
+      const typeKey = `${p.color}_${p.type}`;
+      const seq = seqByKey.get(typeKey) ?? 0;
+      seqByKey.set(typeKey, seq + 1);
+      map.set(`${typeKey}#${seq}`, { r, c });
+    }
+  }
+  return map;
+}
 
 const BLACK_CHARS: Record<string, string> = {
   jiang: '將',
@@ -424,12 +444,27 @@ export default function ChineseChessBoard({
   players = [],
   winner,
   status,
-  onExit
+  onExit,
+  botIsThinking = false
 }: ChineseChessBoardProps) {
   const [selected, setSelected] = useState<{ r: number; c: number } | null>(null);
   const [legalTargets, setLegalTargets] = useState<{ r: number; c: number }[]>([]);
   const [lastMove, setLastMove] = useState<{ from: { r: number; c: number }; to: { r: number; c: number } } | null>(null);
-  
+  // Piece slide animation: per-piece stable id → its current (r,c).
+  // We use state (not just a ref) because React must re-render with new
+  // top/left so CSS transitions can animate from old → new position.
+  // On first mount we seed the map directly from the initial board so the
+  // first paint already shows every piece at its starting cell (no flash).
+  const [piecePositions, setPiecePositions] = useState<Map<string, { r: number; c: number }>>(
+    () => buildInitialPiecePositions(board)
+  );
+  // Counter used to mint a fresh stable id for new pieces (e.g. game restart).
+  const pieceIdSeqRef = React.useRef<Map<string, number>>(new Map());
+  // Pieces that have just been captured on the previous board update. They
+  // are kept around for ~200ms with opacity 0 so they fade out before unmount.
+  const [fadingPieces, setFadingPieces] = useState<{ id: string; color: string; type: string; r: number; c: number }[]>([]);
+  const fadingTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Game Clocks
   const [redTime, setRedTime] = useState<number>(600);
   const [blackTime, setBlackTime] = useState<number>(600);
@@ -608,6 +643,89 @@ export default function ChineseChessBoard({
     }
     prevBoardRef.current = JSON.parse(JSON.stringify(board));
   }, [board]);
+
+  // Sync piece identity map with current board. Each piece gets a stable
+  // string id derived from its color+type. On every board change we re-bind
+  // ids to current cells; unmapped old ids = captured pieces.
+  const syncPieceIds = (nextBoard: any[][]) => {
+    const oldMap = piecePositions;
+    const newMap = new Map<string, { r: number; c: number }>();
+    const claimed = new Set<string>();
+    const captured: { id: string; color: string; type: string; r: number; c: number }[] = [];
+
+    for (let r = 0; r < 10; r++) {
+      for (let c = 0; c < 9; c++) {
+        const p = nextBoard[r]?.[c];
+        if (!p) continue;
+        const typeKey = `${p.color}_${p.type}`;
+        let id: string | null = null;
+        // Exact (r,c) match with same color+type → reuse id.
+        for (const [oldId, pos] of oldMap.entries()) {
+          if (claimed.has(oldId)) continue;
+          if (pos.r === r && pos.c === c && oldId.startsWith(typeKey + '#')) {
+            id = oldId;
+            break;
+          }
+        }
+        if (!id) {
+          // Moved piece: same color+type at a different old cell.
+          for (const [oldId, pos] of oldMap.entries()) {
+            if (claimed.has(oldId)) continue;
+            if (oldId.startsWith(typeKey + '#')) {
+              id = oldId;
+              break;
+            }
+          }
+        }
+        if (!id) {
+          // Game restart / first observation → mint a new id.
+          const seq = pieceIdSeqRef.current.get(typeKey) ?? 0;
+          pieceIdSeqRef.current.set(typeKey, seq + 1);
+          id = `${typeKey}#${seq}`;
+        }
+        claimed.add(id);
+        newMap.set(id, { r, c });
+      }
+    }
+
+    // Anything in oldMap that wasn't claimed is a captured piece.
+    for (const [oldId, pos] of oldMap.entries()) {
+      if (!claimed.has(oldId)) {
+        const [color, type] = oldId.split('#')[0].split('_');
+        captured.push({ id: oldId, color, type, r: pos.r, c: pos.c });
+      }
+    }
+
+    return { newMap, captured };
+  };
+
+  // When board changes, sync the piece-position map. Runs in a layout effect
+  // so React renders with new positions on the SAME tick as the board update,
+  // letting the CSS transition animate from old → new top/left.
+  React.useLayoutEffect(() => {
+    if (!board) return;
+    const { newMap, captured } = syncPieceIds(board);
+    setPiecePositions(newMap);
+    if (captured.length > 0) {
+      setFadingPieces(prev => {
+        const byId = new Map(prev.map(p => [p.id, p]));
+        for (const c of captured) byId.set(c.id, c);
+        return Array.from(byId.values());
+      });
+      if (fadingTimerRef.current) clearTimeout(fadingTimerRef.current);
+      fadingTimerRef.current = setTimeout(() => {
+        setFadingPieces([]);
+        fadingTimerRef.current = null;
+      }, 220);
+    }
+  }, [board]);
+
+  // On unmount, clear any pending fade timer.
+  useEffect(() => {
+    return () => {
+      if (fadingTimerRef.current) clearTimeout(fadingTimerRef.current);
+    };
+  }, []);
 
   // Turn ticking clocks
   useEffect(() => {
@@ -971,14 +1089,14 @@ export default function ChineseChessBoard({
                 </span>
               </div>
 
-              {/* Interactive Grid Cell Nodes placement */}
+              {/* Interactive Grid Cell Nodes placement (click handlers + last-move + legal dots) */}
               <div className="absolute inset-0 z-20">
-                {board.map((row, r) => 
+                {board.map((row, r) =>
                   row.map((cell, c) => {
-                    const isSelected = selected && selected.r === r && selected.c === c;
                     const isLegalTarget = legalTargets.some(t => t.r === r && t.c === c);
+                    const isSelected = selected && selected.r === r && selected.c === c;
                     const character = cell ? (cell.color === 'R' ? RED_CHARS[cell.type] : BLACK_CHARS[cell.type]) : '';
-                    
+
                     // Check if this node was part of the last move to show a visual trail
                     const isLastMoveFrom = lastMove && lastMove.from.r === r && lastMove.from.c === c;
                     const isLastMoveTo = lastMove && lastMove.to.r === r && lastMove.to.c === c;
@@ -1020,14 +1138,13 @@ export default function ChineseChessBoard({
                           </div>
                         ) : (
                           <>
-                            {/* Empty square but legal move indicator */}
+                            {/* Empty square: legal move indicator or hover dot */}
                             {isLegalTarget ? (
                               <div className="relative flex items-center justify-center w-full h-full">
                                 <div className="absolute w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-emerald-500 opacity-80 animate-ping" />
                                 <div className="absolute w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-emerald-500 border border-emerald-400 shadow-md shadow-emerald-500/50" />
                               </div>
                             ) : (
-                              // Micro dot indicators
                               <div className="w-1 h-1 rounded-full opacity-0 group-hover:opacity-40 bg-amber-900 transition-opacity" />
                             )}
                           </>
@@ -1035,6 +1152,93 @@ export default function ChineseChessBoard({
                       </button>
                     );
                   })
+                )}
+              </div>
+
+              {/* Piece overlay layer (slide animation).
+                  Pieces are rendered with stable React keys derived from
+                  color+type so React keeps the same DOM node across moves.
+                  CSS transition on top/left gives a smooth 350ms ease-out
+                  slide; new pieces "pop in" via initial keyframe. */}
+              <div className="absolute inset-0 z-30 pointer-events-none">
+                {Array.from(piecePositions.entries()).map(([id, pos]) => {
+                  const piece = board[pos.r]?.[pos.c];
+                  if (!piece) return null;
+                  const character = piece.color === 'R' ? RED_CHARS[piece.type] : BLACK_CHARS[piece.type];
+                  const isSelected = selected && selected.r === pos.r && selected.c === pos.c;
+                  return (
+                    <div
+                      key={id}
+                      className={`absolute flex items-center justify-center select-none will-change-[top,left]`}
+                      style={{
+                        left: `${(pos.c / 8) * 100}%`,
+                        top: `${(pos.r / 9) * 100}%`,
+                        width: '12%',
+                        height: '11%',
+                        transform: 'translate(-50%, -50%)',
+                        transition: 'top 350ms ease-out, left 350ms ease-out'
+                      }}
+                    >
+                      <div
+                        className={`w-9 h-9 sm:w-12 sm:h-12 md:w-14 md:h-14 rounded-full border-2 flex flex-col items-center justify-center font-serif font-extrabold shadow-md
+                          ${piece.color === 'R'
+                            ? 'bg-[#fdfbf7] border-red-800 text-red-700 shadow-red-900/30'
+                            : 'bg-[#222222] border-stone-900 text-stone-100 shadow-black/60'
+                          }
+                          ${isSelected ? 'scale-110 ring-4 ring-amber-500 animate-bounce' : ''}
+                        `}
+                      >
+                        <div className={`w-[85%] h-[85%] rounded-full border border-dashed flex flex-col items-center justify-center relative
+                          ${piece.color === 'R' ? 'border-red-700/40' : 'border-stone-700/50'}
+                        `}>
+                          <span className="text-base sm:text-xl md:text-2xl font-black leading-none">{character}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Captured-piece ghosts: kept on screen ~200ms with fade-out */}
+                {fadingPieces.map((fp) => {
+                  const character = fp.color === 'R' ? RED_CHARS[fp.type] : BLACK_CHARS[fp.type];
+                  return (
+                    <div
+                      key={`fading-${fp.id}`}
+                      className="absolute flex items-center justify-center select-none pointer-events-none"
+                      style={{
+                        left: `${(fp.c / 8) * 100}%`,
+                        top: `${(fp.r / 9) * 100}%`,
+                        width: '12%',
+                        height: '11%',
+                        transform: 'translate(-50%, -50%)',
+                        transition: 'opacity 200ms ease-out',
+                        opacity: 0
+                      }}
+                    >
+                      <div
+                        className={`w-9 h-9 sm:w-12 sm:h-12 md:w-14 md:h-14 rounded-full border-2 flex flex-col items-center justify-center font-serif font-extrabold shadow-md
+                          ${fp.color === 'R'
+                            ? 'bg-[#fdfbf7] border-red-800 text-red-700 shadow-red-900/30'
+                            : 'bg-[#222222] border-stone-900 text-stone-100 shadow-black/60'
+                          }
+                        `}
+                      >
+                        <div className={`w-[85%] h-[85%] rounded-full border border-dashed flex flex-col items-center justify-center relative
+                          ${fp.color === 'R' ? 'border-red-700/40' : 'border-stone-700/50'}
+                        `}>
+                          <span className="text-base sm:text-xl md:text-2xl font-black leading-none">{character}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Bot thinking overlay (only when AI delay is in flight) */}
+                {botIsThinking && (
+                  <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-amber-500/95 text-white text-[10px] sm:text-xs font-bold px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2 z-40 animate-pulse whitespace-nowrap">
+                    <span className="w-2 h-2 bg-white rounded-full animate-ping" />
+                    Máy đang suy nghĩ...
+                  </div>
                 )}
               </div>
 
