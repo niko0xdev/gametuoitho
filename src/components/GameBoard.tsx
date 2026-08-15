@@ -34,8 +34,17 @@ export default function GameBoard({
   const [connected, setConnected] = useState(false);
   const [disconnectAlert, setDisconnectAlert] = useState<string | null>(null);
   const [statusLog, setStatusLog] = useState<string[]>(['Bắt đầu thiết lập kết nối trận đấu...']);
+  // Solo mode: hold the bot's MATCH_STATE_UPDATE so the user can read each AI move.
+  const [botIsThinking, setBotIsThinking] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const userLastMoveAtRef = useRef<number>(0);
+  const pendingBotMoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSoloMatch = matchId.startsWith('match_solo_');
+  // How long we wait between user's click and the AI move becoming visible.
+  // The worker has its own ~800ms engine delay; this guarantees at least
+  // 1200ms total thinking time so the user can follow each AI move.
+  const SOLO_BOT_REVEAL_MS = 1200;
 
   useEffect(() => {
     // Dynamic self-referential WebSocket URL
@@ -73,11 +82,45 @@ export default function GameBoard({
         const { type, payload } = JSON.parse(event.data);
 
         switch (type) {
-          case 'MATCH_STATE_UPDATE':
-            setMatch(payload);
-            setDisconnectAlert(null);
-            fetchOpponent(payload);
+          case 'MATCH_STATE_UPDATE': {
+            const applyState = (next: typeof payload) => {
+              setBotIsThinking(false);
+              userLastMoveAtRef.current = 0;
+              setMatch(next);
+              setDisconnectAlert(null);
+              fetchOpponent(next);
+            };
+
+            // Solo mode pacing: hold the bot's response so the user can
+            // perceive a thinking gap of SOLO_BOT_REVEAL_MS between their
+            // move and the AI's move appearing on the board. We detect the
+            // bot's response by checking that (a) the user just moved and
+            // (b) the new state's turn is back to the user — i.e. the bot
+            // has just played and it's now the human's turn again.
+            const botJustMoved =
+              isSoloMatch &&
+              userLastMoveAtRef.current > 0 &&
+              payload?.turn === userId;
+
+            if (botJustMoved) {
+              const elapsed = Date.now() - userLastMoveAtRef.current;
+              if (elapsed < SOLO_BOT_REVEAL_MS) {
+                if (pendingBotMoveTimerRef.current) {
+                  clearTimeout(pendingBotMoveTimerRef.current);
+                }
+                setBotIsThinking(true);
+                const delay = SOLO_BOT_REVEAL_MS - elapsed;
+                pendingBotMoveTimerRef.current = setTimeout(() => {
+                  pendingBotMoveTimerRef.current = null;
+                  applyState(payload);
+                }, delay);
+                break;
+              }
+            }
+
+            applyState(payload);
             break;
+          }
 
           case 'PLAYER_DISCONNECTED':
             setDisconnectAlert(`Kỳ thủ đối diện mất kết nối! Đang chờ 60 giây gia hạn...`);
@@ -114,6 +157,10 @@ export default function GameBoard({
     };
 
     return () => {
+      if (pendingBotMoveTimerRef.current) {
+        clearTimeout(pendingBotMoveTimerRef.current);
+        pendingBotMoveTimerRef.current = null;
+      }
       if (wsRef.current) {
         wsRef.current.close();
       }
@@ -138,6 +185,10 @@ export default function GameBoard({
   };
 
   const handleMoveSubmit = (move: any) => {
+    userLastMoveAtRef.current = Date.now();
+    if (isSoloMatch) {
+      setBotIsThinking(true);
+    }
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: 'MAKE_MOVE',
@@ -257,6 +308,7 @@ export default function GameBoard({
                   winner={match.winner}
                   status={match.status}
                   onExit={onExit}
+                  botIsThinking={isSoloMatch ? botIsThinking : false}
                 />
               )}
               {match.gameId === 'co_vua' && (
