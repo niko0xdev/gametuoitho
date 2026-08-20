@@ -1249,6 +1249,26 @@ export default function BiLacArena({
       ? finishedMatches.filter(m => m.weekLabel === currentWeekLabel)
       : finishedMatches;
 
+    // Tab tuần: chỉ hiện những ai THỰC SỰ tham gia trận tuần này (cả PLAYING lẫn FINISHED).
+    // Tab alltime giữ nguyên (hiện tất cả players trong giải để dễ theo dõi dài hạn).
+    const weeklyParticipantIds = new Set<string>();
+    // Luôn lấy ongoing match players (nếu có) để mini-leaderboard "thành viên trận này"
+    // hiển thị đủ, kể cả khi họ chưa hoàn thành trận nào tuần này.
+    matches.filter(m => m.status === 'PLAYING').forEach(m => {
+      m.team1.forEach(pId => weeklyParticipantIds.add(pId));
+      m.team2.forEach(pId => weeklyParticipantIds.add(pId));
+      if (m.benched) weeklyParticipantIds.add(m.benched);
+    });
+    if (leaderboardTab === 'weekly') {
+      matches
+        .filter(m => m.weekLabel === currentWeekLabel && (m.status === 'PLAYING' || m.status === 'FINISHED'))
+        .forEach(m => {
+          m.team1.forEach(pId => weeklyParticipantIds.add(pId));
+          m.team2.forEach(pId => weeklyParticipantIds.add(pId));
+          if (m.benched) weeklyParticipantIds.add(m.benched);
+        });
+    }
+
     // Initialize map
     const statsMap: Record<string, {
       player: BiLacPlayer;
@@ -1263,6 +1283,8 @@ export default function BiLacArena({
     }> = {};
 
     players.forEach(p => {
+      // Tab tuần: bỏ qua player không tham gia trận nào tuần này — khỏi tạo stats entry.
+      if (leaderboardTab === 'weekly' && !weeklyParticipantIds.has(p.id)) return;
       statsMap[p.id] = {
         player: p,
         matchesPlayed: 0,
