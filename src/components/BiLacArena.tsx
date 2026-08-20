@@ -1007,6 +1007,8 @@ export default function BiLacArena({
       if (res.ok) {
         const updated = await res.json();
         setMatches(prev => prev.map(m => m.id === matchId ? updated : m));
+        // Clear banner "kết quả hoà" cũ (nếu có) sau khi user vừa chỉnh tỷ số khác đi.
+        setError(null);
         // Chỉ phát âm thanh/lời nói sau khi server xác nhận — tránh báo "ghi bàn" falsely.
         if (diff > 0) {
           playBeep(523, 'sine', 0.12);
@@ -1029,6 +1031,13 @@ export default function BiLacArena({
   const handleFinishMatch = async (matchId: string) => {
     const match = matches.find(m => m.id === matchId);
     if (!match) return;
+
+    // Bi lắc: cấm kết quả hoà — bắt buộc phải có đội thắng (hoặc host huỷ trận).
+    if (match.score1 === match.score2) {
+      setError(`Tỷ số đang hoà ${match.score1}–${match.score2}. Vui lòng chọn đội thắng (nút Xanh Thắng / Đỏ Thắng phía trên) hoặc chỉnh lại tỷ số trước khi xác nhận kết thúc.`);
+      playBeep(220, 'sawtooth', 0.25);
+      return;
+    }
 
     try {
       const res = await bilacFetch(`/api/bilac/matches/${matchId}/update`, {
@@ -1079,6 +1088,7 @@ export default function BiLacArena({
       if (res.ok) {
         const updated = await res.json();
         setMatches(prev => prev.map(m => m.id === matchId ? updated : m));
+        setError(null);  // Clear banner "kết quả hoà" cũ khi user vừa chọn đội thắng.
         playBeep(1046, 'sine', 0.4);
         setSuccessMsg(`Trận đấu đã kết thúc nhanh! Phần thắng thuộc về ${winnerLabel} với tỷ số 7 - 6.`);
         setTimeout(() => setSuccessMsg(null), 4000);
@@ -2069,13 +2079,27 @@ export default function BiLacArena({
                     Hủy bỏ trận đấu
                   </button>
 
-                  <button
-                    onClick={() => handleFinishMatch(ongoingMatch.id)}
-                    className="px-6 py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-xl text-xs font-bold tracking-wider uppercase flex items-center gap-2 cursor-pointer shadow-lg hover:shadow-xl hover:scale-102 transform active:scale-98 transition-all"
-                  >
-                    <Check className="w-5 h-5 font-bold" />
-                    Xác nhận kết thúc đấu trí
-                  </button>
+                  {ongoingMatch.score1 === ongoingMatch.score2 ? (
+                    <div
+                      id="bilac_no_draw_warning"
+                      className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border border-amber-500/40 rounded-xl text-amber-300 text-xs font-bold animate-pulse"
+                      title="Bi lắc bắt buộc có đội thắng — không cho phép kết quả hoà"
+                    >
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>
+                        Tỷ số đang hoà {ongoingMatch.score1}–{ongoingMatch.score2}. Vui lòng chọn <b>Xanh Thắng</b> / <b>Đỏ Thắng</b> phía trên, hoặc chỉnh lại bàn thắng.
+                      </span>
+                    </div>
+                  ) : (
+                    <button
+                      id="btn_finish_match"
+                      onClick={() => handleFinishMatch(ongoingMatch.id)}
+                      className="px-6 py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-xl text-xs font-bold tracking-wider uppercase flex items-center gap-2 cursor-pointer shadow-lg hover:shadow-xl hover:scale-102 transform active:scale-98 transition-all"
+                    >
+                      <Check className="w-5 h-5 font-bold" />
+                      Xác nhận kết thúc đấu trí
+                    </button>
+                  )}
                 </div>
               </div>
 
