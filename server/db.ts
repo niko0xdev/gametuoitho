@@ -184,8 +184,8 @@ class Database {
         if (!/duplicate column name/i.test(String(err?.message))) throw err;
       }
     }
-    // Existing rows pre-date verification — grandfather them as verified.
-    try { sqliteDb.exec(`UPDATE users SET email_verified = 1 WHERE email_verified = 0;`); } catch {}
+    // Existing rows pre-date verification — grandfather only legacy rows (created_at = 0).
+    try { sqliteDb.exec(`UPDATE users SET email_verified = 1 WHERE email_verified = 0 AND created_at = 0;`); } catch {}
     try { sqliteDb.exec(`UPDATE users SET created_at = CAST(strftime('%s','now') AS INTEGER)*1000 WHERE created_at = 0;`); } catch {}
 
     // --- daily_challenges: migrate legacy single-PK (date) to composite (date, game_id)

@@ -46,7 +46,9 @@ export function handleRegister(req: Request, res: Response) {
     avatar,
     role: 'user' as const,
     otp,
-    otpExpires: Date.now() + 5 * 60 * 1000
+    otpExpires: Date.now() + 5 * 60 * 1000,
+    emailVerified: false,
+    createdAt: Date.now(),
   };
 
   const profile = {
@@ -101,6 +103,7 @@ export function handleVerifyEmail(req: Request, res: Response) {
   }
   user.otp = undefined;
   user.otpExpires = undefined;
+  user.emailVerified = true;
   db.saveUser(user);
   const profile = db.getProfile(user.id);
   res.json({
@@ -142,7 +145,8 @@ export function handleLogin(req: Request, res: Response) {
     return res.status(400).json({ error: 'Vui lòng điền đầy đủ tên tài khoản và mật khẩu!' });
   }
 
-  const user = db.getUserByUsername(username);
+  const input = String(username).trim().toLowerCase();
+  const user = db.getUserByEmail(input) ?? db.getUserByUsername(input);
   if (!user) {
     return res.status(400).json({ error: 'Tài khoản không tồn tại!' });
   }
@@ -154,6 +158,9 @@ export function handleLogin(req: Request, res: Response) {
   const passwordHash = hashPassword(password);
   if (user.passwordHash !== passwordHash) {
     return res.status(400).json({ error: 'Mật khẩu không chính xác!' });
+  }
+  if (!user.emailVerified) {
+    return res.status(403).json({ error: 'Tài khoản chưa xác thực email. Vui lòng kiểm tra hộp thư của bạn.' });
   }
 
   let profile = db.getProfile(user.id);

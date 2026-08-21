@@ -58,7 +58,8 @@ describe('POST /api/auth/login', () => {
   before(() => {
     db.saveUser({
       id: 'u_login', username: 'loginuser', email: 'l@x.com',
-      passwordHash: hashPassword('correct'), displayName: 'L', avatar: 'a', role: 'user'
+      passwordHash: hashPassword('correct'), displayName: 'L', avatar: 'a', role: 'user',
+      emailVerified: true, createdAt: Date.now()
     });
     db.saveProfile({
       id: 'u_login', displayName: 'L', avatar: 'a',
@@ -93,7 +94,8 @@ describe('POST /api/auth/login', () => {
   it('200s on valid creds and lazy-creates profile', async () => {
     db.saveUser({
       id: 'u_noprofile', username: 'noprofileuser', email: 'np@x.com',
-      passwordHash: hashPassword('pw'), displayName: 'NP', avatar: 'a', role: 'user'
+      passwordHash: hashPassword('pw'), displayName: 'NP', avatar: 'a', role: 'user',
+      emailVerified: true, createdAt: Date.now()
     });
     // Ensure no profile
     const res = await request(getApp()).post('/api/auth/login', { username: 'noprofileuser', password: 'pw' });
@@ -142,14 +144,14 @@ describe('Direct handler invocation (c8 instrumentation)', () => {
   }
   it('handleLogin directly', () => {
     const id = `dir_${Date.now()}`;
-    db.saveUser({ id, username: id, email: `${id}@x.com`, passwordHash: hashPassword('pw'), displayName: 'D', avatar: 'a', role: 'user' });
+    db.saveUser({ id, username: id, email: `${id}@x.com`, passwordHash: hashPassword('pw'), displayName: 'D', avatar: 'a', role: 'user', emailVerified: true, createdAt: Date.now() });
     const res = makeRes();
     handleLogin({ body: { username: id, password: 'pw' } } as any, res);
     assert.equal(res.body.user.username, id);
   });
   it('handleLogin lazy profile creation', () => {
     const id = `dir_np_${Date.now()}`;
-    db.saveUser({ id, username: id, email: `${id}@x.com`, passwordHash: hashPassword('pw'), displayName: 'D', avatar: 'a', role: 'user' });
+    db.saveUser({ id, username: id, email: `${id}@x.com`, passwordHash: hashPassword('pw'), displayName: 'D', avatar: 'a', role: 'user', emailVerified: true, createdAt: Date.now() });
     const res = makeRes();
     handleLogin({ body: { username: id, password: 'pw' } } as any, res);
     assert.ok(db.getProfile(id));
