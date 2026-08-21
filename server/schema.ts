@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, primaryKey } from 'drizzle-orm/sqlite-core';
 
 export const usersTable = sqliteTable('users', {
   id: text('id').primaryKey(),
@@ -10,7 +10,16 @@ export const usersTable = sqliteTable('users', {
   role: text('role').$type<'admin' | 'user'>().notNull(),
   otp: text('otp'),
   otpExpires: integer('otp_expires'),
+  otpAttempts: integer('otp_attempts').default(0),
+  lastOtpAt: integer('last_otp_at').default(0),
   isGoogleUser: integer('is_google_user'), // 1 = true, 0 = false
+  emailVerified: integer('email_verified').default(0),
+  createdAt: integer('created_at').notNull().default(0),
+});
+
+export const dailyCountersTable = sqliteTable('daily_counters', {
+  date: text('date').primaryKey(),
+  otpSends: integer('otp_sends').notNull().default(0),
 });
 
 export const profilesTable = sqliteTable('profiles', {
@@ -60,12 +69,14 @@ export const tournamentsTable = sqliteTable('tournaments', {
 
 export const dailyChallengesTable = sqliteTable('daily_challenges', {
   id: text('id').notNull(),
-  date: text('date').primaryKey(), // YYYY-MM-DD
+  date: text('date').notNull(),
   gameId: text('game_id').notNull(),
   seed: text('seed').notNull(),
   prompt: text('prompt').notNull(),
   topScores: text('top_scores').notNull(), // JSON string array of scores
-});
+}, (table) => ({
+  pk: primaryKey({ columns: [table.date, table.gameId] }),
+}));
 
 export const bilacPlayersTable = sqliteTable('bilac_players', {
   id: text('id').primaryKey(),

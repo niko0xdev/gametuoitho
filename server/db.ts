@@ -6,6 +6,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { eq, and, like, or } from 'drizzle-orm';
 import {
   usersTable,
+  dailyCountersTable,
   profilesTable,
   matchesTable,
   tournamentsTable,
@@ -44,7 +45,11 @@ export interface UserRecord {
   role: 'admin' | 'user';
   otp?: string;
   otpExpires?: number;
+  otpAttempts?: number;
+  lastOtpAt?: number;
   isGoogleUser?: boolean;
+  emailVerified?: boolean;
+  createdAt?: number;
 }
 
 export function hashPassword(password: string): string {
@@ -72,7 +77,16 @@ class Database {
         role TEXT NOT NULL,
         otp TEXT,
         otp_expires INTEGER,
-        is_google_user INTEGER
+        otp_attempts INTEGER DEFAULT 0,
+        last_otp_at INTEGER DEFAULT 0,
+        is_google_user INTEGER,
+        email_verified INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS daily_counters (
+        date TEXT PRIMARY KEY,
+        otp_sends INTEGER NOT NULL DEFAULT 0
       );
 
       CREATE TABLE IF NOT EXISTS profiles (
@@ -122,11 +136,12 @@ class Database {
 
       CREATE TABLE IF NOT EXISTS daily_challenges (
         id TEXT NOT NULL,
-        date TEXT PRIMARY KEY,
+        date TEXT NOT NULL,
         game_id TEXT NOT NULL,
         seed TEXT NOT NULL,
         prompt TEXT NOT NULL,
-        top_scores TEXT NOT NULL
+        top_scores TEXT NOT NULL,
+        PRIMARY KEY (date, game_id)
       );
 
       CREATE TABLE IF NOT EXISTS bilac_players (
@@ -158,6 +173,46 @@ class Database {
       );
 
     `);
+    // --- users columns added after initial release: guard via ALTER for existing DBs
+    for (const ddl of [
+      `ALTER TABLE users ADD COLUMN otp_attempts INTEGER DEFAULT 0;`,
+      `ALTER TABLE users ADD COLUMN last_otp_at INTEGER DEFAULT 0;`,
+      `ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0;`,
+      `ALTER TABLE users ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;`,
+    ]) {
+      try { sqliteDb.exec(ddl); } catch (err: any) {
+        if (!/duplicate column name/i.test(String(err?.message))) throw err;
+      }
+    }
+    // Existing rows pre-date verification — grandfather them as verified.
+    try { sqliteDb.exec(`UPDATE users SET email_verified = 1 WHERE email_verified = 0;`); } catch {}
+    try { sqliteDb.exec(`UPDATE users SET created_at = CAST(strftime('%s','now') AS INTEGER)*1000 WHERE created_at = 0;`); } catch {}
+
+    // --- daily_challenges: migrate legacy single-PK (date) to composite (date, game_id)
+    try {
+      const ddl = sqliteDb.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='daily_challenges'`).get() as { sql: string } | undefined;
+      if (ddl?.sql && /date\s+TEXT\s+PRIMARY\s+KEY/i.test(ddl.sql) && !/PRIMARY\s+KEY\s*\(\s*date\s*,\s*game_id/i.test(ddl.sql)) {
+        console.log('[db] migrating daily_challenges: single PK (date) → composite (date, game_id)');
+        sqliteDb.exec(`
+          CREATE TABLE daily_challenges_new (
+            id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            game_id TEXT NOT NULL,
+            seed TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            top_scores TEXT NOT NULL,
+            PRIMARY KEY (date, game_id)
+          );
+          INSERT INTO daily_challenges_new (id, date, game_id, seed, prompt, top_scores)
+            SELECT id, date, game_id, seed, prompt, top_scores FROM daily_challenges;
+          DROP TABLE daily_challenges;
+          ALTER TABLE daily_challenges_new RENAME TO daily_challenges;
+        `);
+      }
+    } catch (e) {
+      console.error('[db] daily_challenges migration skipped:', e);
+    }
+
     // ALTER runs separately so try/catch can swallow "duplicate column" on re-init
     try {
       sqliteDb.exec(`ALTER TABLE bilac_tournaments ADD COLUMN owner_user_id TEXT;`);
@@ -467,10 +522,7 @@ class Database {
     }
   }
 
-  // Users
-  getUser(userId: string): UserRecord | undefined {
-    const row = drizzleDb.select().from(usersTable).where(eq(usersTable.id, userId)).get();
-    if (!row) return undefined;
+  private toUserRecord(row: any): UserRecord {
     return {
       id: row.id,
       username: row.username,
@@ -481,25 +533,25 @@ class Database {
       role: row.role,
       otp: row.otp || undefined,
       otpExpires: row.otpExpires || undefined,
-      isGoogleUser: row.isGoogleUser === 1
+      otpAttempts: row.otpAttempts ?? 0,
+      lastOtpAt: row.lastOtpAt ?? 0,
+      isGoogleUser: row.isGoogleUser === 1,
+      emailVerified: (row.emailVerified ?? 0) === 1,
+      createdAt: row.createdAt ?? 0,
     };
+  }
+
+  // Users
+  getUser(userId: string): UserRecord | undefined {
+    const row = drizzleDb.select().from(usersTable).where(eq(usersTable.id, userId)).get();
+    if (!row) return undefined;
+    return this.toUserRecord(row);
   }
 
   getUserByUsername(username: string): UserRecord | undefined {
     const row = drizzleDb.select().from(usersTable).where(eq(usersTable.username, username.toLowerCase())).get();
     if (!row) return undefined;
-    return {
-      id: row.id,
-      username: row.username,
-      email: row.email || undefined,
-      passwordHash: row.passwordHash,
-      displayName: row.displayName,
-      avatar: row.avatar,
-      role: row.role,
-      otp: row.otp || undefined,
-      otpExpires: row.otpExpires || undefined,
-      isGoogleUser: row.isGoogleUser === 1
-    };
+    return this.toUserRecord(row);
   }
 
   // Shared user lookup for invite flows. Prefix on username + contains on displayName.
@@ -521,18 +573,7 @@ class Database {
   getUserByEmail(email: string): UserRecord | undefined {
     const row = drizzleDb.select().from(usersTable).where(eq(usersTable.email, email.toLowerCase())).get();
     if (!row) return undefined;
-    return {
-      id: row.id,
-      username: row.username,
-      email: row.email || undefined,
-      passwordHash: row.passwordHash,
-      displayName: row.displayName,
-      avatar: row.avatar,
-      role: row.role,
-      otp: row.otp || undefined,
-      otpExpires: row.otpExpires || undefined,
-      isGoogleUser: row.isGoogleUser === 1
-    };
+    return this.toUserRecord(row);
   }
 
   saveUser(user: UserRecord): void {
@@ -547,7 +588,11 @@ class Database {
         role: user.role,
         otp: user.otp || null,
         otpExpires: user.otpExpires || null,
-        isGoogleUser: user.isGoogleUser ? 1 : 0
+        otpAttempts: user.otpAttempts ?? 0,
+        lastOtpAt: user.lastOtpAt ?? 0,
+        isGoogleUser: user.isGoogleUser ? 1 : 0,
+        emailVerified: user.emailVerified ? 1 : 0,
+        createdAt: user.createdAt ?? Date.now(),
       })
       .onConflictDoUpdate({
         target: usersTable.id,
@@ -560,7 +605,11 @@ class Database {
           role: user.role,
           otp: user.otp || null,
           otpExpires: user.otpExpires || null,
-          isGoogleUser: user.isGoogleUser ? 1 : 0
+          otpAttempts: user.otpAttempts ?? 0,
+          lastOtpAt: user.lastOtpAt ?? 0,
+          isGoogleUser: user.isGoogleUser ? 1 : 0,
+          emailVerified: user.emailVerified ? 1 : 0,
+          createdAt: user.createdAt ?? Date.now(),
         }
       })
       .run();
@@ -568,18 +617,7 @@ class Database {
 
   getAllUsers(): UserRecord[] {
     const rows = drizzleDb.select().from(usersTable).all();
-    return rows.map(row => ({
-      id: row.id,
-      username: row.username,
-      email: row.email || undefined,
-      passwordHash: row.passwordHash,
-      displayName: row.displayName,
-      avatar: row.avatar,
-      role: row.role,
-      otp: row.otp || undefined,
-      otpExpires: row.otpExpires || undefined,
-      isGoogleUser: row.isGoogleUser === 1
-    }));
+    return rows.map(row => this.toUserRecord(row));
   }
 
   // Profiles
@@ -805,9 +843,13 @@ class Database {
     }));
   }
 
-  // Daily Challenges
-  getDailyChallenge(date: string): DailyChallenge | undefined {
-    const row = drizzleDb.select().from(dailyChallengesTable).where(eq(dailyChallengesTable.date, date)).get();
+  // Daily Challenges — composite PK (date, gameId). Single-arg form kept for
+  // backward compat (returns first match for date). Prefer 2-arg form.
+  getDailyChallenge(date: string, gameId?: string): DailyChallenge | undefined {
+    const cond = gameId !== undefined
+      ? and(eq(dailyChallengesTable.date, date), eq(dailyChallengesTable.gameId, gameId))
+      : eq(dailyChallengesTable.date, date);
+    const row = drizzleDb.select().from(dailyChallengesTable).where(cond).get();
     if (!row) return undefined;
     return {
       id: row.id,
@@ -830,10 +872,9 @@ class Database {
         topScores: JSON.stringify(challenge.topScores || [])
       })
       .onConflictDoUpdate({
-        target: dailyChallengesTable.date,
+        target: [dailyChallengesTable.date, dailyChallengesTable.gameId],
         set: {
           id: challenge.id,
-          gameId: challenge.gameId,
           seed: challenge.seed,
           prompt: challenge.prompt,
           topScores: JSON.stringify(challenge.topScores || [])

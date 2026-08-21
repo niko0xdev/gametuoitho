@@ -16,7 +16,7 @@ const DAILY_WORDS = [
 
 class DailyChallengeManager {
   getOrCreateChallenge(gameId: string, dateStr: string): DailyChallenge {
-    let challenge = db.getDailyChallenge(`${gameId}_${dateStr}`);
+    let challenge = db.getDailyChallenge(dateStr, gameId);
     if (challenge) {
       return challenge;
     }
@@ -61,7 +61,7 @@ class DailyChallengeManager {
     avatar: string,
     score: number
   ): DailyChallenge | null {
-    const challenge = db.getDailyChallenge(`${gameId}_${dateStr}`);
+    const challenge = db.getDailyChallenge(dateStr, gameId);
     if (!challenge) return null;
 
     // Check if player already submitted (FR-DAILY-04)
