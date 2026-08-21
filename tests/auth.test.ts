@@ -230,15 +230,24 @@ describe('POST /api/auth/reset-password', () => {
     assert.equal(res.status, 404);
   });
   it('400s on wrong OTP', async () => {
+    // Seed a hashed OTP so wrong-OTP path is exercised via hash comparison.
+    const { hashOtp } = await import('../server/handlers/authHandlers.ts');
+    const u = db.getUserByEmail('otp@x.com')!;
+    u.otp = hashOtp('000000');
+    u.otpExpires = Date.now() + 100000;
+    u.otpAttempts = 0;
+    db.saveUser(u);
     const res = await request(getApp()).post('/api/auth/reset-password', {
       email: 'otp@x.com', otp: '999999', newPassword: 'p'
     });
     assert.equal(res.status, 400);
   });
   it('400s on expired OTP', async () => {
+    const { hashOtp } = await import('../server/handlers/authHandlers.ts');
     const u = db.getUserByEmail('otp@x.com')!;
-    u.otp = '111111';
+    u.otp = hashOtp('111111');
     u.otpExpires = Date.now() - 1000;
+    u.otpAttempts = 0;
     db.saveUser(u);
     const res = await request(getApp()).post('/api/auth/reset-password', {
       email: 'otp@x.com', otp: '111111', newPassword: 'newpw'
@@ -246,9 +255,11 @@ describe('POST /api/auth/reset-password', () => {
     assert.equal(res.status, 400);
   });
   it('200s and resets password', async () => {
+    const { hashOtp } = await import('../server/handlers/authHandlers.ts');
     const u = db.getUserByEmail('otp@x.com')!;
-    u.otp = '222222';
+    u.otp = hashOtp('222222');
     u.otpExpires = Date.now() + 100000;
+    u.otpAttempts = 0;
     db.saveUser(u);
     const res = await request(getApp()).post('/api/auth/reset-password', {
       email: 'otp@x.com', otp: '222222', newPassword: 'Str0ngpw1'
@@ -257,9 +268,11 @@ describe('POST /api/auth/reset-password', () => {
     assert.equal(db.getUserByEmail('otp@x.com')!.passwordHash, hashPassword('Str0ngpw1'));
   });
   it('400s on a weak new password', async () => {
+    const { hashOtp } = await import('../server/handlers/authHandlers.ts');
     const u = db.getUserByEmail('otp@x.com')!;
-    u.otp = '333333';
+    u.otp = hashOtp('333333');
     u.otpExpires = Date.now() + 100000;
+    u.otpAttempts = 0;
     db.saveUser(u);
     const res = await request(getApp()).post('/api/auth/reset-password', {
       email: 'otp@x.com', otp: '333333', newPassword: 'a1'
@@ -316,6 +329,10 @@ describe('POST /api/auth/verify-email + resend-otp (Express/Worker parity)', () 
     const username = `re_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const email = `${username}@x.com`;
     await request(getApp()).post('/api/auth/register', { username, password: 'Str0ngpw1', email, displayName: 'RE' });
+    // Cooldown: bypass 60s window so the immediate resend succeeds.
+    const u = db.getUserByEmail(email)!;
+    u.lastOtpAt = 0;
+    db.saveUser(u);
     const res = await request(getApp()).post('/api/auth/resend-otp', { email });
     assert.equal(res.status, 200);
     assert.ok(res.body._debugOtp);

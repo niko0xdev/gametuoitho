@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import type { Request, Response } from 'express';
 import { db, hashPassword } from '../db.ts';
 import { validatePassword } from '../../src/lib/passwordRules.ts';
@@ -6,6 +7,53 @@ import { validatePassword } from '../../src/lib/passwordRules.ts';
 // decode) must never leak from a production process. The Worker is the production
 // authority; Express is legacy dev/offline per CLAUDE.md.
 const isDev = process.env.NODE_ENV !== 'production';
+
+// OTP policy — mirrors worker/src/lib/password.ts
+export const OTP_TTL_MS = 10 * 60 * 1000;
+export const OTP_RESEND_MIN_MS = 60 * 1000;
+export const OTP_MAX_ATTEMPTS = 5;
+
+export function hashOtp(otp: string): string {
+  return crypto.createHash('sha256').update(String(otp).trim()).digest('hex');
+}
+
+export function generateOtp(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function normalizeEmail(email: unknown): string {
+  return String(email).trim().toLowerCase();
+}
+
+function isHashedOtp(value: string | undefined): boolean {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+}
+
+/**
+ * Worker-parity OTP verifier. Returns an error message string on failure (and
+ * persists the incremented attempt count), or null on success.
+ */
+function verifyOtpForUser(user: { otp?: string; otpExpires?: number; otpAttempts?: number }, otpInput: unknown): string | null {
+  if (!user.otp || !user.otpExpires) {
+    return 'Chưa có mã OTP. Vui lòng yêu cầu mã mới.';
+  }
+  if (Date.now() > user.otpExpires) {
+    return 'Mã OTP đã hết hạn!';
+  }
+  if ((user.otpAttempts ?? 0) >= OTP_MAX_ATTEMPTS) {
+    return 'Bạn đã nhập sai quá nhiều lần. Vui lòng yêu cầu mã OTP mới.';
+  }
+  const trimmed = String(otpInput).trim();
+  const hashedInput = hashOtp(trimmed);
+  const stored = user.otp;
+  const matches = isHashedOtp(stored) ? hashedInput === stored : trimmed === stored;
+  if (!matches) {
+    (user as { otpAttempts?: number }).otpAttempts = (user.otpAttempts ?? 0) + 1;
+    db.saveUser(user as Parameters<typeof db.saveUser>[0]);
+    return 'Mã OTP không chính xác!';
+  }
+  return null;
+}
 
 export function handleRegister(req: Request, res: Response) {
   const { username, password, email, displayName } = req.body;
@@ -35,7 +83,7 @@ export function handleRegister(req: Request, res: Response) {
   // Worker parity: create the user with a pending email verification OTP. The OTP
   // is echoed back as _debugOtp so the dev "Simulated Mail Inbox" can autofill it;
   // production delivers via email and never echoes it.
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otp = generateOtp();
 
   const userRecord = {
     id: userId,
@@ -45,8 +93,10 @@ export function handleRegister(req: Request, res: Response) {
     displayName: displayName.trim(),
     avatar,
     role: 'user' as const,
-    otp,
-    otpExpires: Date.now() + 5 * 60 * 1000,
+    otp: hashOtp(otp),
+    otpExpires: Date.now() + OTP_TTL_MS,
+    otpAttempts: 0,
+    lastOtpAt: Date.now(),
     emailVerified: false,
     createdAt: Date.now(),
   };
@@ -92,17 +142,17 @@ export function handleVerifyEmail(req: Request, res: Response) {
   if (!email || !otp) {
     return res.status(400).json({ error: 'Vui lòng nhập email và mã OTP!' });
   }
-  const user = db.getUserByEmail(email.trim().toLowerCase());
-  // Generic error to avoid revealing whether the email is registered.
-  const GENERIC = 'Mã OTP không chính xác hoặc đã hết hạn!';
+  const user = db.getUserByEmail(normalizeEmail(email));
   if (!user) {
-    return res.status(400).json({ error: GENERIC });
+    return res.status(404).json({ error: 'Không tìm thấy tài khoản!' });
   }
-  if (!user.otp || user.otp !== String(otp).trim() || !user.otpExpires || Date.now() > user.otpExpires) {
-    return res.status(400).json({ error: GENERIC });
+  const otpError = verifyOtpForUser(user, otp);
+  if (otpError) {
+    return res.status(400).json({ error: otpError });
   }
   user.otp = undefined;
   user.otpExpires = undefined;
+  user.otpAttempts = 0;
   user.emailVerified = true;
   db.saveUser(user);
   const profile = db.getProfile(user.id);
@@ -128,13 +178,18 @@ export function handleResendOtp(req: Request, res: Response) {
   if (!email) {
     return res.status(400).json({ error: 'Vui lòng cung cấp email!' });
   }
-  const user = db.getUserByEmail(email.trim().toLowerCase());
+  const user = db.getUserByEmail(normalizeEmail(email));
   if (!user) {
     return res.status(400).json({ error: 'Không tìm thấy tài khoản!' });
   }
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  user.otp = otp;
-  user.otpExpires = Date.now() + 5 * 60 * 1000;
+  if (user.lastOtpAt && Date.now() - user.lastOtpAt < OTP_RESEND_MIN_MS) {
+    return res.status(429).json({ error: 'Vui lòng đợi 60 giây trước khi yêu cầu mã mới.' });
+  }
+  const otp = generateOtp();
+  user.otp = hashOtp(otp);
+  user.otpExpires = Date.now() + OTP_TTL_MS;
+  user.otpAttempts = 0;
+  user.lastOtpAt = Date.now();
   db.saveUser(user);
   res.json({ success: true, _debugOtp: isDev ? otp : undefined, message: 'Đã gửi lại mã OTP.' });
 }
@@ -279,14 +334,19 @@ export function handleForgotPassword(req: Request, res: Response) {
     return res.status(400).json({ error: 'Vui lòng cung cấp địa chỉ email!' });
   }
 
-  const user = db.getUserByEmail(email.trim());
+  const user = db.getUserByEmail(normalizeEmail(email));
   if (!user) {
     return res.status(404).json({ error: 'Không tìm thấy tài khoản nào liên kết với email này!' });
   }
+  if (user.lastOtpAt && Date.now() - user.lastOtpAt < OTP_RESEND_MIN_MS) {
+    return res.status(429).json({ error: 'Vui lòng đợi 60 giây trước khi yêu cầu mã mới.' });
+  }
 
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  user.otp = otp;
-  user.otpExpires = Date.now() + 5 * 60 * 1000;
+  const otp = generateOtp();
+  user.otp = hashOtp(otp);
+  user.otpExpires = Date.now() + OTP_TTL_MS;
+  user.otpAttempts = 0;
+  user.lastOtpAt = Date.now();
   db.saveUser(user);
 
   console.log(`\n==================================================================`);
@@ -306,17 +366,14 @@ export function handleResetPassword(req: Request, res: Response) {
     return res.status(400).json({ error: 'Vui lòng cung cấp đầy đủ email, mã OTP và mật khẩu mới!' });
   }
 
-  const user = db.getUserByEmail(email.trim());
+  const user = db.getUserByEmail(normalizeEmail(email));
   if (!user) {
     return res.status(404).json({ error: 'Không tìm thấy tài khoản!' });
   }
 
-  if (!user.otp || user.otp !== otp.trim()) {
-    return res.status(400).json({ error: 'Mã xác thực OTP không chính xác!' });
-  }
-
-  if (!user.otpExpires || Date.now() > user.otpExpires) {
-    return res.status(400).json({ error: 'Mã OTP đã hết hạn (hiệu lực trong 5 phút)!' });
+  const otpError = verifyOtpForUser(user, otp);
+  if (otpError) {
+    return res.status(400).json({ error: otpError });
   }
 
   const pwCheck = validatePassword(newPassword);
@@ -327,6 +384,7 @@ export function handleResetPassword(req: Request, res: Response) {
   user.passwordHash = hashPassword(newPassword);
   user.otp = undefined;
   user.otpExpires = undefined;
+  user.otpAttempts = 0;
   db.saveUser(user);
 
   res.json({
