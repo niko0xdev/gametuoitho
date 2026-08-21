@@ -5,8 +5,8 @@
 - **Stack**: React 19 + Vite 6 + Tailwind 4 (frontend) · Express + WebSocket + tsx (backend) · SQLite (via better-sqlite3 + drizzle-orm).
 - **Entry**: `server.ts` at repo root. Single command serves both API and SPA (`npm run dev`).
 - **Default port**: `3000` (override via `PORT` env var). Server boots a Vite dev server in middleware mode.
-- **DB**: SQLite file auto-created at `database.db` on first boot. Tables: `users`, `profiles`, `matches`, `tournaments`, `daily_challenges`, `bilac_players`, `bilac_matches`, `bilac_tournaments`, `bilac_tournament_members`, `my_leagues`, `league_permissions`.
-- **Seed**: Migration from legacy `database.json` runs on boot via `migrateFromJson()` in `server/db.ts`. Don't delete that JSON — keep as first-run seed.
+- **DB**: SQLite file auto-created at `database.db` on first boot (override via `DB_FILE` env; legacy seed JSON via `DB_FILE_JSON`). Tables: `users`, `profiles`, `matches`, `tournaments`, `daily_challenges`, `bilac_players`, `bilac_matches`, `bilac_tournaments`, `bilac_tournament_members`, `my_leagues`, `league_permissions`.
+- **Seed**: Migration from legacy `database.json` runs on boot via `migrateFromJson()` in `server/db.ts` (path overridable via `DB_FILE_JSON`). Don't delete that JSON — keep as first-run seed.
 - **LLM**: All AI routes call an OpenAI-compatible endpoint. Required env: `OPENAI_API_KEY`, `OPENAI_MODEL`. Optional `OPENAI_BASE_URL` (use for Ollama/Groq/Together). Default base URL is `https://api.openai.com/v1`.
 
 ## Runtime Conventions
@@ -20,7 +20,7 @@
 
 ### Env Loading
 - `server.ts` calls `dotenv.config({ path: '.env.local' })` then `dotenv.config()` fallback to `.env`. Both must keep existing keys.
-- Keep `.env.example` in sync with all documented vars (`OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL`, `APP_URL`).
+- Keep `.env.example` in sync with all documented vars (`OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL`, `APP_URL`, `DB_FILE`, `DB_FILE_JSON`).
 - **Never** commit real keys. `.env.local` is gitignored.
 
 ### Folder Layout
@@ -67,7 +67,7 @@
 
 ### Planned
 - [ ] Replace SHA-256 password hashing with bcrypt + per-user salt.
-- [ ] Move `database.db` to a configurable path (`DB_FILE` env).
+- [x] Move `database.db` to a configurable path (`DB_FILE` env) + legacy seed `DB_FILE_JSON`.
 - [ ] Migrate server test suite from `node:test` to vitest (worker already on vitest).
 
 ## Code Quality Gates
