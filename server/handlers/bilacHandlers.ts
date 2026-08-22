@@ -250,7 +250,7 @@ export function handleCreateBilacPlayer(req: Request, res: Response) {
   if (existing) {
     return res.status(400).json({ error: 'Tên người chơi đã tồn tại trong giải đấu này!' });
   }
-  const id = 'bl-' + Date.now();
+  const id = 'bl-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
   const avatar = `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(nameTrimmed)}`;
   const player = { id, name: nameTrimmed, avatar, tournamentId };
   db.saveBiLacPlayer(player);
@@ -369,7 +369,7 @@ export function handleCreateBilacMatch(req: Request, res: Response) {
   const benchedPlayerId: string | undefined = sittingOut?.id;
 
   const match = {
-    id: 'match-' + Date.now(),
+    id: 'match-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
     timestamp: Date.now(),
     weekLabel,
     team1,

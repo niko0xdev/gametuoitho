@@ -10,8 +10,8 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist database.json",
     "lint": "tsc --noEmit",
-    "test": "c8 --reporter=text --reporter=lcov --include='server/**/*.ts' --include='src/lib/**/*.ts' --exclude='**/*.test.ts' --exclude='server/roomManager.ts' --exclude='server/db.ts' npx tsx --test tests/**/*.test.ts",
-    "test:fast": "npx tsx --test tests/**/*.test.ts",
+    "test": "vitest run --coverage",
+    "test:fast": "vitest run",
     "dev:worker": "concurrently -k -n vite,worker -c blue,green \"vite\" \"cd worker && npx wrangler dev --local --port 8787\"",
     "deploy:worker": "cd worker && npx wrangler deploy",
     "db:migrate:local": "cd worker && npx wrangler d1 migrations apply gametuoitho-db --local",
@@ -38,6 +38,7 @@
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/ws": "^8.18.1",
+    "@vitest/coverage-v8": "^2.1.9",
     "autoprefixer": "^10.4.21",
     "c8": "^11.0.0",
     "concurrently": "^10.0.3",
@@ -46,6 +47,7 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "vitest": "^2.1.9"
   }
 }

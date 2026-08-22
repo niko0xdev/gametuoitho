@@ -1,4 +1,4 @@
-import { describe, it, before } from 'node:test';
+import { describe, it, beforeAll } from 'vitest';
 import assert from 'node:assert/strict';
 import { getApp, request } from './_bootstrap.ts';
 import { db } from '../server/db.ts';
@@ -6,7 +6,7 @@ import { tournamentManager } from '../server/tournamentManager.ts';
 import { dailyChallengeManager } from '../server/dailyChallengeManager.ts';
 import { RULE_ENGINES, caroEngine, coTuongEngine, coVuaEngine, oAnQuanEngine, coCaNguaEngine, duoiHinhBatChuEngine, noiChuEngine, doanTuEngine, speedMathEngine, numberPatternEngine, memoryMatchEngine, simonSaysEngine, reflexEngine, getChineseChessLegalMoves } from '../server/rules.ts';
 
-before(() => { getApp(); });
+beforeAll(() => { getApp(); });
 
 describe('tournamentManager', () => {
   it('createTournament and joinTournament', () => {

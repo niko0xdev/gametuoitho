@@ -1,10 +1,10 @@
-import { describe, it, before } from 'node:test';
+import { describe, it, beforeAll } from 'vitest';
 import assert from 'node:assert/strict';
 import { getApp, request } from './_bootstrap.ts';
 import { db, hashPassword } from '../server/db.ts';
 import { handleLogin, handleGoogleSso, handleQuickLogin } from '../server/handlers/authHandlers.ts';
 
-before(() => {
+beforeAll(() => {
   getApp(); // ensure server.ts ran
 });
 
@@ -55,7 +55,7 @@ describe('POST /api/auth/register', () => {
 });
 
 describe('POST /api/auth/login', () => {
-  before(() => {
+  beforeAll(() => {
     db.saveUser({
       id: 'u_login', username: 'loginuser', email: 'l@x.com',
       passwordHash: hashPassword('correct'), displayName: 'L', avatar: 'a', role: 'user',

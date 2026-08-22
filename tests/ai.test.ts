@@ -1,8 +1,8 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, beforeAll, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 import { getApp, request } from './_bootstrap.ts';
 
-before(() => {
+beforeAll(() => {
   getApp();
   process.env.OPENAI_API_KEY = 'test-key';
   process.env.OPENAI_MODEL = 'gpt-4o-mini';
