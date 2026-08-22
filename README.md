@@ -51,6 +51,6 @@ Kiến trúc production: Worker phục vụ `/api/*` (route trên apex zone, sam
 
 ## Ghi chú
 
-- DB production (D1) bắt đầu rỗng — không migrate từ `database.json` cũ.
+- DB production (D1) bắt đầu rỗng sau `worker/migrations/*` — không auto-migrate từ `database.json`; `server/db.ts#migrateFromJson`/`seedDefaults` chỉ chạy trên SQLite legacy (`npm run dev`). Muốn seed demo trên D1, insert thủ công via `wrangler d1 execute` / D1 console (dataset mẫu ở `server/db.ts#seedDefaults`) — xem [`docs/deploy-cloudflare.md`](docs/deploy-cloudflare.md).
 - Realtime dùng Durable Objects + WebSocket (không phải SSE).
 - AI gọi endpoint OpenAI-compatible (`OPENAI_BASE_URL`).

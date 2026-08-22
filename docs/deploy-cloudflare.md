@@ -87,6 +87,8 @@ npm run db:migrate:remote
 
 - [ ] **Xong khi**: hiện `🚣🚣🚣` / `✅ ... migrations applied`.
 
+> **Lưu ý seed:** D1 trống sau migrate (không auto-import `database.json`; `server/db.ts#migrateFromJson`/`seedDefaults` chỉ dành cho SQLite legacy `npm run dev`). Nếu cần dữ liệu demo trên D1 (3 users mẫu + giải Bi Lắc mặc định), insert thủ công bằng `npx wrangler d1 execute gametuoitho-db --remote --command "..."` hoặc D1 console — dataset mẫu ở `server/db.ts#seedDefaults`.
+
 Commit `database_id` (giờ là giá trị thật) lên repo:
 ```bash
 git add worker/wrangler.toml
