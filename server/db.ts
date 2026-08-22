@@ -620,6 +620,24 @@ class Database {
     return rows.map(row => this.toUserRecord(row));
   }
 
+  // Atomically reserve one OTP send for a UTC calendar day. Returning no row
+  // means the configured cap was already reached (or is zero).
+  tryIncrementDailyOtp(
+    date = new Date().toISOString().slice(0, 10),
+    cap = 80,
+  ): number | undefined {
+    const safeCap = Number.isFinite(cap) ? Math.max(0, Math.floor(cap)) : 80;
+    const row = sqliteDb.prepare(`
+      INSERT INTO daily_counters (date, otp_sends)
+      SELECT ?, 1
+      WHERE ? >= 1
+      ON CONFLICT(date) DO UPDATE SET otp_sends = otp_sends + 1
+      WHERE otp_sends < ?
+      RETURNING otp_sends
+    `).get(date, safeCap, safeCap) as { otp_sends: number } | undefined;
+    return row?.otp_sends;
+  }
+
   // Profiles
   getProfile(userId: string): UserProfile | undefined {
     const row = drizzleDb.select().from(profilesTable).where(eq(profilesTable.id, userId)).get();
