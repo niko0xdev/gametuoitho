@@ -1,13 +1,42 @@
 import { describe, it, beforeAll } from 'vitest';
 import assert from 'node:assert/strict';
 import { getApp, request } from './_bootstrap.ts';
-import { db, hashPassword } from '../server/db.ts';
+import { db, SQLITE_FILE } from '../server/db.ts';
 import { hashOtp, OTP_MAX_ATTEMPTS } from '../server/handlers/authHandlers.ts';
+import Database from 'better-sqlite3';
 
 beforeAll(() => { getApp(); });
 
 function uniq(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function todayUtcKey(): string { return new Date().toISOString().slice(0, 10); }
+
+function deleteTodayCounter(): void {
+  const key = todayUtcKey();
+  try {
+    const raw = new Database(SQLITE_FILE);
+    raw.exec(`DELETE FROM daily_counters WHERE date = '${key.replace(/'/g, "''")}'`);
+    raw.close();
+  } catch {}
+}
+
+function deleteCounter(date: string): void {
+  try {
+    const raw = new Database(SQLITE_FILE);
+    raw.exec(`DELETE FROM daily_counters WHERE date = '${date.replace(/'/g, "''")}'`);
+    raw.close();
+  } catch {}
+}
+
+function readDailyCount(date = todayUtcKey()): number | undefined {
+  try {
+    const raw = new Database(SQLITE_FILE);
+    const r = raw.prepare('SELECT otp_sends FROM daily_counters WHERE date = ?').get(date) as any;
+    raw.close();
+    return r?.otp_sends as number | undefined;
+  } catch { return undefined; }
 }
 
 // (a) Case-insensitive forgot/reset
@@ -182,5 +211,264 @@ describe('Batch 3: resend/forgot cooldown', () => {
     const ok = await request(getApp()).post('/api/auth/forgot-password', { email });
     assert.equal(ok.status, 200);
     assert.ok(ok.body._debugOtp);
+  });
+});
+
+// (d) Batch 6: Express OTP daily cap parity (server/db.ts + OTP_DAILY_CAP)
+describe('Batch 6: dailyCounters helper + issuance parity', () => {
+  const OTHER_DAY = '2099-12-31';
+
+  it('tryIncrementDailyOtp is atomic, cap-fenced, and uses explicit UTC date keys', () => {
+    const d1 = '2099-01-02';
+    const d2 = '2099-01-03';
+    deleteCounter(d1);
+    deleteCounter(d2);
+    try {
+      assert.equal(db.tryIncrementDailyOtp(d1, 2), 1);
+      assert.equal(readDailyCount(d1), 1);
+      assert.equal(db.tryIncrementDailyOtp(d1, 2), 2);
+      assert.equal(readDailyCount(d1), 2);
+      // At cap → no row
+      assert.equal(db.tryIncrementDailyOtp(d1, 2), undefined);
+      assert.equal(readDailyCount(d1), 2);
+      // Different date is independent
+      assert.equal(db.tryIncrementDailyOtp(d2, 2), 1);
+      assert.equal(readDailyCount(d2), 1);
+      // Raising the cap for the same d1 allows one more, which is the cap-parity contract:
+      // capping is per call, not per row-creation.
+      assert.equal(db.tryIncrementDailyOtp(d1, 80), 3);
+      assert.equal(readDailyCount(d1), 3);
+      // cap 0 never creates a row
+      const d3 = '2099-01-04';
+      deleteCounter(d3);
+      assert.equal(db.tryIncrementDailyOtp(d3, 0), undefined);
+      assert.equal(readDailyCount(d3), undefined);
+    } finally {
+      deleteCounter(d1);
+      deleteCounter(d2);
+      deleteCounter('2099-01-04');
+    }
+  });
+
+  it('default UTC-day key: tryIncrementDailyOtp() uses today without explicit date', () => {
+    deleteTodayCounter();
+    try {
+      const v = db.tryIncrementDailyOtp(undefined, 2);
+      assert.equal(v, 1);
+      assert.equal(readDailyCount(todayUtcKey()), 1);
+    } finally {
+      deleteTodayCounter();
+    }
+  });
+
+  it('boundary OTP_DAILY_CAP=2: 2 issues succeed, 3rd (register) gets 429 and creates no user', async () => {
+    const prev = process.env.OTP_DAILY_CAP;
+    deleteTodayCounter();
+    process.env.OTP_DAILY_CAP = '2';
+    try {
+      const mk = (s: string) => `${s}_${uniq('capR')}`;
+      const u1 = mk('u'), e1 = `${u1}@x.com`;
+      const r1 = await request(getApp()).post('/api/auth/register', { username: u1, password: 'Str0ngpw1', email: e1, displayName: 'R1' });
+      assert.equal(r1.status, 200);
+      assert.equal(readDailyCount(), 1);
+
+      const u2 = mk('u2'), e2 = `${u2}@x.com`;
+      const r2 = await request(getApp()).post('/api/auth/register', { username: u2, password: 'Str0ngpw1', email: e2, displayName: 'R2' });
+      assert.equal(r2.status, 200);
+      assert.equal(readDailyCount(), 2);
+
+      const u3 = mk('u3'), e3 = `${u3}@x.com`;
+      const before = readDailyCount();
+      const r3 = await request(getApp()).post('/api/auth/register', { username: u3, password: 'Str0ngpw1', email: e3, displayName: 'R3' });
+      assert.equal(r3.status, 429);
+      assert.match(r3.body.error, /quá nhiều mã OTP/i);
+      assert.equal(readDailyCount(), before, 'cap should not advance on 429');
+      assert.equal(db.getUserByEmail(e3), undefined, 'over-cap register must not create a user');
+      assert.equal(db.getUserByUsername(u3), undefined);
+    } finally {
+      if (prev === undefined) delete (process.env as any).OTP_DAILY_CAP; else process.env.OTP_DAILY_CAP = prev;
+      deleteTodayCounter();
+    }
+  });
+
+  it('resend-otp counts toward the same cap and 429 leaves OTP state unchanged', async () => {
+    const prev = process.env.OTP_DAILY_CAP;
+    deleteTodayCounter();
+    process.env.OTP_DAILY_CAP = '2';
+    try {
+      const u = uniq('capRe');
+      const email = `${u}@x.com`;
+      const reg = await request(getApp()).post('/api/auth/register', { username: u, password: 'Str0ngpw1', email, displayName: 'Re' });
+      assert.equal(reg.status, 200);
+      assert.equal(readDailyCount(), 1);
+      // bypass cooldown for the second success
+      const user = db.getUserByEmail(email)!;
+      user.lastOtpAt = 0;
+      db.saveUser(user);
+      const r1 = await request(getApp()).post('/api/auth/resend-otp', { email });
+      assert.equal(r1.status, 200);
+      assert.equal(readDailyCount(), 2);
+      // Next resend (after cooldown) should be cap-blocked and must not mutate OTP state
+      const snap = db.getUserByEmail(email)!;
+      snap.lastOtpAt = 0;
+      db.saveUser(snap);
+      const before = db.getUserByEmail(email)!;
+      const otpBefore = before.otp;
+      const expBefore = before.otpExpires;
+      const attBefore = before.otpAttempts;
+      const lastBefore = before.lastOtpAt;
+      const r2 = await request(getApp()).post('/api/auth/resend-otp', { email });
+      assert.equal(r2.status, 429);
+      assert.match(r2.body.error, /quá nhiều mã OTP/i);
+      const after = db.getUserByEmail(email)!;
+      assert.equal(after.otp, otpBefore);
+      assert.equal(after.otpExpires, expBefore);
+      assert.equal(after.otpAttempts, attBefore);
+      assert.equal(after.lastOtpAt, lastBefore);
+    } finally {
+      if (prev === undefined) delete (process.env as any).OTP_DAILY_CAP; else process.env.OTP_DAILY_CAP = prev;
+      deleteTodayCounter();
+    }
+  });
+
+  it('forgot-password counts toward the same cap and 429 leaves OTP state unchanged', async () => {
+    const prev = process.env.OTP_DAILY_CAP;
+    deleteTodayCounter();
+    process.env.OTP_DAILY_CAP = '2';
+    try {
+      const u = uniq('capFp');
+      const email = `${u}@x.com`;
+      const reg = await request(getApp()).post('/api/auth/register', { username: u, password: 'Str0ngpw1', email, displayName: 'Fp' });
+      assert.equal(reg.status, 200);
+      await request(getApp()).post('/api/auth/verify-email', { email, otp: reg.body._debugOtp });
+      const holder = db.getUserByEmail(email)!;
+      holder.lastOtpAt = 0;
+      db.saveUser(holder);
+      assert.equal(readDailyCount(), 1);
+      const f1 = await request(getApp()).post('/api/auth/forgot-password', { email });
+      assert.equal(f1.status, 200);
+      assert.equal(readDailyCount(), 2);
+      const locked = db.getUserByEmail(email)!;
+      locked.lastOtpAt = 0;
+      db.saveUser(locked);
+      const before = db.getUserByEmail(email)!;
+      const otpBefore = before.otp;
+      const expBefore = before.otpExpires;
+      const attBefore = before.otpAttempts;
+      const lastBefore = before.lastOtpAt;
+      const f2 = await request(getApp()).post('/api/auth/forgot-password', { email });
+      assert.equal(f2.status, 429);
+      assert.match(f2.body.error, /quá nhiều mã OTP/i);
+      const after = db.getUserByEmail(email)!;
+      assert.equal(after.otp, otpBefore);
+      assert.equal(after.otpExpires, expBefore);
+      assert.equal(after.otpAttempts, attBefore);
+      assert.equal(after.lastOtpAt, lastBefore);
+    } finally {
+      if (prev === undefined) delete (process.env as any).OTP_DAILY_CAP; else process.env.OTP_DAILY_CAP = prev;
+      deleteTodayCounter();
+    }
+  });
+
+  it('invalid/duplicate/unknown/cooldown requests do not consume a slot', async () => {
+    const prev = process.env.OTP_DAILY_CAP;
+    deleteTodayCounter();
+    process.env.OTP_DAILY_CAP = '2';
+    try {
+      // Seed one slot used
+      const seedU = uniq('capInv0');
+      const seedE = `${seedU}@x.com`;
+      const seed = await request(getApp()).post('/api/auth/register', { username: seedU, password: 'Str0ngpw1', email: seedE, displayName: 'S' });
+      assert.equal(seed.status, 200);
+      assert.equal(readDailyCount(), 1);
+
+      // Invalid register (missing email) → 400, no increment
+      const bad = await request(getApp()).post('/api/auth/register', { username: uniq('bad'), password: 'Str0ngpw1', displayName: 'X' } as any);
+      assert.equal(bad.status, 400);
+      assert.equal(readDailyCount(), 1);
+
+      // Duplicate email → 400, no increment
+      const dup = await request(getApp()).post('/api/auth/register', { username: uniq('dup'), password: 'Str0ngpw1', email: seedE, displayName: 'D' });
+      assert.equal(dup.status, 400);
+      assert.equal(readDailyCount(), 1);
+
+      // Cooldown-blocked resend → 429 (cooldown message), no increment
+      const tooSoon = await request(getApp()).post('/api/auth/resend-otp', { email: seedE });
+      assert.equal(tooSoon.status, 429);
+      assert.match(tooSoon.body.error, /60 giây/i);
+      assert.equal(readDailyCount(), 1);
+
+      // Unknown forgot → 404, no increment
+      const unk = await request(getApp()).post('/api/auth/forgot-password', { email: `no_${uniq('u')}@x.com` });
+      assert.equal(unk.status, 404);
+      assert.equal(readDailyCount(), 1);
+
+      // Verification (not an issuance) must never consume
+      const v = await request(getApp()).post('/api/auth/verify-email', { email: seedE, otp: seed.body._debugOtp });
+      assert.ok([200, 400].includes(v.status));
+      assert.equal(readDailyCount(), 1);
+    } finally {
+      if (prev === undefined) delete (process.env as any).OTP_DAILY_CAP; else process.env.OTP_DAILY_CAP = prev;
+      deleteTodayCounter();
+    }
+  });
+
+  it('cap 0 blocks every issuance with cap message', async () => {
+    const prev = process.env.OTP_DAILY_CAP;
+    deleteTodayCounter();
+    process.env.OTP_DAILY_CAP = '0';
+    try {
+      const u = uniq('cap0');
+      const e = `${u}@x.com`;
+      const r = await request(getApp()).post('/api/auth/register', { username: u, password: 'Str0ngpw1', email: e, displayName: 'Z' });
+      assert.equal(r.status, 429);
+      assert.match(r.body.error, /quá nhiều mã OTP/i);
+      assert.equal(db.getUserByEmail(e), undefined);
+    } finally {
+      if (prev === undefined) delete (process.env as any).OTP_DAILY_CAP; else process.env.OTP_DAILY_CAP = prev;
+      deleteTodayCounter();
+    }
+  });
+
+  it('reset-password (OTP consumption) does not consume a slot', async () => {
+    const prev = process.env.OTP_DAILY_CAP;
+    deleteTodayCounter();
+    process.env.OTP_DAILY_CAP = '3';
+    try {
+      const u = uniq('capRst');
+      const e = `${u}@x.com`;
+      const reg = await request(getApp()).post('/api/auth/register', { username: u, password: 'Str0ngpw1', email: e, displayName: 'Rst' });
+      assert.equal(reg.status, 200);
+      await request(getApp()).post('/api/auth/verify-email', { email: e, otp: reg.body._debugOtp });
+      const holder = db.getUserByEmail(e)!;
+      holder.lastOtpAt = 0;
+      db.saveUser(holder);
+      const fp = await request(getApp()).post('/api/auth/forgot-password', { email: e });
+      assert.equal(fp.status, 200);
+      const before = readDailyCount();
+      // wrong reset still should not consume (consumption path, not issuance)
+      const bad = await request(getApp()).post('/api/auth/reset-password', { email: e, otp: '000000', newPassword: 'Str0ngpw2' });
+      assert.equal(bad.status, 400);
+      assert.equal(readDailyCount(), before);
+      const ok = await request(getApp()).post('/api/auth/reset-password', { email: e, otp: fp.body._debugOtp, newPassword: 'Str0ngpw2' });
+      assert.equal(ok.status, 200);
+      assert.equal(readDailyCount(), before, 'successful reset must not consume a slot');
+    } finally {
+      if (prev === undefined) delete (process.env as any).OTP_DAILY_CAP; else process.env.OTP_DAILY_CAP = prev;
+      deleteTodayCounter();
+    }
+  });
+
+  it('isolation helper: other UTC day does not affect today', () => {
+    deleteCounter(OTHER_DAY);
+    try {
+      assert.equal(db.tryIncrementDailyOtp(OTHER_DAY, 5), 1);
+      assert.equal(readDailyCount(OTHER_DAY), 1);
+      // today counter should still be whatever batch cleanup leaves; OTHER_DAY isolation is what we assert
+      deleteCounter(OTHER_DAY);
+      assert.equal(readDailyCount(OTHER_DAY), undefined);
+    } finally {
+      deleteCounter(OTHER_DAY);
+    }
   });
 });

@@ -12,6 +12,21 @@ const isDev = process.env.NODE_ENV !== 'production';
 export const OTP_TTL_MS = 10 * 60 * 1000;
 export const OTP_RESEND_MIN_MS = 60 * 1000;
 export const OTP_MAX_ATTEMPTS = 5;
+const OTP_DAILY_CAP_DEFAULT = 80;
+const OTP_DAILY_CAP_ERROR = 'Hệ thống đã gửi quá nhiều mã OTP hôm nay. Vui lòng thử lại sau.';
+
+function getOtpDailyCap(): number {
+  const configured = process.env.OTP_DAILY_CAP;
+  if (configured === undefined) return OTP_DAILY_CAP_DEFAULT;
+  const parsed = Number(configured);
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : OTP_DAILY_CAP_DEFAULT;
+}
+
+function reserveOtpSend(res: Response): boolean {
+  if (db.tryIncrementDailyOtp(undefined, getOtpDailyCap()) !== undefined) return true;
+  res.status(429).json({ error: OTP_DAILY_CAP_ERROR });
+  return false;
+}
 
 export function hashOtp(otp: string): string {
   return crypto.createHash('sha256').update(String(otp).trim()).digest('hex');
@@ -75,6 +90,7 @@ export function handleRegister(req: Request, res: Response) {
   if (db.getUserByEmail(trimmedEmail)) {
     return res.status(400).json({ error: 'Email này đã được đăng ký!' });
   }
+  if (!reserveOtpSend(res)) return;
 
   const userId = 'user_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
   const passwordHash = hashPassword(password);
@@ -185,6 +201,7 @@ export function handleResendOtp(req: Request, res: Response) {
   if (user.lastOtpAt && Date.now() - user.lastOtpAt < OTP_RESEND_MIN_MS) {
     return res.status(429).json({ error: 'Vui lòng đợi 60 giây trước khi yêu cầu mã mới.' });
   }
+  if (!reserveOtpSend(res)) return;
   const otp = generateOtp();
   user.otp = hashOtp(otp);
   user.otpExpires = Date.now() + OTP_TTL_MS;
@@ -341,6 +358,7 @@ export function handleForgotPassword(req: Request, res: Response) {
   if (user.lastOtpAt && Date.now() - user.lastOtpAt < OTP_RESEND_MIN_MS) {
     return res.status(429).json({ error: 'Vui lòng đợi 60 giây trước khi yêu cầu mã mới.' });
   }
+  if (!reserveOtpSend(res)) return;
 
   const otp = generateOtp();
   user.otp = hashOtp(otp);
