@@ -3,7 +3,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/**/*.test.ts', 'server/**/*.test.ts'],
     // coTuongCheck is a standalone console script, not a vitest suite — run via `npx tsx`
     exclude: ['tests/coTuongCheck.test.ts'],
     // Single fork, sequential files: suites share a temp SQLite file via

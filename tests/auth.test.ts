@@ -135,7 +135,7 @@ describe('POST /api/auth/google-sso', () => {
   });
 });
 
-describe('Direct handler invocation (c8 instrumentation)', () => {
+describe('Direct handler invocation (coverage instrumentation)', () => {
   function makeRes() {
     const r: any = { statusCode: 200, body: null };
     r.status = (c: number) => { r.statusCode = c; return r; };
