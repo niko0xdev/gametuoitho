@@ -6,7 +6,7 @@
 - **Entry**: `server.ts` at repo root. Single command serves both API and SPA (`npm run dev`).
 - **Default port**: `3000` (override via `PORT` env var). Server boots a Vite dev server in middleware mode.
 - **DB**: SQLite file auto-created at `database.db` on first boot (override via `DB_FILE` env; legacy seed JSON via `DB_FILE_JSON`). Tables: `users`, `profiles`, `matches`, `tournaments`, `daily_challenges`, `bilac_players`, `bilac_matches`, `bilac_tournaments`, `bilac_tournament_members`, `my_leagues`, `league_permissions`.
-- **Seed**: Migration from legacy `database.json` runs on boot via `migrateFromJson()` in `server/db.ts` (path overridable via `DB_FILE_JSON`). Don't delete that JSON — keep as first-run seed.
+- **Seed**: Migration from legacy `database.json` runs on boot via `migrateFromJson()` in `server/db.ts` (path overridable via `DB_FILE_JSON`). Don't delete that JSON — keep as first-run seed for legacy `npm run dev`. D1 (production) starts empty after `worker/migrations/*`; `migrateFromJson`/`seedDefaults` are not ported — see Cloudflare deploy note below.
 - **LLM**: All AI routes call an OpenAI-compatible endpoint. Required env: `OPENAI_API_KEY`, `OPENAI_MODEL`. Optional `OPENAI_BASE_URL` (use for Ollama/Groq/Together). Default base URL is `https://api.openai.com/v1`.
 
 ## Runtime Conventions
@@ -118,7 +118,7 @@ Non-negotiables:
 - Local dev modes:
   - `npm run dev` — legacy Express + better-sqlite3 (offline).
   - `npm run dev:worker` — Vite frontend + wrangler dev with local D1 (production-like).
-- Migrate data manually if moving from SQLite to D1 — `migrateFromJson` is not ported.
+- Seeding: D1 starts empty after `worker/migrations/*`; `migrateFromJson`/`seedDefaults` (`server/db.ts`) are not ported. To seed demo data on D1, insert via `wrangler d1 execute` / D1 console (canonical demo rows live in `server/db.ts#seedDefaults`). For legacy SQLite, `migrateFromJson()` auto-imports `database.json` then `seedDefaults()` on first boot.
 
 ## Realtime architecture (Durable Objects)
 
