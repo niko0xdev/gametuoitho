@@ -1,8 +1,8 @@
-import { describe, it, before } from 'node:test';
+import { describe, it, beforeAll } from 'vitest';
 import assert from 'node:assert/strict';
 import { getApp, request } from './_bootstrap.ts';
 
-before(() => { getApp(); });
+beforeAll(() => { getApp(); });
 
 const uniq = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 

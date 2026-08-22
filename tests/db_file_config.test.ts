@@ -2,13 +2,13 @@
 // Contract: server/db.ts must respect env overrides and initDb must create
 // the expected tables regardless of the underlying file path.
 // See server/db.ts:35-36, CLAUDE.md Project Snapshot DB bullet, .env.example.
-import { describe, it, before } from 'node:test';
+import { describe, it, beforeAll } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { getApp } from './_bootstrap.ts';
 
-before(() => { getApp(); });
+beforeAll(() => { getApp(); });
 
 describe('DB_FILE configurable path', () => {
   it('bootstrap wired process.env.DB_FILE to a temp file', () => {

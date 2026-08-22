@@ -1,9 +1,9 @@
-import { describe, it, before } from 'node:test';
+import { describe, it, beforeAll } from 'vitest';
 import assert from 'node:assert/strict';
 import { getApp } from './_bootstrap.ts';
 import { db } from '../server/db.ts';
 
-before(() => { getApp(); });
+beforeAll(() => { getApp(); });
 
 describe('daily_challenges composite PK parity (Batch 1)', () => {
   it('RED: two challenges on same date with different gameId both persist', () => {

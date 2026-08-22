@@ -1,9 +1,9 @@
-import { describe, it, before } from 'node:test';
+import { describe, it, beforeAll } from 'vitest';
 import assert from 'node:assert/strict';
 import { getApp, request } from './_bootstrap.ts';
 import { db } from '../server/db.ts';
 
-before(() => { getApp(); });
+beforeAll(() => { getApp(); });
 
 describe('GET /api/replays/:userId', () => {
   it('returns ended matches of user', async () => {

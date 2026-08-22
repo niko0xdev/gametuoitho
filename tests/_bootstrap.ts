@@ -25,10 +25,10 @@ process.on('exit', () => {
 
 // Use dynamic import to ensure env vars are set BEFORE the linked server.ts runs.
 await import('../server.ts');
-import { after as nodeAfter } from 'node:test';
+import { afterAll } from 'vitest';
 
 // Close the shared HTTP server after all tests in this file complete so the worker can exit.
-nodeAfter(async () => {
+afterAll(async () => {
   await closeServer();
 });
 

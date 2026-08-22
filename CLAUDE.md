@@ -68,7 +68,7 @@
 ### Planned
 - [ ] Replace SHA-256 password hashing with bcrypt + per-user salt.
 - [x] Move `database.db` to a configurable path (`DB_FILE` env) + legacy seed `DB_FILE_JSON`.
-- [ ] Migrate server test suite from `node:test` to vitest (worker already on vitest).
+- [x] Migrate server test suite from `node:test` to vitest (worker already on vitest).
 
 ## Code Quality Gates
 
