@@ -10,13 +10,19 @@ export interface PairResult<P extends Player> {
 
 export type Rng = () => number;
 
+export interface PairingHistory {
+  timestamp: number;
+  team1: string[];
+  team2: string[];
+}
+
 const defaultRng: Rng = Math.random;
 
-// Random thuần: xáo trộn Fisher-Yates đều rồi chia xen kẽ — KHÔNG đọc
-// ELO / bảng xếp hạng tuần, không cân bằng trình độ. Thứ tự input bị bỏ qua.
+// Shuffle without skill weighting; four players cannot repeat their latest pairing.
 export function pairPlayers<P extends Player>(
   players: readonly P[],
-  rng: Rng = defaultRng
+  rng: Rng = defaultRng,
+  history: readonly PairingHistory[] = []
 ): PairResult<P> {
   const n = players.length;
   if (n < 2) {
@@ -38,6 +44,24 @@ export function pairPlayers<P extends Player>(
   const teamA: P[] = [];
   const teamB: P[] = [];
   shuffled.forEach((p, i) => (i % 2 === 0 ? teamA.push(p) : teamB.push(p)));
+
+  if (n === 4) {
+    const rosterKey = (ids: string[]) => JSON.stringify([...ids].sort());
+    const selectedKey = rosterKey(players.map(p => p.id));
+    const previous = history
+      .filter(m => m.team1.length === 2 && m.team2.length === 2
+        && rosterKey([...m.team1, ...m.team2]) === selectedKey)
+      .reduce<PairingHistory | undefined>((latest, m) =>
+        !latest || m.timestamp > latest.timestamp ? m : latest, undefined);
+    if (previous) {
+      const teamKey = rosterKey(teamA.map(p => p.id));
+      if (teamKey === rosterKey(previous.team1) || teamKey === rosterKey(previous.team2)) {
+        // Either swap produces one of the two remaining partitions, with equal odds.
+        const swapIndex = Math.floor(rng() * 2);
+        [teamA[1], teamB[swapIndex]] = [teamB[swapIndex], teamA[1]];
+      }
+    }
+  }
 
   return { teamA, teamB, sittingOut };
 }

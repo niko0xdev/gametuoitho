@@ -384,8 +384,14 @@ bilacRoute.post('/matches', checkAccess, async (c: any) => {
 
   const interval = getBiLacWeeklyInterval(new Date());
 
-  // Chia đội random thuần — không đọc ELO / bảng xếp hạng tuần.
-  const { teamA, teamB, sittingOut } = pairPlayers(selected.map((p: any) => ({ id: p.id })));
+  // Read persisted history so the exclusion also survives reloads.
+  const historyRows = selected.length === 4
+    ? await db.select().from(bilacMatchesTable).where(eq(bilacMatchesTable.tournamentId, tournamentId)).all()
+    : [];
+  const history = historyRows.map(serializeMatch);
+  const { teamA, teamB, sittingOut } = pairPlayers(
+    selected.map((p: any) => ({ id: p.id })), undefined, history,
+  );
   const t1 = teamA.map(p => p.id);
   const t2 = teamB.map(p => p.id);
   const benched: string | undefined = sittingOut?.id;

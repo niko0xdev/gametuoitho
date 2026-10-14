@@ -362,8 +362,13 @@ export function handleCreateBilacMatch(req: Request, res: Response) {
   const interval = getBiLacWeeklyInterval(now);
   const weekLabel = interval.label;
 
-  // Chia đội random thuần — không đọc ELO / bảng xếp hạng tuần.
-  const { teamA, teamB, sittingOut } = pairPlayers(selectedPlayers.map(p => ({ id: p.id })));
+  // Read persisted history so the exclusion also survives reloads.
+  const history = selectedPlayers.length === 4
+    ? db.getAllBiLacMatches().filter(m => m.tournamentId === tournamentId)
+    : [];
+  const { teamA, teamB, sittingOut } = pairPlayers(
+    selectedPlayers.map(p => ({ id: p.id })), undefined, history,
+  );
   const team1 = teamA.map(p => p.id);
   const team2 = teamB.map(p => p.id);
   const benchedPlayerId: string | undefined = sittingOut?.id;
