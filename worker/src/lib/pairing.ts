@@ -54,8 +54,13 @@ export function pairPlayers<P extends Player>(
         && rosterKey([...m.team1, ...m.team2, ...(m.benched ? [m.benched] : [])]) === selectedKey)
       .reduce<PairingHistory | undefined>((latest, m) =>
         !latest || m.timestamp > latest.timestamp ? m : latest, undefined);
-    if (previous) {
+    const latestMatch = history.reduce<PairingHistory | undefined>((latest, m) =>
+      !latest || m.timestamp > latest.timestamp ? m : latest, undefined);
+    const protectedReserve = n % 2 === 1 ? latestMatch?.benched : null;
+    if (previous || protectedReserve) {
       const repeats = (result: PairResult<P>) => {
+        if (protectedReserve && result.sittingOut?.id === protectedReserve) return true;
+        if (!previous) return false;
         const teamKey = rosterKey(result.teamA.map(p => p.id));
         return (result.sittingOut?.id ?? null) === (previous.benched ?? null)
           && (teamKey === rosterKey(previous.team1) || teamKey === rosterKey(previous.team2));
@@ -69,7 +74,11 @@ export function pairPlayers<P extends Player>(
         // Bound retries even for a stuck RNG. For 3 players, swap the reserve;
         // swapping the two solo teams would only reverse their colours.
         if (result.sittingOut) {
-          [result.teamA[0], result.sittingOut] = [result.sittingOut, result.teamA[0]];
+          const replacement = [...result.teamA, ...result.teamB].find(p =>
+            p.id !== protectedReserve && p.id !== previous?.benched)!;
+          const team = result.teamA.includes(replacement) ? result.teamA : result.teamB;
+          const index = team.indexOf(replacement);
+          [team[index], result.sittingOut] = [result.sittingOut, team[index]];
         } else {
           [result.teamA[0], result.teamB[0]] = [result.teamB[0], result.teamA[0]];
         }
