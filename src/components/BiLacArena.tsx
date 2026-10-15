@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { BiLacPlayer, BiLacMatch, UserProfile } from '../types';
 import { UserSearchInput, type UserSearchResult } from './UserSearchInput';
+import { createLatestRequestGate } from '../lib/latestRequest';
 
 // ponytail: donate hidden until ready — flip to true to re-enable widget + modal
 const DONATE_ENABLED = false;
@@ -78,6 +79,8 @@ export default function BiLacArena({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [viewOnlyData, setViewOnlyData] = useState<any | null>(null);
+  const [viewOnlyRefreshKey, setViewOnlyRefreshKey] = useState(0);
+  const viewOnlyScopeRef = useRef<string | null>(null);
   const [viewOnlyError, setViewOnlyError] = useState<string | null>(null);
   // Guest passcode gate: non-members must enter the tournament passcode each
   // session. Valid code is cached in localStorage (bilac_guest_code_<slug>) so
@@ -105,6 +108,14 @@ export default function BiLacArena({
   // Không auto-restore currentTournament từ localStorage — reload trang sẽ đưa user
   // về portal list (luồng rõ ràng) thay vì tự động vào lại tour cũ.
   const [currentTournament, setCurrentTournament] = useState<{ id: string; name: string; description?: string } | null>(null);
+  const activeTournamentIdRef = useRef<string | null>(null);
+  activeTournamentIdRef.current = currentTournament?.id ?? null;
+  const activeUserIdRef = useRef<string | null>(null);
+  activeUserIdRef.current = loggedInUserId || localStorage.getItem('auth_userId');
+  const portalRequestGateRef = useRef(createLatestRequestGate());
+  const dataRequestGateRef = useRef(createLatestRequestGate());
+  const membersRequestGateRef = useRef(createLatestRequestGate());
+  const latestDataLoadRef = useRef(0);
   const [lastVisitedTournament, setLastVisitedTournament] = useState<{ id: string; name: string } | null>(() => {
     try {
       const raw = localStorage.getItem('bilac_tournament');
@@ -205,21 +216,32 @@ export default function BiLacArena({
       'x-tournament-code': code,
     };
     if (effectiveUserId) headers['x-user-id'] = effectiveUserId;
-    return fetch(url, { ...options, headers });
+    // The response for a write can arrive after a previous GET. Invalidate that
+    // GET both before and after the mutation so it cannot restore stale UI.
+    const isWrite = (options.method ?? 'GET').toUpperCase() !== 'GET';
+    if (isWrite) dataRequestGateRef.current.invalidate();
+    try {
+      return await fetch(url, { ...options, cache: 'no-store', headers });
+    } finally {
+      if (isWrite) dataRequestGateRef.current.invalidate();
+    }
   };
 
   // Fetch all tournaments for the portal
   const fetchTournaments = async () => {
+    const userId = activeUserIdRef.current;
+    const token = portalRequestGateRef.current.begin();
     try {
       const res = await bilacFetch('/api/bilac/tournaments');
       if (res.ok) {
         const data = await res.json();
+        if (!portalRequestGateRef.current.isCurrent(token) || activeUserIdRef.current !== userId) return;
         setAllTournaments(data);
         // Cross-check cached myTournaments against the API result so cards for tours
         // the current user no longer has access to (removed by owner, or never a member)
         // don't leak from localStorage.
         setMyTournaments(prev => {
-          const allowedIds = new Set(data.map((d: any) => d.id));
+          const allowedIds = new Set(data.filter((d: any) => d.isMember).map((d: any) => d.id));
           const filtered = prev.filter(t => allowedIds.has(t.id));
           if (filtered.length !== prev.length) {
             localStorage.setItem('bilac_my_tournaments', JSON.stringify(filtered));
@@ -236,46 +258,66 @@ export default function BiLacArena({
   };
 
   // Load players and matches on mount
-  const fetchData = async () => {
+  const fetchData = async (signal?: AbortSignal) => {
     if (!currentTournament) return;
+    const tournamentId = currentTournament.id;
+    const requestToken = dataRequestGateRef.current.begin();
+    const loadToken = ++latestDataLoadRef.current;
+    const isCurrent = () => !signal?.aborted
+      && activeTournamentIdRef.current === tournamentId
+      && dataRequestGateRef.current.isCurrent(requestToken);
     setLoading(true);
     setError(null);
     try {
       const [resPlayers, resMatches] = await Promise.all([
-        bilacFetch('/api/bilac/players'),
-        bilacFetch('/api/bilac/matches')
+        bilacFetch('/api/bilac/players', { signal }),
+        bilacFetch('/api/bilac/matches', { signal })
       ]);
       if (resPlayers.ok && resMatches.ok) {
         const pData = await resPlayers.json();
         const mData = await resMatches.json();
+        if (!isCurrent()) return;
         setPlayers(pData);
         setMatches(mData.sort((a: BiLacMatch, b: BiLacMatch) => b.timestamp - a.timestamp));
       } else {
         const errPlayers = await resPlayers.json().catch(() => ({}));
         const errMatches = await resMatches.json().catch(() => ({}));
+        if (!isCurrent()) return;
         setError(errPlayers.error || errMatches.error || 'Mã truy cập giải đấu đã hết hạn hoặc không chính xác!');
         if (resPlayers.status === 401 || resPlayers.status === 403) {
           handleLogoutTournament();
         }
       }
     } catch (e) {
+      if (!isCurrent()) return;
       console.error('Lỗi khi tải dữ liệu Bi Lắc:', e);
       setError('Lỗi kết nối máy chủ!');
     } finally {
-      setLoading(false);
+      if (latestDataLoadRef.current === loadToken && activeTournamentIdRef.current === tournamentId) {
+        setLoading(false);
+      }
     }
   };
 
   // Fetch members of the current tournament (any member can read).
   const fetchMembers = async () => {
     if (!currentTournament) return;
+    const tournamentId = currentTournament.id;
+    const token = membersRequestGateRef.current.begin();
+    const isCurrent = () => activeTournamentIdRef.current === tournamentId
+      && membersRequestGateRef.current.isCurrent(token);
     try {
       const res = await bilacFetch('/api/bilac/tournaments/members');
       if (res.ok) {
         const data = await res.json();
+        if (!isCurrent()) return;
         setMembers(data.members || []);
-        const me = (data.members || []).find((m: any) => m.userId === loggedInUserId);
+        const effectiveUserId = loggedInUserId || localStorage.getItem('auth_userId');
+        const me = (data.members || []).find((m: any) => m.userId === effectiveUserId);
         setMyMemberRole(me?.role ?? null);
+      } else if (isCurrent() && (res.status === 401 || res.status === 403)) {
+        setMembers([]);
+        setMyMemberRole(null);
       }
     } catch (e) {
       console.error('Lỗi tải members:', e);
@@ -344,15 +386,52 @@ export default function BiLacArena({
 
   useEffect(() => {
     if (!currentTournament) {
-      fetchTournaments();
+      if (viewMode === 'member') void fetchTournaments();
     } else {
-      fetchData();
-      fetchMembers();
+      const controller = new AbortController();
+      void fetchData(controller.signal);
+      void fetchMembers();
+      return () => {
+        controller.abort();
+        dataRequestGateRef.current.invalidate();
+        membersRequestGateRef.current.invalidate();
+      };
     }
-    if (currentTournament && activeTab === 'members') {
-      fetchMembers();
-    }
-  }, [currentTournament, activeTab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTournament?.id, activeTab, viewMode, loggedInUserId]);
+
+  // Mobile Safari/PWA and Android webviews can preserve an old React tree while
+  // backgrounded. Refresh on foreground and on Safari's bfcache restoration.
+  useEffect(() => {
+    let lastRefresh = 0;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      // iOS can dispatch focus, visibilitychange and pageshow together.
+      if (Date.now() - lastRefresh < 300) return;
+      lastRefresh = Date.now();
+      if (viewMode === 'view-only' && slug) {
+        setViewOnlyRefreshKey(key => key + 1);
+      } else if (currentTournament) {
+        void fetchData();
+        if (activeTab === 'members') void fetchMembers();
+      } else if (viewMode === 'member') {
+        void fetchTournaments();
+      }
+    };
+    const onVisibilityChange = () => refresh();
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) refresh();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pageshow', onPageShow);
+    window.addEventListener('focus', refresh);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pageshow', onPageShow);
+      window.removeEventListener('focus', refresh);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTournament?.id, activeTab, viewMode, slug]);
 
   // View-only mode: fetch by-slug payload. Guests must supply the tournament
   // passcode (?code=); logged-in members bypass via the isMember flag.
@@ -366,18 +445,23 @@ export default function BiLacArena({
     setViewOnlyError(null);
     setPasscodeError(null);
     setPasscodeRequired(false);
-    setViewOnlyData(null);
+    const scope = `${slug}:${code ?? ''}:${loggedInUserId || localStorage.getItem('auth_userId') || ''}`;
+    if (viewOnlyScopeRef.current !== scope) {
+      setViewOnlyData(null);
+      viewOnlyScopeRef.current = scope;
+    }
     const headers: Record<string, string> = {};
     // Prefer the live prop (re-triggers on login); fall back to cached id so
     // the very first render (profile still loading) still sends the header.
     const uid = loggedInUserId || localStorage.getItem('auth_userId');
     if (uid) headers['x-user-id'] = uid;
     const q = code ? `?code=${encodeURIComponent(code)}` : '';
-    fetch(`/api/bilac/tournaments/by-slug/${slug}${q}`, { headers })
+    fetch(`/api/bilac/tournaments/by-slug/${slug}${q}`, { headers, cache: 'no-store' })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (cancelled) return;
         if (res.status === 403 && data.passcodeRequired) {
+          setViewOnlyData(null);
           // Non-member without (valid) code → prompt. Drop any stale cache but
           // keep guestCode as-is: resetting it would re-run this effect, and the
           // top-level setPasscodeError(null) would then wipe the error we set here.
@@ -389,6 +473,7 @@ export default function BiLacArena({
           return;
         }
         if (!res.ok) {
+          setViewOnlyData(null);
           setViewOnlyError(data.error || 'Không tải được giải đấu.');
           return;
         }
@@ -405,13 +490,16 @@ export default function BiLacArena({
         }
       })
       .catch(() => {
-        if (!cancelled) setViewOnlyError('Lỗi kết nối máy chủ.');
+        if (!cancelled) {
+          setViewOnlyData(null);
+          setViewOnlyError('Lỗi kết nối máy chủ.');
+        }
       });
     return () => { cancelled = true; };
     // Re-run when the user logs in (loggedInUserId flips null → id) so the
     // header is sent and isMember is re-evaluated, and when a new code is submitted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, slug, loggedInUserId, guestCode]);
+  }, [viewMode, slug, loggedInUserId, guestCode, viewOnlyRefreshKey]);
 
   // Esc closes the edit-tournament modal (a11y).
   useEffect(() => {
@@ -423,11 +511,16 @@ export default function BiLacArena({
 
   // Logout/switch tournament
   const handleLogoutTournament = () => {
+    dataRequestGateRef.current.invalidate();
+    membersRequestGateRef.current.invalidate();
     localStorage.removeItem('bilac_tournament');
     localStorage.removeItem('bilac_tournament_code');
     setCurrentTournament(null);
     setPlayers([]);
     setMatches([]);
+    setMembers([]);
+    setMyMemberRole(null);
+    setLoading(false);
     setError(null);
     setSuccessMsg(null);
     playBeep(220, 'sawtooth', 0.2);
@@ -2219,7 +2312,7 @@ export default function BiLacArena({
                   <ul className="list-disc pl-4 space-y-1 text-[11px] text-stone-500">
                     <li>Nếu số người lẻ (ví dụ 7), hệ thống sẽ chọn ngẫu nhiên 1 người ngồi dự bị trận này.</li>
                     <li>
-                      <strong>Cơ chế random thuần:</strong> Xáo trộn đều tất cả người chơi rồi chia đôi — không cân bằng trình độ, đảm bảo may rủi công bằng.
+                      <strong>Cơ chế chia đội:</strong> Xáo trộn ngẫu nhiên, không cân bằng trình độ. Với 4 người, cặp đội sẽ khác trận gần nhất của cùng nhóm, kể cả khi đổi màu đội.
                     </li>
                   </ul>
                 </div>

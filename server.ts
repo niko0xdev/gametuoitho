@@ -1,7 +1,6 @@
 import express from 'express';
 import http from 'http';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
@@ -20,9 +19,6 @@ import { handleListBilacTournaments, handleAccessBilacTournament, handleCreateBi
 import { handleListLeagues, handleGetLeagueBySlug, handleAccessLeague, handleCreateLeague, handlePutLeague, handleDeleteLeague, handleListLeagueMembers, handleInviteLeagueMember, handleRemoveLeagueMember, handleSearchUsers } from './server/handlers/leagueHandlers.ts';
 import { db } from './server/db.ts';
 import { handleParseRoster, handleParsePlayers, handleParseEvents } from './server/handlers/aiHandlers.ts';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();

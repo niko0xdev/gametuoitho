@@ -1,6 +1,7 @@
 // worker/src/index.ts
 import { Hono } from 'hono';
 import { cors } from './lib/cors';
+import { bilacNoStore } from './lib/bilac-cache';
 import type { Bindings } from './db';
 import { healthRoute } from './routes/health';
 import { authRoute } from './routes/auth';
@@ -21,6 +22,9 @@ export { GameServerDO } from './do/gameserver';
 
 const app = new Hono<{ Bindings: Bindings }>();
 app.use('*', cors());
+// Tournament/player/match responses are user-scoped and change during play.
+// Never let a browser or intermediary reuse an old Bi Lac API response.
+app.use('/api/bilac/*', bilacNoStore);
 app.route('/api/health', healthRoute);
 app.route('/api/auth', authRoute);
 app.route('/api/profile', profileRoute);

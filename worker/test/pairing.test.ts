@@ -74,3 +74,25 @@ describe('pairPlayers (random thuần)', () => {
     assert.throws(() => pairPlayers([]));
   });
 });
+
+describe('four-player previous-match exclusion', () => {
+  const key = (teams: string[][]) => JSON.stringify(teams.map(t => [...t].sort()).sort());
+  it('excludes the latest matching roster even when colours are reversed', () => {
+    const history = [
+      { timestamp: 10, team1: ['p1', 'p3'], team2: ['p2', 'p4'] },
+      { timestamp: 20, team1: ['p4', 'p2'], team2: ['p3', 'p1'] },
+      { timestamp: 30, team1: ['p1', 'p2'], team2: ['p3', 'other'] },
+    ];
+    for (const rng of [() => 0, () => 0.99, () => 0.5]) {
+      const result = pairPlayers(mk(4), rng, history);
+      assert.notEqual(key([ids(result.teamA), ids(result.teamB)]), key([history[1].team1, history[1].team2]));
+      assert.deepEqual([...ids(result.teamA), ...ids(result.teamB)].sort(), ids(mk(4)));
+    }
+  });
+  it('leaves other roster sizes and unrelated history unchanged', () => {
+    const history = [{ timestamp: 1, team1: ['x', 'y'], team2: ['z', 'w'] }];
+    for (const n of [2, 4, 5, 8]) {
+      assert.deepEqual(pairPlayers(mk(n), () => 0.5, history), pairPlayers(mk(n), () => 0.5));
+    }
+  });
+});

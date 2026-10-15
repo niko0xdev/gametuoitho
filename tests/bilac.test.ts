@@ -410,6 +410,26 @@ describe('POST /api/bilac/matches (auto team balancing)', () => {
     assert.equal(res.body.team1.length + res.body.team2.length, 4);
     assert.equal(res.body.status, 'PLAYING');
   });
+  it('does not repeat the latest persisted four-player pairing across requests', async () => {
+    const owner = uniq('noRepeat');
+    const { id, code } = await setupTournament(owner);
+    const playerIds = ['a', 'b', 'c', 'd'].map(suffix => id + suffix);
+    for (const playerId of playerIds) {
+      db.saveBiLacPlayer({ id: playerId, name: playerId, avatar: 'a', tournamentId: id });
+    }
+    const key = (m: any) => JSON.stringify([m.team1.slice().sort(), m.team2.slice().sort()].sort());
+    let previous: string | undefined;
+    for (let i = 0; i < 12; i++) {
+      const res = await request(getApp()).post('/api/bilac/matches', { playerIds }, {
+        'x-user-id': owner, 'x-tournament-id': id, 'x-tournament-code': code,
+      });
+      assert.equal(res.status, 200);
+      assert.notEqual(key(res.body), previous);
+      // Give each stored match a distinct chronological position.
+      db.saveBiLacMatch({ ...res.body, timestamp: Date.now() + i * 1000 });
+      previous = key(res.body);
+    }
+  });
   it('handles 5 players (one benched)', async () => {
     const owner = uniq('cmOK5');
     const { id, code } = await setupTournament(owner);
