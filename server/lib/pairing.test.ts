@@ -97,3 +97,34 @@ describe('four-player previous-match exclusion', () => {
     }
   });
 });
+
+describe('previous-match exclusion for every roster size', () => {
+  const key = (r: ReturnType<typeof pairPlayers>) => JSON.stringify({
+    teams: [ids(r.teamA).sort(), ids(r.teamB).sort()].sort(),
+    benched: r.sittingOut?.id ?? null,
+  });
+  it('avoids repeats for 3–12 players, including unchanged random sources', () => {
+    for (let n = 3; n <= 12; n++) {
+      for (const value of [0, 0.5, 0.99]) {
+        const players = mk(n);
+        const previous = pairPlayers(players, () => value);
+        const history = [{
+          timestamp: 1, team1: ids(previous.teamB), team2: ids(previous.teamA),
+          benched: previous.sittingOut?.id,
+        }];
+        const next = pairPlayers(players, () => value, history);
+        assert.notEqual(key(next), key(previous), 'n=' + n);
+        assert.equal(next.teamA.length, Math.floor(n / 2));
+        assert.equal(next.teamB.length, Math.floor(n / 2));
+        assert.deepEqual([...ids(next.teamA), ...ids(next.teamB),
+          ...(next.sittingOut ? [next.sittingOut.id] : [])].sort(), ids(players).sort());
+      }
+    }
+  });
+  it('keeps the only possible 1v1 pairing for two players', () => {
+    const players = mk(2);
+    assert.deepEqual(pairPlayers(players, () => 0.5, [
+      { timestamp: 1, team1: ['p1'], team2: ['p2'] },
+    ]), pairPlayers(players, () => 0.5));
+  });
+});

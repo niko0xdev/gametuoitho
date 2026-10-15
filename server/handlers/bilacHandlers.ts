@@ -363,7 +363,7 @@ export function handleCreateBilacMatch(req: Request, res: Response) {
   const weekLabel = interval.label;
 
   // Read persisted history so the exclusion also survives reloads.
-  const history = selectedPlayers.length === 4
+  const history = selectedPlayers.length > 2
     ? db.getAllBiLacMatches().filter(m => m.tournamentId === tournamentId)
     : [];
   const { teamA, teamB, sittingOut } = pairPlayers(
