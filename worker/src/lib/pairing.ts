@@ -14,11 +14,12 @@ export interface PairingHistory {
   timestamp: number;
   team1: string[];
   team2: string[];
+  benched?: string | null;
 }
 
 const defaultRng: Rng = Math.random;
 
-// Shuffle without skill weighting; four players cannot repeat their latest pairing.
+// Shuffle without skill weighting; avoid the latest pairing for the same roster.
 export function pairPlayers<P extends Player>(
   players: readonly P[],
   rng: Rng = defaultRng,
@@ -45,21 +46,35 @@ export function pairPlayers<P extends Player>(
   const teamB: P[] = [];
   shuffled.forEach((p, i) => (i % 2 === 0 ? teamA.push(p) : teamB.push(p)));
 
-  if (n === 4) {
+  if (n > 2) {
     const rosterKey = (ids: string[]) => JSON.stringify([...ids].sort());
     const selectedKey = rosterKey(players.map(p => p.id));
     const previous = history
-      .filter(m => m.team1.length === 2 && m.team2.length === 2
-        && rosterKey([...m.team1, ...m.team2]) === selectedKey)
+      .filter(m => m.team1.length === Math.floor(n / 2) && m.team2.length === Math.floor(n / 2)
+        && rosterKey([...m.team1, ...m.team2, ...(m.benched ? [m.benched] : [])]) === selectedKey)
       .reduce<PairingHistory | undefined>((latest, m) =>
         !latest || m.timestamp > latest.timestamp ? m : latest, undefined);
     if (previous) {
-      const teamKey = rosterKey(teamA.map(p => p.id));
-      if (teamKey === rosterKey(previous.team1) || teamKey === rosterKey(previous.team2)) {
-        // Either swap produces one of the two remaining partitions, with equal odds.
-        const swapIndex = Math.floor(rng() * 2);
-        [teamA[1], teamB[swapIndex]] = [teamB[swapIndex], teamA[1]];
+      const repeats = (result: PairResult<P>) => {
+        const teamKey = rosterKey(result.teamA.map(p => p.id));
+        return (result.sittingOut?.id ?? null) === (previous.benched ?? null)
+          && (teamKey === rosterKey(previous.team1) || teamKey === rosterKey(previous.team2));
+      };
+      let result = { teamA, teamB, sittingOut };
+      // Rejection sampling preserves equal odds among the remaining partitions.
+      for (let attempt = 0; repeats(result) && attempt < 16; attempt++) {
+        result = pairPlayers(players, rng);
       }
+      if (repeats(result)) {
+        // Bound retries even for a stuck RNG. For 3 players, swap the reserve;
+        // swapping the two solo teams would only reverse their colours.
+        if (result.sittingOut) {
+          [result.teamA[0], result.sittingOut] = [result.sittingOut, result.teamA[0]];
+        } else {
+          [result.teamA[0], result.teamB[0]] = [result.teamB[0], result.teamA[0]];
+        }
+      }
+      return result;
     }
   }
 

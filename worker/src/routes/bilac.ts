@@ -385,7 +385,7 @@ bilacRoute.post('/matches', checkAccess, async (c: any) => {
   const interval = getBiLacWeeklyInterval(new Date());
 
   // Read persisted history so the exclusion also survives reloads.
-  const historyRows = selected.length === 4
+  const historyRows = selected.length > 2
     ? await db.select().from(bilacMatchesTable).where(eq(bilacMatchesTable.tournamentId, tournamentId)).all()
     : [];
   const history = historyRows.map(serializeMatch);
