@@ -127,3 +127,33 @@ describe('previous-match exclusion for every roster size', () => {
     ]), pairPlayers(players, () => 0.5));
   });
 });
+
+describe('reserve rotation', () => {
+  it('always fields the previous reserve, even when the rest of the roster changes', () => {
+    for (const n of [3, 5, 7, 9]) {
+      const players = mk(n);
+      const first = pairPlayers(players, () => 0.99);
+      const history = [{
+        timestamp: 2, team1: ids(first.teamA), team2: ids(first.teamB),
+        benched: first.sittingOut!.id,
+      }];
+      // This RNG would pick the same reserve but change the team partition.
+      const values = [0.99, 0, 0.99, 0.5, 0.99];
+      let i = 0;
+      const next = pairPlayers(players, () => values[i++ % values.length], history);
+      assert.notEqual(next.sittingOut?.id, first.sittingOut!.id);
+      assert.ok([...ids(next.teamA), ...ids(next.teamB)].includes(first.sittingOut!.id));
+      const changed = players.map((p, index) => index === 0 ? { id: 'new' } : p);
+      const afterChange = pairPlayers(changed, () => 0.99, history);
+      assert.notEqual(afterChange.sittingOut?.id, first.sittingOut!.id);
+    }
+  });
+  it('uses the immediately preceding match rather than an older roster match for reserve rotation', () => {
+    const history = [
+      { timestamp: 1, team1: ['p1', 'p2'], team2: ['p3', 'p4'], benched: 'p5' },
+      { timestamp: 2, team1: ['p1', 'other'], team2: ['p4', 'p5'], benched: 'p3' },
+    ];
+    const result = pairPlayers(mk(5), () => 0.5, history);
+    assert.notEqual(result.sittingOut?.id, 'p3');
+  });
+});

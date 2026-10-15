@@ -419,12 +419,15 @@ describe('POST /api/bilac/matches (auto team balancing)', () => {
     }
     const key = (m: any) => JSON.stringify({ teams: [m.team1.slice().sort(), m.team2.slice().sort()].sort(), benched: m.benched ?? null });
     let previous: string | undefined;
+    let previousReserve: string | undefined;
     for (let i = 0; i < 12; i++) {
       const res = await request(getApp()).post('/api/bilac/matches', { playerIds }, {
         'x-user-id': owner, 'x-tournament-id': id, 'x-tournament-code': code,
       });
       assert.equal(res.status, 200);
       assert.notEqual(key(res.body), previous);
+      if (previousReserve) assert.notEqual(res.body.benched, previousReserve);
+      previousReserve = res.body.benched;
       // Give each stored match a distinct chronological position.
       db.saveBiLacMatch({ ...res.body, timestamp: Date.now() + i * 1000 });
       previous = key(res.body);

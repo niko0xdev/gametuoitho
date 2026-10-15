@@ -2310,7 +2310,7 @@ export default function BiLacArena({
                     <span>Đã chọn: {selectedPlayerIds.length} người chơi</span>
                   </div>
                   <ul className="list-disc pl-4 space-y-1 text-[11px] text-stone-500">
-                    <li>Nếu số người lẻ (ví dụ 7), hệ thống sẽ chọn ngẫu nhiên 1 người ngồi dự bị trận này.</li>
+                    <li>Nếu số người lẻ (ví dụ 7), hệ thống chọn ngẫu nhiên 1 người dự bị. Người dự bị ván trước sẽ được vào sân nếu vẫn được chọn, không phải nghỉ 2 ván liên tiếp.</li>
                     <li>
                       <strong>Cơ chế chia đội:</strong> Xáo trộn ngẫu nhiên, không cân bằng trình độ. Từ 3 người, cách chia đội và dự bị sẽ không trùng hoàn toàn trận gần nhất của cùng nhóm, kể cả đổi màu đội. Hai người vẫn đấu 1v1.
                     </li>
