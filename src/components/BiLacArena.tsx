@@ -1,3 +1,5 @@
+import BiLacTelegramSettings from './BiLacTelegramSettings';
+import { currentSeason, standings } from '../../shared/bilac-telegram';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -192,10 +194,6 @@ export default function BiLacArena({
   // Always attaches x-user-id when logged in (covers /api/bilac/* AND other backend routes
   // that need to identify the caller).
   //
-  // Race-condition fix: on first render after deeplink/refresh, `userProfile` is still
-  // null (App.tsx's `fetchProfile` resolves async). The userId IS already in
-  // localStorage.auth_userId (single source of truth — see src/lib/api.ts#3-6).
-  // Fall back to it so we don't 401 on the very first fetch.
   const bilacFetch = async (url: string, options: RequestInit = {}) => {
     // `bilac_tournament` holds JSON.stringify(tournament), not the bare id —
     // parse it. Sending the raw blob would put Vietnamese name chars into the
@@ -209,7 +207,7 @@ export default function BiLacArena({
     })();
     const tid = currentTournament?.id || storedTourId;
     const code = localStorage.getItem('bilac_tournament_code') || '';
-    const effectiveUserId = loggedInUserId || localStorage.getItem('auth_userId') || '';
+    const effectiveUserId = loggedInUserId || '';
     const headers: Record<string, string> = {
       ...((options.headers as Record<string, string>) || {}),
       'x-tournament-id': tid,
@@ -219,6 +217,12 @@ export default function BiLacArena({
     // The response for a write can arrive after a previous GET. Invalidate that
     // GET both before and after the mutation so it cannot restore stale UI.
     const isWrite = (options.method ?? 'GET').toUpperCase() !== 'GET';
+    const updateMatchId = url.match(/\/matches\/([^/]+)\/update$/)?.[1];
+    if (updateMatchId && typeof options.body === 'string') {
+      const current = matches.find(m => m.id === updateMatchId) as (BiLacMatch & { revision?: number }) | undefined;
+      if (current?.revision !== undefined) options = { ...options, body: JSON.stringify({ ...JSON.parse(options.body), expectedRevision: current.revision }) };
+    }
+
     if (isWrite) dataRequestGateRef.current.invalidate();
     try {
       return await fetch(url, { ...options, cache: 'no-store', headers });
@@ -1334,7 +1338,7 @@ export default function BiLacArena({
       return `${dayStr}/${monthStr}/${yearStr}`;
     };
 
-    const currentWeekLabel = `Tuần từ ${formatDate(start)} đến ${formatDate(end)}`;
+    const currentWeekLabel = currentSeason();
 
     // Filter matches based on the selected type
     const finishedMatches = matches.filter(m => m.status === 'FINISHED');
@@ -1455,7 +1459,9 @@ export default function BiLacArena({
     });
   };
 
-  const currentLeaderboard = calculateLeaderboards();
+  const currentLeaderboard = leaderboardTab === 'weekly'
+    ? standings(players, matches, currentSeason()).map(row => ({ ...row, player: players.find(p => p.id === row.id)!, matchesPlayed: row.played }))
+    : calculateLeaderboards();
   const ongoingMatch = matches.find(m => m.status === 'PLAYING');
 
 // 2-tap confirm for Quick Win buttons — first tap arms, second tap (within 5s) triggers.
@@ -2961,6 +2967,7 @@ export default function BiLacArena({
 
       {activeTab === 'members' && (
         <div className="bg-white p-6 sm:p-8 rounded-2xl border border-stone-200 shadow-sm" id="bilac_tab_members_content">
+          <BiLacTelegramSettings tournamentId={currentTournament.id} userId={loggedInUserId} request={bilacFetch} />
           <div className="mb-6">
             <h2 className="text-lg font-bold text-stone-900 flex items-center gap-1.5">
               <UserPlus className="w-5 h-5 text-orange-500" />
@@ -3222,7 +3229,7 @@ function bilacCurrentWeek() {
   const short = (x: Date) =>
     `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}`;
   return {
-    label: `Tuần từ ${fmt(start)} đến ${fmt(end)}`,
+    label: currentSeason(),
     timeframe: `Thứ 4 ${short(start)} (12:00) ➔ Thứ 4 ${short(end)} (11:30)`,
   };
 }
@@ -3642,34 +3649,12 @@ function BiLacFormChart({ players, matches, title = 'Phong độ', emptyHint, we
 // leaderboard (diff desc → wins desc — see calculateLeaderboards). team1/team2 may
 // arrive as arrays (express) or JSON strings (older worker) — coerce defensively.
 function computeSeasonLeaderboard(players: any[], matches: any[], weekLabel: string) {
-  const stats: Record<string, {
-    player: any; matchesPlayed: number; wins: number; losses: number;
-    goalsScored: number; goalsConceded: number; diff: number; points: number;
-  }> = {};
-  players.forEach(p => {
-    stats[p.id] = { player: p, matchesPlayed: 0, wins: 0, losses: 0, goalsScored: 0, goalsConceded: 0, diff: 0, points: 0 };
-  });
-  const teamArr = (t: any): string[] => {
+  const teamArr = (t: unknown): string[] => {
     if (Array.isArray(t)) return t;
-    try { const a = JSON.parse(t || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
+    try { const a = JSON.parse(String(t || '[]')); return Array.isArray(a) ? a : []; } catch { return []; }
   };
-  matches
-    .filter(m => m.status === 'FINISHED' && m.weekLabel === weekLabel)
-    .forEach(m => {
-      const s1 = m.score1, s2 = m.score2;
-      const apply = (team: any, scored: number, conceded: number, won: boolean, draw: boolean) =>
-        teamArr(team).forEach((pid: string) => {
-          const st = stats[pid]; if (!st) return;
-          st.matchesPlayed += 1; st.goalsScored += scored; st.goalsConceded += conceded;
-          if (won) { st.wins += 1; st.points += 3; }
-          else if (draw) { st.points += 1; }
-          else { st.losses += 1; }
-        });
-      apply(m.team1, s1, s2, s1 > s2, s1 === s2);
-      apply(m.team2, s2, s1, s2 > s1, s1 === s2);
-    });
-  Object.values(stats).forEach((st: any) => { st.diff = st.wins - st.losses; });
-  return Object.values(stats).sort((a: any, b: any) => b.diff - a.diff || b.wins - a.wins || 0);
+  return standings(players, matches.map(m => ({ ...m, team1: teamArr(m.team1), team2: teamArr(m.team2) })), weekLabel)
+    .map(row => ({ ...row, player: players.find(p => p.id === row.id), matchesPlayed: row.played }));
 }
 
 function ViewOnlyTournamentView({ data }: { data: any }) {

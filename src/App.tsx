@@ -139,7 +139,14 @@ export default function App() {
     playRetroBeep(880, 'sine', 0.2);
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
+    try {
+      const response = await fetch('/api/auth/logout', { method: 'POST' });
+      if (!response.ok && response.status !== 404) throw new Error('Logout failed');
+    } catch {
+      window.alert('Chưa thể đăng xuất an toàn. Vui lòng kiểm tra kết nối và thử lại.');
+      return;
+    }
     localStorage.removeItem('auth_userId');
     // Xoá các cache thuộc về user cũ để user mới (nếu login lại) hoặc tài khoản khác
     // không thấy danh sách giải đấu / tournament code bị rò rỉ.

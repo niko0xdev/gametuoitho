@@ -17,7 +17,9 @@
     "deploy:worker": "cd worker && npx wrangler deploy",
     "db:migrate:local": "cd worker && npx wrangler d1 migrations apply gametuoitho-db --local",
     "db:migrate:remote": "cd worker && npx wrangler d1 migrations apply gametuoitho-db --remote",
-    "test:worker": "cd worker && npm test"
+    "test:worker": "cd worker && npm test",
+    "dev:telegram": "tsx worker/scripts/telegram-preview.ts",
+    "test:telegram": "npm --prefix worker test -- test/telegram-domain.test.ts test/telegram-actions.test.ts test/telegram-flow.test.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
