@@ -66,4 +66,4 @@ OTP_DAILY_CAP = "80"
 
 # Prune unverified accounts (>24h) every 6h — anti D1 bloat from signup spam.
 [triggers]
-crons = ["13 */6 * * *"]
+crons = ["13 */6 * * *", "20 6 * * *", "0 14 * * *", "*/5 * * * *"]

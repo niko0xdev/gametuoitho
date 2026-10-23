@@ -1,4 +1,6 @@
 // worker/src/index.ts
+import { telegramRoute } from './routes/telegram';
+import { runTelegramSchedule } from './lib/telegram-schedule';
 import { Hono } from 'hono';
 import { cors } from './lib/cors';
 import { bilacNoStore } from './lib/bilac-cache';
@@ -25,6 +27,7 @@ app.use('*', cors());
 // Tournament/player/match responses are user-scoped and change during play.
 // Never let a browser or intermediary reuse an old Bi Lac API response.
 app.use('/api/bilac/*', bilacNoStore);
+app.route('/api/telegram', telegramRoute);
 app.route('/api/health', healthRoute);
 app.route('/api/auth', authRoute);
 app.route('/api/profile', profileRoute);
@@ -82,7 +85,8 @@ async function pruneUnverified(env: Bindings) {
 
 export default {
   fetch: app.fetch,
-  scheduled: async (_event: ScheduledEvent, env: Bindings, ctx: ExecutionContext) => {
-    ctx.waitUntil(pruneUnverified(env));
+  scheduled: async (event: ScheduledEvent, env: Bindings, ctx: ExecutionContext) => {
+    if (event.cron === '13 */6 * * *') ctx.waitUntil(pruneUnverified(env));
+    else ctx.waitUntil(runTelegramSchedule(env, event.cron, event.scheduledTime));
   },
 };

@@ -87,6 +87,7 @@ export const bilacPlayersTable = sqliteTable('bilac_players', {
 });
 
 export const bilacMatchesTable = sqliteTable('bilac_matches', {
+  revision: integer('revision').notNull().default(0),
   id: text('id').primaryKey(),
   timestamp: integer('timestamp').notNull(),
   weekLabel: text('week_label').notNull(),

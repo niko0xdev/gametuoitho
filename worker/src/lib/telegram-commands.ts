@@ -1,0 +1,236 @@
+import type { Bindings } from '../db';
+import { sha256Hex } from './password';
+import { currentSeason, standings, renderStandings, scoreInput, type RankingPlayer } from '../../../shared/bilac-telegram';
+import { createBiLacMatch, memberRole, saveBiLacScore, type StoredMatch } from './bilac-actions';
+import { enqueue, telegram, TelegramError } from './telegram-client';
+
+interface Actor { id: number; is_bot?: boolean }
+interface Message { message_id: number; text?: string; chat: { id: number; type: string; title?: string }; from?: Actor; sender_chat?: object; reply_to_message?: { text?: string }; migrate_to_chat_id?: number }
+export interface TelegramUpdate { update_id: number; message?: Message; callback_query?: { id: string; from: Actor; data?: string; message?: Message }; my_chat_member?: { chat: Message['chat']; new_chat_member: { status: string } } }
+interface Integration { tournament_id: string; chat_id: string; enabled: number }
+interface Draft { id: string; tournament_id: string; chat_id: string; telegram_id: string; kind: string; payload: string; revision: number; expires_at: number; consumed: number; decision: string | null }
+interface Selection { players: RankingPlayer[]; selected: string[]; page: number }
+class CommandError extends Error {}
+
+export async function tableMessage(env: Bindings, tournamentId: string, date = new Date()) {
+  const tournament = await env.DB.prepare('SELECT name,slug FROM bilac_tournaments WHERE id=?').bind(tournamentId).first<{ name: string; slug: string | null }>();
+  if (!tournament) throw new CommandError('Giải không còn tồn tại.');
+  const players = (await env.DB.prepare('SELECT id,name FROM bilac_players WHERE tournament_id=? ORDER BY rowid').bind(tournamentId).all<RankingPlayer>()).results;
+  const matches = (await env.DB.prepare('SELECT * FROM bilac_matches WHERE tournament_id=?').bind(tournamentId).all<StoredMatch>()).results;
+  const season = currentSeason(date);
+  const rows = standings(players, matches.map(m => ({ ...m, team1: JSON.parse(m.team1), team2: JSON.parse(m.team2), weekLabel: m.week_label })), season);
+  const url = tournament.slug ? `${env.APP_URL}/bilac/${tournament.slug}` : env.APP_URL;
+  return renderStandings(tournament.name, season, rows, url) + `\nCập nhật: ${date.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
+}
+
+async function linkedUser(env: Bindings, telegramId: string) {
+  return (await env.DB.prepare('SELECT user_id FROM telegram_links WHERE telegram_id=?').bind(telegramId).first<{ user_id: string }>())?.user_id;
+}
+async function authorised(env: Bindings, tournamentId: string, telegramId: string) {
+  const userId = await linkedUser(env, telegramId);
+  if (!userId || !await memberRole(env, tournamentId, userId)) throw new CommandError('Hãy liên kết tài khoản trên web và tham gia giải trước nhé!');
+  return userId;
+}
+async function newDraft(env: Bindings, id: string, integration: Integration, telegramId: string, kind: string, payload: unknown) {
+  await env.DB.prepare(`INSERT OR IGNORE INTO telegram_drafts (id,tournament_id,chat_id,telegram_id,kind,payload,expires_at)
+    VALUES (?,?,?,?,?,?,?)`).bind(id, integration.tournament_id, integration.chat_id, telegramId, kind, JSON.stringify(payload), Date.now() + 10 * 60000).run();
+}
+function selectionMessage(id: string, revision: number, data: Selection) {
+  const start = data.page * 8;
+  const buttons = data.players.slice(start, start + 8).map((p, i) => [{ text: `${data.selected.includes(p.id) ? '✓ ' : ''}${p.name.slice(0, 40)}`, callback_data: `sel:${id}:${revision}:${start + i}:${data.selected.includes(p.id) ? 0 : 1}` }]);
+  const nav = [];
+  if (data.page > 0) nav.push({ text: '← Trước', callback_data: `page:${id}:${revision}:${data.page - 1}` });
+  if (start + 8 < data.players.length) nav.push({ text: 'Sau →', callback_data: `page:${id}:${revision}:${data.page + 1}` });
+  if (nav.length) buttons.push(nav);
+  buttons.push([{ text: `Chia đội (${data.selected.length} người)`, callback_data: `go:${id}:${revision}` }]);
+  return { text: '🎲 Chọn người đang có mặt, rồi bấm Chia đội. Chỉ người mở danh sách được chọn.', reply_markup: { inline_keyboard: buttons } };
+}
+async function matchText(env: Bindings, match: StoredMatch) {
+  const players = (await env.DB.prepare('SELECT id,name FROM bilac_players WHERE tournament_id=?').bind(match.tournament_id).all<RankingPlayer>()).results;
+  const names = new Map(players.map(p => [p.id, p.name]));
+  const team = (json: string) => (JSON.parse(json) as string[]).map(id => names.get(id) ?? '?').join(', ');
+  return `⚽ Trận #${match.id}\nĐội A: ${team(match.team1)}\nĐội B: ${team(match.team2)}${match.benched ? `\nDự bị: ${names.get(match.benched)}` : ''}\nReply tin này bằng /score@${env.TELEGRAM_BOT_USERNAME} 10 7 để nhập điểm.`;
+}
+
+async function callback(env: Bindings, update: TelegramUpdate) {
+  const cb = update.callback_query!;
+  if (!cb.message || cb.from.is_bot || cb.message.chat.type === 'private') return;
+  const [action, id, revisionRaw, value, selected] = (cb.data ?? '').split(':');
+  if (!['sel', 'page', 'go', 'save', 'finish', 'add'].includes(action)) return;
+  const draft = await env.DB.prepare('SELECT * FROM telegram_drafts WHERE id=?').bind(id).first<Draft>();
+  if (!draft || draft.chat_id !== String(cb.message.chat.id) || draft.telegram_id !== String(cb.from.id) || draft.expires_at < Date.now()) throw new CommandError('Nút này hết hạn hoặc dành cho người khác. Hãy chạy lệnh lại.');
+  const integration = await env.DB.prepare('SELECT * FROM bilac_telegram WHERE tournament_id=? AND chat_id=? AND enabled=1').bind(draft.tournament_id, draft.chat_id).first<Integration>();
+  if (!integration) throw new CommandError('Group đã ngắt kết nối.');
+  const userId = await authorised(env, draft.tournament_id, draft.telegram_id);
+  if (draft.consumed) return;
+  if (draft.revision !== Number(revisionRaw)) {
+    if (draft.kind === 'random' && !draft.decision) {
+      await telegram(env, 'editMessageText', { chat_id: draft.chat_id, message_id: cb.message.message_id, ...selectionMessage(id, draft.revision, JSON.parse(draft.payload)) });
+      return;
+    }
+    throw new CommandError('Danh sách đã thay đổi. Dùng nút trong bản mới nhất nhé!');
+  }
+  const data = JSON.parse(draft.payload);
+  if ((action === 'sel' || action === 'page') && draft.kind === 'random') {
+    const selection = data as Selection;
+    if (action === 'sel') {
+      const player = selection.players[Number(value)];
+      if (!player) throw new CommandError('Người chơi không hợp lệ.');
+      selection.selected = selection.selected.filter(p => p !== player.id);
+      if (selected === '1') selection.selected.push(player.id);
+    } else selection.page = Math.min(Math.max(0, Number(value) || 0), Math.max(0, Math.ceil(selection.players.length / 8) - 1));
+    const result = await env.DB.prepare('UPDATE telegram_drafts SET payload=?,revision=revision+1 WHERE id=? AND revision=? AND consumed=0 AND decision IS NULL')
+      .bind(JSON.stringify(selection), id, draft.revision).run();
+    if (result.meta.changes) {
+      await telegram(env, 'editMessageText', { chat_id: draft.chat_id, message_id: cb.message.message_id, ...selectionMessage(id, draft.revision + 1, selection) });
+    }
+    return;
+  }
+  if (action === 'go' && draft.kind === 'random' && (data as Selection).selected.length < 2) throw new CommandError('Chọn ít nhất 2 người trước khi chia đội nhé!');
+  const lock = await env.DB.prepare('UPDATE telegram_drafts SET decision=? WHERE id=? AND revision=? AND (decision IS NULL OR decision=?)')
+    .bind(action, id, draft.revision, action).run();
+  if (!lock.meta.changes) throw new CommandError('Thao tác đã được xác nhận hoặc thay đổi.');
+  let text: string;
+  if (action === 'go' && draft.kind === 'random') {
+    let match: StoredMatch;
+    try { match = await createBiLacMatch(env, draft.tournament_id, userId, (data as Selection).selected, `tg-${id}`); }
+    catch (error) {
+      await env.DB.prepare('UPDATE telegram_drafts SET decision=NULL WHERE id=? AND consumed=0').bind(id).run();
+      throw error;
+    }
+    text = await matchText(env, match);
+  } else if ((action === 'save' || action === 'finish') && draft.kind === 'score') {
+    const match = data.match as StoredMatch;
+    await saveBiLacScore(env, draft.tournament_id, userId, match, scoreInput(String(data.scores[0]), String(data.scores[1])), action === 'finish', `tg-${id}`);
+    text = `✅ Trận #${match.id}: A ${data.scores[0]} – ${data.scores[1]} B\n${action === 'finish' || match.status === 'FINISHED' ? 'Đã kết thúc trận.' : 'Đã lưu điểm, trận vẫn đang chơi.'}`;
+  } else if (action === 'add' && draft.kind === 'player') {
+    const name = String(data.name);
+    const playerId = 'tg-player-' + (await sha256Hex(draft.tournament_id + ':' + name.toLocaleLowerCase('vi'))).slice(0, 24);
+    const names = (await env.DB.prepare('SELECT id,name FROM bilac_players WHERE tournament_id=?').bind(draft.tournament_id).all<RankingPlayer>()).results;
+    const duplicate = names.find(p => p.name.normalize('NFC').toLocaleLowerCase('vi') === name.toLocaleLowerCase('vi'));
+    if (duplicate && duplicate.id !== playerId) throw new CommandError('Tên người chơi đã có trong giải.');
+    await env.DB.prepare(`INSERT OR IGNORE INTO bilac_players (id,name,avatar,tournament_id)
+      SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM bilac_players WHERE tournament_id=? AND lower(name)=lower(?))
+      AND EXISTS (SELECT 1 FROM bilac_tournament_members m JOIN users u ON u.id=m.user_id WHERE m.tournament_id=? AND m.user_id=?)`)
+      .bind(playerId, name, `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name)}`, draft.tournament_id, draft.tournament_id, name, draft.tournament_id, userId).run();
+    const created = await env.DB.prepare('SELECT 1 FROM bilac_players WHERE id=?').bind(playerId).first();
+    if (!created) throw new CommandError('Tên người chơi đã có trong giải.');
+    text = `✅ Đã thêm ${name} vào giải. Dùng /random@${env.TELEGRAM_BOT_USERNAME} để chia đội.`;
+  } else throw new CommandError('Thao tác không hợp lệ.');
+  await enqueue(env, `draft:${id}`, draft.chat_id, { text }, draft.tournament_id);
+  await env.DB.prepare('UPDATE telegram_drafts SET consumed=1 WHERE id=?').bind(id).run();
+}
+
+async function message(env: Bindings, update: TelegramUpdate) {
+  const m = update.message!;
+  if (!m.from || m.from.is_bot || m.sender_chat) return;
+  const chatId = String(m.chat.id), telegramId = String(m.from.id);
+  const send = (text: string, extra = {}, tournamentId: string | null = null) => enqueue(env, `update:${update.update_id}`, chatId, { text, ...extra }, tournamentId);
+  if (m.migrate_to_chat_id) {
+    await env.DB.prepare('UPDATE bilac_telegram SET chat_id=? WHERE chat_id=?').bind(String(m.migrate_to_chat_id), chatId).run();
+    return;
+  }
+  const raw = m.text?.trim() ?? '';
+  const [command, ...args] = raw.split(/\s+/);
+  const [verb, target] = command.toLowerCase().split('@');
+  if (!verb.startsWith('/') || (target && target !== env.TELEGRAM_BOT_USERNAME?.toLowerCase())) return;
+  if (verb === '/start' && m.chat.type === 'private') {
+    const hash = await sha256Hex(args[0] || '');
+    const token = await env.DB.prepare("SELECT * FROM telegram_tokens WHERE hash=? AND purpose='account' AND expires_at>?").bind(hash, Date.now()).first<{ user_id: string; telegram_id: string | null }>();
+    if (!token || (token.telegram_id && token.telegram_id !== telegramId)) throw new CommandError('Link hết hạn. Hãy tạo lại trên web.');
+    await env.DB.prepare('UPDATE telegram_tokens SET telegram_id=? WHERE hash=? AND (telegram_id IS NULL OR telegram_id=?)').bind(telegramId, hash, telegramId).run();
+    await send('Mở lại web, kiểm tra Telegram ID và bấm Xác nhận liên kết để hoàn tất.');
+    return;
+  }
+  if (m.chat.type !== 'group' && m.chat.type !== 'supergroup') return;
+  if (verb === '/connect') {
+    const hash = await sha256Hex(args[0] || '');
+    const token = await env.DB.prepare("SELECT * FROM telegram_tokens WHERE hash=? AND purpose='group' AND expires_at>?").bind(hash, Date.now()).first<{ user_id: string; tournament_id: string }>();
+    if (!token || await linkedUser(env, telegramId) !== token.user_id || await memberRole(env, token.tournament_id, token.user_id) !== 'owner') throw new CommandError('Mã kết nối không hợp lệ, hoặc bạn chưa liên kết tài khoản chủ giải.');
+    let admin: { status: string };
+    try { admin = await telegram<{ status: string }>(env, 'getChatMember', { chat_id: chatId, user_id: m.from.id }); }
+    catch (error) {
+      if (error instanceof TelegramError && [400, 403].includes(error.code)) throw new CommandError('Hãy thêm bot làm quản trị viên group rồi thử kết nối lại.');
+      throw error;
+    }
+    if (!['creator', 'administrator'].includes(admin.status)) throw new CommandError('Chỉ quản trị viên group mới kết nối được.');
+    const occupied = await env.DB.prepare('SELECT tournament_id FROM bilac_telegram WHERE chat_id=?').bind(chatId).first<{ tournament_id: string }>();
+    if (occupied && occupied.tournament_id !== token.tournament_id) throw new CommandError('Group đã kết nối với giải khác.');
+    // Stage the destination, then require confirmation in the verified owner session.
+    await env.DB.prepare('UPDATE telegram_tokens SET telegram_id=?,chat_id=?,chat_title=? WHERE hash=?')
+      .bind(telegramId, chatId, (m.chat.title ?? chatId).slice(0, 150), hash).run();
+    await send('Đã nhận group. Chủ giải hãy mở web và xác nhận kết nối. BXH của giải sẽ được chia sẻ trong group này.');
+    return;
+  }
+  const integration = await env.DB.prepare('SELECT * FROM bilac_telegram WHERE chat_id=? AND enabled=1').bind(chatId).first<Integration>();
+  if (!integration) { if (verb === '/help') await send('Group chưa kết nối. Chủ giải mở phần Telegram trên web để bắt đầu.'); return; }
+  if (verb === '/help') {
+    await send(`/bxh@${env.TELEGRAM_BOT_USERNAME}: BXH tuần\n/random@${env.TELEGRAM_BOT_USERNAME}: chọn người và chia đội\n/addplayer@${env.TELEGRAM_BOT_USERNAME} Tên: thêm người\n/score@${env.TELEGRAM_BOT_USERNAME} mã-trận 10 7: nhập điểm (hoặc reply tin trận)\nLịch BXH: 13:20 và 21:00 giờ Việt Nam.`, {}, integration.tournament_id);
+    return;
+  }
+  if (verb === '/bxh') { await send(await tableMessage(env, integration.tournament_id), {}, integration.tournament_id); return; }
+  if (!['/random', '/score', '/addplayer'].includes(verb)) return;
+  await authorised(env, integration.tournament_id, telegramId);
+  const id = update.update_id.toString(36);
+  if (verb === '/random') {
+    const players = (await env.DB.prepare('SELECT id,name FROM bilac_players WHERE tournament_id=? ORDER BY name').bind(integration.tournament_id).all<RankingPlayer>()).results;
+    if (players.length < 2) throw new CommandError('Cần ít nhất 2 người. Dùng /addplayer để thêm nhé!');
+    const selection: Selection = { players, selected: [], page: 0 };
+    await newDraft(env, id, integration, telegramId, 'random', selection);
+    const payload = selectionMessage(id, 0, selection);
+    await send(payload.text, { reply_markup: payload.reply_markup }, integration.tournament_id);
+  } else if (verb === '/addplayer') {
+    const name = args.join(' ').normalize('NFC').replace(/\s+/g, ' ').trim();
+    if (!name || name.length > 60 || /[\p{Cc}\p{Cf}]/u.test(name)) throw new CommandError('Tên cần từ 1 đến 60 ký tự, không chứa ký tự điều khiển.');
+    await newDraft(env, id, integration, telegramId, 'player', { name });
+    await send(`Thêm người chơi: ${name}?`, { reply_markup: { inline_keyboard: [[{ text: 'Xác nhận thêm', callback_data: `add:${id}:0` }]] } }, integration.tournament_id);
+  } else {
+    let matchId: string | undefined;
+    if (args.length === 2) matchId = m.reply_to_message?.text?.match(/Trận #([a-zA-Z0-9-]+)/)?.[1];
+    else if (args.length === 3) matchId = args.shift()?.replace(/^#/, '');
+    if (!matchId || args.length !== 2) throw new CommandError('Dùng /score mã-trận 10 7, hoặc reply tin trận với /score 10 7.');
+    const scores = scoreInput(args[0], args[1]);
+    const match = await env.DB.prepare('SELECT * FROM bilac_matches WHERE id=? AND tournament_id=?').bind(matchId, integration.tournament_id).first<StoredMatch>();
+    if (!match) throw new CommandError('Không tìm thấy trận trong giải này.');
+    await newDraft(env, id, integration, telegramId, 'score', { match, scores });
+    await send(`Trận #${match.id}\nA ${scores[0]} – ${scores[1]} B\n${match.status === 'FINISHED' ? 'Sửa kết quả đã kết thúc (chỉ chủ giải).' : 'Chọn lưu điểm hoặc kết thúc trận.'}`, {
+      reply_markup: { inline_keyboard: [[{ text: 'Lưu điểm', callback_data: `save:${id}:0` }, { text: 'Kết thúc trận', callback_data: `finish:${id}:0` }]] },
+    }, integration.tournament_id);
+  }
+}
+
+export async function processUpdate(env: Bindings, update: TelegramUpdate) {
+  try {
+    if (update.callback_query) {
+      // Stop the spinner even if later database processing needs recovery.
+      await telegram(env, 'answerCallbackQuery', { callback_query_id: update.callback_query.id }).catch(() => undefined);
+      await callback(env, update);
+    } else if (update.message) await message(env, update);
+    else if (update.my_chat_member) {
+      const status = update.my_chat_member.new_chat_member.status;
+      if (['left', 'kicked'].includes(status)) await env.DB.prepare("UPDATE bilac_telegram SET enabled=0,health='Bot removed from group' WHERE chat_id=?").bind(String(update.my_chat_member.chat.id)).run();
+    }
+  } catch (error) {
+    if (!(error instanceof CommandError) && !(error instanceof Error && /^(Bạn|Chọn|Giải|Trận|Điểm)/.test(error.message))) throw error;
+    const chatId = update.message?.chat.id ?? update.callback_query?.message?.chat.id;
+    if (chatId) await enqueue(env, `error:${update.update_id}`, String(chatId), { text: error.message });
+  }
+}
+
+export async function recoverUpdates(env: Bindings) {
+  const now = Date.now();
+  const pending = await env.DB.prepare("SELECT id,payload FROM telegram_updates WHERE status='pending' AND lease_until<? AND attempts<5 ORDER BY id LIMIT 20")
+    .bind(now).all<{ id: number; payload: string }>();
+  for (const row of pending.results) {
+    const claim = await env.DB.prepare("UPDATE telegram_updates SET lease_until=?,attempts=attempts+1 WHERE id=? AND status='pending' AND lease_until<?")
+      .bind(now + 60000, row.id, now).run();
+    if (!claim.meta.changes) continue;
+    try {
+      await processUpdate(env, JSON.parse(row.payload));
+      await env.DB.prepare("UPDATE telegram_updates SET status='done',payload='{}' WHERE id=?").bind(row.id).run();
+    } catch {
+      // Keep accepted updates durable; the recovery cron retries after lease expiry.
+      console.error('Telegram update processing failed', row.id);
+    }
+  }
+}

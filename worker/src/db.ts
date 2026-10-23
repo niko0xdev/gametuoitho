@@ -6,6 +6,9 @@ import type { GameServerDO } from './do/gameserver';
 
 export type Bindings = {
   DB: D1Database;
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_WEBHOOK_SECRET?: string;
+  TELEGRAM_BOT_USERNAME?: string;
   CORS_ORIGIN: string;
   APP_URL: string;
   OPENAI_API_KEY?: string;

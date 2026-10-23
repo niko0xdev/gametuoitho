@@ -1,13 +1,15 @@
 // worker/src/routes/bilac.ts
 import { Hono } from 'hono';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { Bindings } from '../db';
 import { createDb } from '../db';
 import {
   bilacTournamentsTable, bilacPlayersTable, bilacMatchesTable, bilacTournamentMembersTable, usersTable,
 } from '../schema';
 import { requireLoggedIn } from '../lib/auth';
-import { pairPlayers } from '../lib/pairing';
+import { createBiLacMatch, memberRole } from '../lib/bilac-actions';
+import { sessionUser } from '../lib/session';
+import { currentSeason } from '../../../shared/bilac-telegram';
 
 export const bilacRoute = new Hono<{ Bindings: Bindings }>();
 
@@ -37,7 +39,7 @@ function getBiLacWeeklyInterval(date: Date) {
   }
   const fmt = (x: Date) =>
     `${String(x.getDate()).padStart(2,'0')}/${String(x.getMonth()+1).padStart(2,'0')}/${x.getFullYear()}`;
-  return { start, end, label: `Tuần từ ${fmt(start)} đến ${fmt(end)}` };
+  return { start, end, label: currentSeason(date) };
 }
 
 const checkAccess = async (c: any, next: any) => {
@@ -53,6 +55,11 @@ const checkAccess = async (c: any, next: any) => {
   if (!uid) return c.json({ error: 'Vui lòng đăng nhập để tiếp tục!' }, 401);
   const userRows = await db.select().from(usersTable).where(eq(usersTable.id, uid)).all();
   if (!userRows[0]) return c.json({ error: 'Tài khoản không tồn tại!' }, 401);
+  if (c.req.method !== 'GET') {
+    const verified = await sessionUser(c);
+    if (verified !== uid) return c.json({ error: 'Vui lòng đăng xuất rồi đăng nhập lại để cập nhật giải đấu.' }, 401);
+    if (!await memberRole(c.env, tournamentId, uid)) return c.json({ error: 'Bạn cần là thành viên giải đấu.' }, 403);
+  }
   c.set('tournamentId', tournamentId);
   c.set('userId', uid);
   await next();
@@ -373,53 +380,27 @@ bilacRoute.get('/matches', checkAccess, async (c: any) => {
 
 bilacRoute.post('/matches', checkAccess, async (c: any) => {
   const { playerIds } = await c.req.json();
-  const tournamentId = c.get('tournamentId');
-  if (!Array.isArray(playerIds) || playerIds.length < 2) {
-    return c.json({ error: 'Cần ít nhất 2 người chơi để chia đội!' }, 400);
+  if (!Array.isArray(playerIds) || !playerIds.every(id => typeof id === 'string')) return c.json({ error: 'Danh sách người chơi không hợp lệ.' }, 400);
+  try {
+    const match = await createBiLacMatch(c.env, c.get('tournamentId'), c.get('userId'), playerIds, 'match-' + crypto.randomUUID());
+    return c.json(serializeMatch({ ...match, weekLabel: match.week_label, tournamentId: match.tournament_id }));
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Không thể chia đội.' }, 409);
   }
-  const db = createDb(c.env);
-  const all = await db.select().from(bilacPlayersTable).where(eq(bilacPlayersTable.tournamentId, tournamentId)).all();
-  const selected = all.filter((p: any) => playerIds.includes(p.id));
-  if (selected.length < 2) return c.json({ error: 'Không tìm thấy người chơi hợp lệ trong hệ thống!' }, 400);
-
-  const interval = getBiLacWeeklyInterval(new Date());
-
-  // Read persisted history so the exclusion also survives reloads.
-  const historyRows = selected.length > 2
-    ? await db.select().from(bilacMatchesTable).where(eq(bilacMatchesTable.tournamentId, tournamentId)).all()
-    : [];
-  const history = historyRows.map(serializeMatch);
-  const { teamA, teamB, sittingOut } = pairPlayers(
-    selected.map((p: any) => ({ id: p.id })), undefined, history,
-  );
-  const t1 = teamA.map(p => p.id);
-  const t2 = teamB.map(p => p.id);
-  const benched: string | undefined = sittingOut?.id;
-
-  const match = {
-    id: 'match-' + Date.now(),
-    timestamp: Date.now(),
-    weekLabel: interval.label,
-    team1: JSON.stringify(t1),
-    team2: JSON.stringify(t2),
-    score1: 0, score2: 0,
-    status: 'PLAYING',
-    benched: benched ?? null,
-    tournamentId,
-  };
-  await db.insert(bilacMatchesTable).values(match as any);
-  return c.json(serializeMatch(match));
 });
 
 bilacRoute.post('/matches/:id/update', checkAccess, async (c: any) => {
   const matchId = c.req.param('id');
   const tournamentId = c.get('tournamentId');
-  const { score1, score2, status, team1, team2, benched } = await c.req.json();
+  const { score1, score2, status, team1, team2, benched, expectedRevision } = await c.req.json();
   const db = createDb(c.env);
   const rows = await db.select().from(bilacMatchesTable).where(eq(bilacMatchesTable.id, matchId)).all();
   const m = rows[0];
   if (!m) return c.json({ error: 'Không tìm thấy trận đấu!' }, 404);
   if ((m as any).tournamentId !== tournamentId) return c.json({ error: 'Bạn không có quyền chỉnh sửa trận đấu của giải đấu này!' }, 403);
+  if (m.status === 'FINISHED' && await memberRole(c.env, tournamentId, c.get('userId')) !== 'owner') return c.json({ error: 'Chỉ chủ giải được sửa kết quả đã kết thúc.' }, 403);
+  if ([score1, score2].some(v => v !== undefined && (!Number.isInteger(v) || v < 0 || v > 999)) || (status !== undefined && !['PLAYING', 'FINISHED'].includes(status))) return c.json({ error: 'Điểm hoặc trạng thái không hợp lệ.' }, 400);
+  if (expectedRevision !== undefined && expectedRevision !== m.revision) return c.json({ error: 'Trận đã thay đổi. Hãy tải lại trước khi cập nhật.' }, 409);
   // Patch only the fields the client actually sent. A team-swap request omits
   // score/status — spreading undefined would blank them in both the DB write and
   // the JSON response (JSON.stringify drops undefined), corrupting the client's
@@ -448,8 +429,9 @@ bilacRoute.post('/matches/:id/update', checkAccess, async (c: any) => {
     patch.team2 = JSON.stringify(team2);
     patch.benched = nextBenched;
   }
-  await db.update(bilacMatchesTable).set(patch).where(eq(bilacMatchesTable.id, matchId));
-  return c.json(serializeMatch({ ...m, ...patch }));
+  const result = await db.update(bilacMatchesTable).set({ ...patch, revision: m.revision + 1 }).where(and(eq(bilacMatchesTable.id, matchId), eq(bilacMatchesTable.revision, m.revision))).run();
+  if (!result.meta.changes) return c.json({ error: 'Trận đã thay đổi. Hãy tải lại trước khi cập nhật.' }, 409);
+  return c.json(serializeMatch({ ...m, ...patch, revision: m.revision + 1 }));
 });
 
 bilacRoute.delete('/matches/:id', checkAccess, async (c: any) => {
