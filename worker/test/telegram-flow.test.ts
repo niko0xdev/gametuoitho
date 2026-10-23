@@ -11,7 +11,7 @@ import { sha256Hex } from '../src/lib/password';
 function fixture() {
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(JSON.stringify({ ok: true, result: { message_id: 1, status: 'administrator' } }))));
   const { env, sqlite } = testDatabase();
-  Object.assign(env, { TELEGRAM_BOT_TOKEN: 'fixture', TELEGRAM_WEBHOOK_SECRET: 'fixture-secret', TELEGRAM_BOT_USERNAME: 'fixture_bot' });
+  Object.assign(env, { TELEGRAM_ENABLED: 'true', TELEGRAM_BOT_TOKEN: 'fixture', TELEGRAM_WEBHOOK_SECRET: 'fixture-secret', TELEGRAM_BOT_USERNAME: 'fixture_bot' });
   const app = new Hono();
   app.route('/api/auth', authRoute); app.route('/api/bilac', bilacRoute); app.route('/api/telegram', telegramRoute);
   return { env, sqlite, app };
@@ -55,7 +55,7 @@ describe('Telegram integrated flows', () => {
   });
   it('adds a player once, rejects other actors, and rejects expired confirmations', async () => {
     const { env, sqlite } = fixture();
-    sqlite.exec("INSERT INTO telegram_links VALUES ('123','owner'); INSERT INTO bilac_telegram (tournament_id,chat_id,chat_title,connected_by) VALUES ('cup','-456','Group','owner');");
+    sqlite.exec("INSERT INTO telegram_links (telegram_id,user_id) VALUES ('123','owner'); INSERT INTO bilac_telegram (tournament_id,chat_id,chat_title,connected_by) VALUES ('cup','-456','Group','owner');");
     const message = { message_id: 3, from: { id: 123 }, chat: { id: -456, type: 'supergroup' }, text: '/addplayer@fixture_bot Đạt' };
     await processUpdate(env, { update_id: 3, message });
     const callback = { id: 'c', from: { id: 999 }, data: 'add:3:0', message };
@@ -72,7 +72,7 @@ describe('Telegram integrated flows', () => {
   });
   it('recovers a keyboard edit failure and allows choosing after an empty confirmation', async () => {
     const { env, sqlite } = fixture();
-    sqlite.exec("INSERT INTO telegram_links VALUES ('123','owner'); INSERT INTO bilac_telegram (tournament_id,chat_id,chat_title,connected_by) VALUES ('cup','-456','Group','owner');");
+    sqlite.exec("INSERT INTO telegram_links (telegram_id,user_id) VALUES ('123','owner'); INSERT INTO bilac_telegram (tournament_id,chat_id,chat_title,connected_by) VALUES ('cup','-456','Group','owner');");
     const message = { message_id: 1, from: { id: 123 }, chat: { id: -456, type: 'supergroup' }, text: '/random' };
     await processUpdate(env, { update_id: 10, message });
     const click = (id: number, data: string) => processUpdate(env, { update_id: id, callback_query: { id: String(id), from: { id: 123 }, message, data } });

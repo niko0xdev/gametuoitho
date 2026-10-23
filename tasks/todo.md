@@ -20,6 +20,13 @@ Implementation is available locally. Design: `tasks/plan.md`. Setup and test ins
 - [x] Independent code review and regression fixes for logout, keyboard-edit failure, premature confirmation, and group-confirmation replay cleanup.
 - [x] Browser walkthrough: add player, select four players, create match, reply with score, finish, view standings, and trigger both deduplicated posting slots.
 
+## Deployment hardening
+
+- [x] Strict, default-off `TELEGRAM_ENABLED` ENV gate covering UI capability, configuration, webhook, processing, recovery, schedule, and delivery.
+- [x] Bot credentials supplied only through ENV; group controls restricted to the verified tournament owner.
+- [x] Binding and account-link generations propagated through ingress, drafts, SQL mutation guards, and delivery.
+- [x] Regression tests for two tournaments/groups, foreign match references, callback forwarding, rebind/relink races, owner revocation, and late migration responses.
+
 ## Required before real-group testing
 
 - [ ] Supply the real bot username and provision bot token/webhook secret through Worker secrets.

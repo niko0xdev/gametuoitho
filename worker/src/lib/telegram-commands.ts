@@ -1,3 +1,4 @@
+import { telegramEnabled, telegramActorSql, telegramActorParams } from './telegram-config';
 import type { Bindings } from '../db';
 import { sha256Hex } from './password';
 import { currentSeason, standings, renderStandings, scoreInput, type RankingPlayer } from '../../../shared/bilac-telegram';
@@ -6,9 +7,9 @@ import { enqueue, telegram, TelegramError } from './telegram-client';
 
 interface Actor { id: number; is_bot?: boolean }
 interface Message { message_id: number; text?: string; chat: { id: number; type: string; title?: string }; from?: Actor; sender_chat?: object; reply_to_message?: { text?: string }; migrate_to_chat_id?: number }
-export interface TelegramUpdate { update_id: number; message?: Message; callback_query?: { id: string; from: Actor; data?: string; message?: Message }; my_chat_member?: { chat: Message['chat']; new_chat_member: { status: string } } }
-interface Integration { tournament_id: string; chat_id: string; enabled: number }
-interface Draft { id: string; tournament_id: string; chat_id: string; telegram_id: string; kind: string; payload: string; revision: number; expires_at: number; consumed: number; decision: string | null }
+export interface TelegramUpdate { bindingId?: string | null; linkId?: string | null; update_id: number; message?: Message; callback_query?: { id: string; from: Actor; data?: string; message?: Message }; my_chat_member?: { chat: Message['chat']; new_chat_member: { status: string } } }
+interface Integration { tournament_id: string; chat_id: string; enabled: number; binding_id: string }
+interface Draft { id: string; tournament_id: string; chat_id: string; telegram_id: string; kind: string; payload: string; revision: number; expires_at: number; consumed: number; decision: string | null; binding_id: string; user_id: string; link_id: string }
 interface Selection { players: RankingPlayer[]; selected: string[]; page: number }
 class CommandError extends Error {}
 
@@ -29,11 +30,14 @@ async function linkedUser(env: Bindings, telegramId: string) {
 async function authorised(env: Bindings, tournamentId: string, telegramId: string) {
   const userId = await linkedUser(env, telegramId);
   if (!userId || !await memberRole(env, tournamentId, userId)) throw new CommandError('Hãy liên kết tài khoản trên web và tham gia giải trước nhé!');
-  return userId;
+  const link = await env.DB.prepare('SELECT link_id FROM telegram_links WHERE telegram_id=? AND user_id=?').bind(telegramId, userId).first<{ link_id: string }>();
+  if (!link?.link_id) throw new CommandError('Liên kết tài khoản đã thay đổi. Hãy thử lại.');
+  return { userId, linkId: link.link_id };
 }
-async function newDraft(env: Bindings, id: string, integration: Integration, telegramId: string, kind: string, payload: unknown) {
-  await env.DB.prepare(`INSERT OR IGNORE INTO telegram_drafts (id,tournament_id,chat_id,telegram_id,kind,payload,expires_at)
-    VALUES (?,?,?,?,?,?,?)`).bind(id, integration.tournament_id, integration.chat_id, telegramId, kind, JSON.stringify(payload), Date.now() + 10 * 60000).run();
+async function newDraft(env: Bindings, id: string, integration: Integration, telegramId: string, kind: string, payload: unknown, identity: { userId: string; linkId: string }) {
+  await env.DB.prepare(`INSERT OR IGNORE INTO telegram_drafts (id,tournament_id,chat_id,telegram_id,kind,payload,expires_at,binding_id,user_id,link_id)
+    SELECT ?,?,?,?,?,?,?,?,?,? WHERE ${telegramActorSql}`).bind(id, integration.tournament_id, integration.chat_id, telegramId, kind, JSON.stringify(payload), Date.now() + 10 * 60000, integration.binding_id, identity.userId, identity.linkId,
+      ...telegramActorParams(integration.tournament_id, identity.userId, { id: integration.binding_id, chatId: integration.chat_id, telegramId, linkId: identity.linkId })).run();
 }
 function selectionMessage(id: string, revision: number, data: Selection) {
   const start = data.page * 8;
@@ -54,14 +58,17 @@ async function matchText(env: Bindings, match: StoredMatch) {
 
 async function callback(env: Bindings, update: TelegramUpdate) {
   const cb = update.callback_query!;
-  if (!cb.message || cb.from.is_bot || cb.message.chat.type === 'private') return;
+  if (!cb.message || cb.from.is_bot || !['group', 'supergroup'].includes(cb.message.chat.type)) return;
   const [action, id, revisionRaw, value, selected] = (cb.data ?? '').split(':');
   if (!['sel', 'page', 'go', 'save', 'finish', 'add'].includes(action)) return;
   const draft = await env.DB.prepare('SELECT * FROM telegram_drafts WHERE id=?').bind(id).first<Draft>();
   if (!draft || draft.chat_id !== String(cb.message.chat.id) || draft.telegram_id !== String(cb.from.id) || draft.expires_at < Date.now()) throw new CommandError('Nút này hết hạn hoặc dành cho người khác. Hãy chạy lệnh lại.');
-  const integration = await env.DB.prepare('SELECT * FROM bilac_telegram WHERE tournament_id=? AND chat_id=? AND enabled=1').bind(draft.tournament_id, draft.chat_id).first<Integration>();
-  if (!integration) throw new CommandError('Group đã ngắt kết nối.');
-  const userId = await authorised(env, draft.tournament_id, draft.telegram_id);
+  const integration = await env.DB.prepare('SELECT * FROM bilac_telegram WHERE tournament_id=? AND chat_id=? AND binding_id=? AND enabled=1').bind(draft.tournament_id, draft.chat_id, draft.binding_id).first<Integration>();
+  if (!integration || (update.bindingId !== undefined && update.bindingId !== draft.binding_id)) throw new CommandError('Group đã ngắt kết nối hoặc đổi phiên liên kết.');
+  const identity = await authorised(env, draft.tournament_id, draft.telegram_id);
+  if (identity.userId !== draft.user_id || identity.linkId !== draft.link_id || (update.linkId !== undefined && identity.linkId !== update.linkId)) throw new CommandError('Liên kết tài khoản đã thay đổi. Hãy chạy lệnh mới.');
+  const userId = identity.userId;
+  const actor = { id: draft.binding_id, chatId: draft.chat_id, telegramId: draft.telegram_id, linkId: draft.link_id };
   if (draft.consumed) return;
   if (draft.revision !== Number(revisionRaw)) {
     if (draft.kind === 'random' && !draft.decision) {
@@ -93,7 +100,7 @@ async function callback(env: Bindings, update: TelegramUpdate) {
   let text: string;
   if (action === 'go' && draft.kind === 'random') {
     let match: StoredMatch;
-    try { match = await createBiLacMatch(env, draft.tournament_id, userId, (data as Selection).selected, `tg-${id}`); }
+    try { match = await createBiLacMatch(env, draft.tournament_id, userId, (data as Selection).selected, `tg-${id}`, actor); }
     catch (error) {
       await env.DB.prepare('UPDATE telegram_drafts SET decision=NULL WHERE id=? AND consumed=0').bind(id).run();
       throw error;
@@ -101,7 +108,7 @@ async function callback(env: Bindings, update: TelegramUpdate) {
     text = await matchText(env, match);
   } else if ((action === 'save' || action === 'finish') && draft.kind === 'score') {
     const match = data.match as StoredMatch;
-    await saveBiLacScore(env, draft.tournament_id, userId, match, scoreInput(String(data.scores[0]), String(data.scores[1])), action === 'finish', `tg-${id}`);
+    await saveBiLacScore(env, draft.tournament_id, userId, match, scoreInput(String(data.scores[0]), String(data.scores[1])), action === 'finish', `tg-${id}`, actor);
     text = `✅ Trận #${match.id}: A ${data.scores[0]} – ${data.scores[1]} B\n${action === 'finish' || match.status === 'FINISHED' ? 'Đã kết thúc trận.' : 'Đã lưu điểm, trận vẫn đang chơi.'}`;
   } else if (action === 'add' && draft.kind === 'player') {
     const name = String(data.name);
@@ -111,13 +118,13 @@ async function callback(env: Bindings, update: TelegramUpdate) {
     if (duplicate && duplicate.id !== playerId) throw new CommandError('Tên người chơi đã có trong giải.');
     await env.DB.prepare(`INSERT OR IGNORE INTO bilac_players (id,name,avatar,tournament_id)
       SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM bilac_players WHERE tournament_id=? AND lower(name)=lower(?))
-      AND EXISTS (SELECT 1 FROM bilac_tournament_members m JOIN users u ON u.id=m.user_id WHERE m.tournament_id=? AND m.user_id=?)`)
-      .bind(playerId, name, `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name)}`, draft.tournament_id, draft.tournament_id, name, draft.tournament_id, userId).run();
+      AND EXISTS (SELECT 1 FROM bilac_tournament_members m JOIN users u ON u.id=m.user_id WHERE m.tournament_id=? AND m.user_id=?) AND ${telegramActorSql}`)
+      .bind(playerId, name, `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name)}`, draft.tournament_id, draft.tournament_id, name, draft.tournament_id, userId, ...telegramActorParams(draft.tournament_id, userId, actor)).run();
     const created = await env.DB.prepare('SELECT 1 FROM bilac_players WHERE id=?').bind(playerId).first();
     if (!created) throw new CommandError('Tên người chơi đã có trong giải.');
     text = `✅ Đã thêm ${name} vào giải. Dùng /random@${env.TELEGRAM_BOT_USERNAME} để chia đội.`;
   } else throw new CommandError('Thao tác không hợp lệ.');
-  await enqueue(env, `draft:${id}`, draft.chat_id, { text }, draft.tournament_id);
+  await enqueue(env, `draft:${id}`, draft.chat_id, { text }, draft.tournament_id, Date.now(), draft.binding_id);
   await env.DB.prepare('UPDATE telegram_drafts SET consumed=1 WHERE id=?').bind(id).run();
 }
 
@@ -125,9 +132,9 @@ async function message(env: Bindings, update: TelegramUpdate) {
   const m = update.message!;
   if (!m.from || m.from.is_bot || m.sender_chat) return;
   const chatId = String(m.chat.id), telegramId = String(m.from.id);
-  const send = (text: string, extra = {}, tournamentId: string | null = null) => enqueue(env, `update:${update.update_id}`, chatId, { text, ...extra }, tournamentId);
+  const send = (text: string, extra = {}, integration: Integration | null = null) => enqueue(env, `update:${update.update_id}`, chatId, { text, ...extra }, integration?.tournament_id ?? null, Date.now(), integration?.binding_id);
   if (m.migrate_to_chat_id) {
-    await env.DB.prepare('UPDATE bilac_telegram SET chat_id=? WHERE chat_id=?').bind(String(m.migrate_to_chat_id), chatId).run();
+    await env.DB.prepare('UPDATE bilac_telegram SET chat_id=? WHERE chat_id=? AND (?=1 OR binding_id=?)').bind(String(m.migrate_to_chat_id), chatId, update.bindingId === undefined ? 1 : 0, update.bindingId ?? null).run();
     return;
   }
   const raw = m.text?.trim() ?? '';
@@ -145,8 +152,9 @@ async function message(env: Bindings, update: TelegramUpdate) {
   if (m.chat.type !== 'group' && m.chat.type !== 'supergroup') return;
   if (verb === '/connect') {
     const hash = await sha256Hex(args[0] || '');
-    const token = await env.DB.prepare("SELECT * FROM telegram_tokens WHERE hash=? AND purpose='group' AND expires_at>?").bind(hash, Date.now()).first<{ user_id: string; tournament_id: string }>();
-    if (!token || await linkedUser(env, telegramId) !== token.user_id || await memberRole(env, token.tournament_id, token.user_id) !== 'owner') throw new CommandError('Mã kết nối không hợp lệ, hoặc bạn chưa liên kết tài khoản chủ giải.');
+    const token = await env.DB.prepare("SELECT * FROM telegram_tokens WHERE hash=? AND purpose='group' AND expires_at>?").bind(hash, Date.now()).first<{ user_id: string; tournament_id: string; link_id: string }>();
+    const liveLink = await env.DB.prepare('SELECT user_id,link_id FROM telegram_links WHERE telegram_id=?').bind(telegramId).first<{ user_id: string; link_id: string }>();
+    if (!token || !liveLink || liveLink.link_id !== token.link_id || liveLink.user_id !== token.user_id || await memberRole(env, token.tournament_id, token.user_id) !== 'owner') throw new CommandError('Mã kết nối không hợp lệ, hoặc bạn chưa liên kết tài khoản chủ giải.');
     let admin: { status: string };
     try { admin = await telegram<{ status: string }>(env, 'getChatMember', { chat_id: chatId, user_id: m.from.id }); }
     catch (error) {
@@ -157,33 +165,38 @@ async function message(env: Bindings, update: TelegramUpdate) {
     const occupied = await env.DB.prepare('SELECT tournament_id FROM bilac_telegram WHERE chat_id=?').bind(chatId).first<{ tournament_id: string }>();
     if (occupied && occupied.tournament_id !== token.tournament_id) throw new CommandError('Group đã kết nối với giải khác.');
     // Stage the destination, then require confirmation in the verified owner session.
-    await env.DB.prepare('UPDATE telegram_tokens SET telegram_id=?,chat_id=?,chat_title=? WHERE hash=?')
-      .bind(telegramId, chatId, (m.chat.title ?? chatId).slice(0, 150), hash).run();
+    const staged = await env.DB.prepare(`UPDATE telegram_tokens SET telegram_id=?,chat_id=?,chat_title=? WHERE hash=? AND expires_at>?
+      AND (chat_id IS NULL OR chat_id=?) AND link_id=?
+      AND EXISTS (SELECT 1 FROM telegram_links WHERE telegram_id=? AND user_id=? AND link_id=?)
+      AND EXISTS (SELECT 1 FROM bilac_tournament_members WHERE tournament_id=? AND user_id=? AND role='owner')`)
+      .bind(telegramId, chatId, (m.chat.title ?? chatId).slice(0, 150), hash, Date.now(), chatId, liveLink.link_id, telegramId, token.user_id, liveLink.link_id, token.tournament_id, token.user_id).run();
+    if (!staged.meta.changes) throw new CommandError('Mã này đã dùng cho group khác hoặc quyền đã thay đổi. Hãy tạo mã mới.');
     await send('Đã nhận group. Chủ giải hãy mở web và xác nhận kết nối. BXH của giải sẽ được chia sẻ trong group này.');
     return;
   }
-  const integration = await env.DB.prepare('SELECT * FROM bilac_telegram WHERE chat_id=? AND enabled=1').bind(chatId).first<Integration>();
+  const integration = await env.DB.prepare('SELECT * FROM bilac_telegram WHERE chat_id=? AND enabled=1 AND (?=1 OR binding_id=?)').bind(chatId, update.bindingId === undefined ? 1 : 0, update.bindingId ?? null).first<Integration>();
   if (!integration) { if (verb === '/help') await send('Group chưa kết nối. Chủ giải mở phần Telegram trên web để bắt đầu.'); return; }
   if (verb === '/help') {
-    await send(`/bxh@${env.TELEGRAM_BOT_USERNAME}: BXH tuần\n/random@${env.TELEGRAM_BOT_USERNAME}: chọn người và chia đội\n/addplayer@${env.TELEGRAM_BOT_USERNAME} Tên: thêm người\n/score@${env.TELEGRAM_BOT_USERNAME} mã-trận 10 7: nhập điểm (hoặc reply tin trận)\nLịch BXH: 13:20 và 21:00 giờ Việt Nam.`, {}, integration.tournament_id);
+    await send(`/bxh@${env.TELEGRAM_BOT_USERNAME}: BXH tuần\n/random@${env.TELEGRAM_BOT_USERNAME}: chọn người và chia đội\n/addplayer@${env.TELEGRAM_BOT_USERNAME} Tên: thêm người\n/score@${env.TELEGRAM_BOT_USERNAME} mã-trận 10 7: nhập điểm (hoặc reply tin trận)\nLịch BXH: 13:20 và 21:00 giờ Việt Nam.`, {}, integration);
     return;
   }
-  if (verb === '/bxh') { await send(await tableMessage(env, integration.tournament_id), {}, integration.tournament_id); return; }
+  if (verb === '/bxh') { await send(await tableMessage(env, integration.tournament_id), {}, integration); return; }
   if (!['/random', '/score', '/addplayer'].includes(verb)) return;
-  await authorised(env, integration.tournament_id, telegramId);
+  const identity = await authorised(env, integration.tournament_id, telegramId);
+  if (update.linkId !== undefined && identity.linkId !== update.linkId) throw new CommandError('Liên kết tài khoản đã thay đổi. Hãy chạy lệnh mới.');
   const id = update.update_id.toString(36);
   if (verb === '/random') {
     const players = (await env.DB.prepare('SELECT id,name FROM bilac_players WHERE tournament_id=? ORDER BY name').bind(integration.tournament_id).all<RankingPlayer>()).results;
     if (players.length < 2) throw new CommandError('Cần ít nhất 2 người. Dùng /addplayer để thêm nhé!');
     const selection: Selection = { players, selected: [], page: 0 };
-    await newDraft(env, id, integration, telegramId, 'random', selection);
+    await newDraft(env, id, integration, telegramId, 'random', selection, identity);
     const payload = selectionMessage(id, 0, selection);
-    await send(payload.text, { reply_markup: payload.reply_markup }, integration.tournament_id);
+    await send(payload.text, { reply_markup: payload.reply_markup }, integration);
   } else if (verb === '/addplayer') {
     const name = args.join(' ').normalize('NFC').replace(/\s+/g, ' ').trim();
     if (!name || name.length > 60 || /[\p{Cc}\p{Cf}]/u.test(name)) throw new CommandError('Tên cần từ 1 đến 60 ký tự, không chứa ký tự điều khiển.');
-    await newDraft(env, id, integration, telegramId, 'player', { name });
-    await send(`Thêm người chơi: ${name}?`, { reply_markup: { inline_keyboard: [[{ text: 'Xác nhận thêm', callback_data: `add:${id}:0` }]] } }, integration.tournament_id);
+    await newDraft(env, id, integration, telegramId, 'player', { name }, identity);
+    await send(`Thêm người chơi: ${name}?`, { reply_markup: { inline_keyboard: [[{ text: 'Xác nhận thêm', callback_data: `add:${id}:0` }]] } }, integration);
   } else {
     let matchId: string | undefined;
     if (args.length === 2) matchId = m.reply_to_message?.text?.match(/Trận #([a-zA-Z0-9-]+)/)?.[1];
@@ -192,14 +205,27 @@ async function message(env: Bindings, update: TelegramUpdate) {
     const scores = scoreInput(args[0], args[1]);
     const match = await env.DB.prepare('SELECT * FROM bilac_matches WHERE id=? AND tournament_id=?').bind(matchId, integration.tournament_id).first<StoredMatch>();
     if (!match) throw new CommandError('Không tìm thấy trận trong giải này.');
-    await newDraft(env, id, integration, telegramId, 'score', { match, scores });
+    await newDraft(env, id, integration, telegramId, 'score', { match, scores }, identity);
     await send(`Trận #${match.id}\nA ${scores[0]} – ${scores[1]} B\n${match.status === 'FINISHED' ? 'Sửa kết quả đã kết thúc (chỉ chủ giải).' : 'Chọn lưu điểm hoặc kết thúc trận.'}`, {
       reply_markup: { inline_keyboard: [[{ text: 'Lưu điểm', callback_data: `save:${id}:0` }, { text: 'Kết thúc trận', callback_data: `finish:${id}:0` }]] },
-    }, integration.tournament_id);
+    }, integration);
   }
 }
 
 export async function processUpdate(env: Bindings, update: TelegramUpdate) {
+  if (!telegramEnabled(env)) return;
+  const chat = update.message?.chat ?? update.callback_query?.message?.chat ?? update.my_chat_member?.chat;
+  const bootstrap = /^\/(start|connect)(@\w+)?(\s|$)/i.test(update.message?.text ?? '');
+  if (chat && chat.type !== 'private' && !bootstrap && update.bindingId !== undefined) {
+    const active = await env.DB.prepare('SELECT binding_id FROM bilac_telegram WHERE chat_id=? AND enabled=1').bind(String(chat.id)).first<{ binding_id: string }>();
+    if (!update.bindingId || active?.binding_id !== update.bindingId) return;
+  }
+  const write = Boolean(update.callback_query) || /^\/(random|score|addplayer|connect)(@\w+)?(\s|$)/i.test(update.message?.text ?? '');
+  if (write && update.linkId !== undefined) {
+    const telegramId = update.callback_query?.from.id ?? update.message?.from?.id;
+    const active = await env.DB.prepare('SELECT link_id FROM telegram_links WHERE telegram_id=?').bind(String(telegramId)).first<{ link_id: string }>();
+    if (!update.linkId || active?.link_id !== update.linkId) return;
+  }
   try {
     if (update.callback_query) {
       // Stop the spinner even if later database processing needs recovery.
@@ -208,7 +234,7 @@ export async function processUpdate(env: Bindings, update: TelegramUpdate) {
     } else if (update.message) await message(env, update);
     else if (update.my_chat_member) {
       const status = update.my_chat_member.new_chat_member.status;
-      if (['left', 'kicked'].includes(status)) await env.DB.prepare("UPDATE bilac_telegram SET enabled=0,health='Bot removed from group' WHERE chat_id=?").bind(String(update.my_chat_member.chat.id)).run();
+      if (['left', 'kicked'].includes(status)) await env.DB.prepare("UPDATE bilac_telegram SET enabled=0,health='Bot removed from group' WHERE chat_id=? AND (?=1 OR binding_id=?)").bind(String(update.my_chat_member.chat.id), update.bindingId === undefined ? 1 : 0, update.bindingId ?? null).run();
     }
   } catch (error) {
     if (!(error instanceof CommandError) && !(error instanceof Error && /^(Bạn|Chọn|Giải|Trận|Điểm)/.test(error.message))) throw error;
@@ -218,6 +244,7 @@ export async function processUpdate(env: Bindings, update: TelegramUpdate) {
 }
 
 export async function recoverUpdates(env: Bindings) {
+  if (!telegramEnabled(env)) return;
   const now = Date.now();
   const pending = await env.DB.prepare("SELECT id,payload FROM telegram_updates WHERE status='pending' AND lease_until<? AND attempts<5 ORDER BY id LIMIT 20")
     .bind(now).all<{ id: number; payload: string }>();

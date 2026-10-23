@@ -13,9 +13,9 @@ import { sha256Hex } from '../src/lib/password.ts';
 // This process binds loopback only and uses an in-memory fixture database.
 const port = Number(process.env.TELEGRAM_PREVIEW_PORT || 3310);
 const { env, sqlite } = testDatabase();
-Object.assign(env, { APP_URL: `http://localhost:${port}`, TELEGRAM_BOT_TOKEN: 'local-fixture', TELEGRAM_WEBHOOK_SECRET: 'local-fixture', TELEGRAM_BOT_USERNAME: 'bilac_local_test_bot' });
+Object.assign(env, { APP_URL: `http://localhost:${port}`, TELEGRAM_ENABLED: 'true', TELEGRAM_BOT_TOKEN: 'local-fixture', TELEGRAM_WEBHOOK_SECRET: 'local-fixture', TELEGRAM_BOT_USERNAME: 'bilac_local_test_bot' });
 sqlite.prepare('UPDATE users SET password_hash=? WHERE id=?').run(await sha256Hex('LocalTest123'), 'owner');
-sqlite.exec("INSERT INTO telegram_links VALUES ('123','owner'); INSERT INTO bilac_telegram (tournament_id,chat_id,chat_title,connected_by) VALUES ('cup','-456','Group thử nghiệm local','owner');");
+sqlite.exec("INSERT INTO telegram_links (telegram_id,user_id) VALUES ('123','owner'); INSERT INTO bilac_telegram (tournament_id,chat_id,chat_title,connected_by) VALUES ('cup','-456','Group thử nghiệm local','owner');");
 const messages: Array<{ message_id: number; text: string; reply_markup?: object }> = [];
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {

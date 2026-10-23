@@ -23,7 +23,7 @@ describe('Telegram persisted actions', () => {
   });
   it('never blindly retries an uncertain send and honours retry_after', async () => {
     const { env, sqlite } = testDatabase();
-    env.TELEGRAM_BOT_TOKEN = 'fixture';
+    Object.assign(env, { TELEGRAM_ENABLED: 'true', TELEGRAM_BOT_TOKEN: 'fixture', TELEGRAM_BOT_USERNAME: 'fixture_bot', TELEGRAM_WEBHOOK_SECRET: 'fixture-secret' });
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('timeout')));
     await enqueue(env, 'one', '123', { text: 'test' }, null, 1000);
     await deliver(env, 1000);

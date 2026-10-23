@@ -10,6 +10,7 @@ type Status = {
 export default function BiLacTelegramSettings({ tournamentId, userId, request }: {
   tournamentId: string; userId: string | null; request: (url: string, options?: RequestInit) => Promise<Response>;
 }) {
+  const [enabled, setEnabled] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -33,12 +34,18 @@ export default function BiLacTelegramSettings({ tournamentId, userId, request }:
     return data;
   }
   async function refresh(epoch = generation.current) {
+    const response = await requestRef.current('/api/telegram/capabilities', { cache: 'no-store' });
+    const capability = await response.json().catch(() => ({ enabled: false }));
+    if (epoch !== generation.current) return;
+    const available = response.ok && capability.enabled === true;
+    setEnabled(available);
+    if (!available) { setStatus(null); return; }
     const data = await call('status', undefined, 'GET');
     if (epoch === generation.current) setStatus(data);
   }
   useEffect(() => {
     const epoch = ++generation.current;
-    setStatus(null); setLink(''); setCommand(''); setError(''); setNotice(''); setBusy(false);
+    setEnabled(false); setStatus(null); setLink(''); setCommand(''); setError(''); setNotice(''); setBusy(false);
     void refresh(epoch).catch(e => { if (epoch === generation.current) setError(e.message); });
     return () => { generation.current++; };
   }, [tournamentId, userId]);
@@ -49,6 +56,7 @@ export default function BiLacTelegramSettings({ tournamentId, userId, request }:
     catch (e) { if (epoch === generation.current) setError(e instanceof Error ? e.message : 'Có lỗi xảy ra.'); }
     finally { if (epoch === generation.current) setBusy(false); }
   }
+  if (!enabled) return null;
   const button = 'px-3 py-2 min-h-10 rounded-lg bg-stone-100 text-stone-800 text-sm font-semibold hover:bg-stone-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 disabled:opacity-50';
   return (
     <section className="mb-6 rounded-xl border border-stone-200 bg-stone-50 p-4 space-y-3" aria-labelledby="telegram-title">

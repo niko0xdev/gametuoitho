@@ -19,9 +19,15 @@ The group starts connected for convenience. The settings panel can pause schedul
 
 ## Production setup
 
+The global `TELEGRAM_ENABLED` Worker ENV flag defaults to the exact string `false`. Telegram is available only when it is exactly `true` and all three bot ENV values below exist. With the flag off, the settings panel is hidden, configuration/webhook routes reject requests, and command processing, recovery, outbound delivery, and scheduled posts do no work. `GET /api/telegram/capabilities` returns only the effective enabled boolean and is never cached. Provision bot credentials through Worker secrets only; no frontend/API field accepts bot credentials. Change the flag in Worker environment configuration and redeploy to enable the integration after provisioning.
+
+Group configuration belongs exclusively to the verified tournament owner. Ordinary members can link their own account, but cannot issue group tokens, bind, rebind, pause, test-post, or disconnect groups, and do not receive group configuration details. Membership and identity always come from the verified session and database, never from a claimed owner role or tournament access code.
+
+Every group binding and Telegram account link has an independent generation ID. The webhook stamps the current generations from database state, overriding any supplied association. Drafts retain their original tournament, group, application user, and link generation. Subsequent processing and SQL mutations require the same live association. Rebinding even to the same group, or unlinking/relinking the same Telegram ID, invalidates old work. Outbox jobs also carry binding generations; stale jobs are cancelled and an old migration response cannot change a replacement binding. The database enforces unique tournament and group bindings.
+
 Runtime support is implemented in the Cloudflare Worker/D1 backend. Legacy Express retains its existing game routes and shares the season helper; it does not host the Telegram webhook or scheduler. Use the Worker or the isolated simulator to test this feature.
 
-Before release, apply `worker/migrations/0008_telegram.sql` through the normal D1 migration command. It adds session, integration, draft, inbox, outbox, and audit tables, plus match revisions. Deploy the Worker and frontend together: the Worker now requires a verified login session for existing gated Bi Lac mutations. Existing logged-in users must sign out and sign in again. Anonymous public views remain available. No auth provider or password-hashing algorithm is changed.
+Before release, apply `worker/migrations/0008_telegram.sql` and `worker/migrations/0009_telegram_binding_isolation.sql` through the normal D1 migration command. It adds session, integration, draft, inbox, outbox, and audit tables, plus match revisions. Deploy the Worker and frontend together: the Worker now requires a verified login session for existing gated Bi Lac mutations. Existing logged-in users must sign out and sign in again. Anonymous public views remain available. No auth provider or password-hashing algorithm is changed.
 
 Provide these Worker secrets interactively, without placing values in source, chat, shell history, or a checked-in file:
 
