@@ -1,6 +1,6 @@
 # Telegram integration for Bi Lac tournaments
 
-Status: implemented locally following user approval, with real-bot configuration and live verification pending. Research date: 23 October 2026. The initial design follows below; see `tasks/todo.md` for delivery status and the explicit Worker-only runtime scope adjustment. No production deployment has occurred.
+Status: deployed to production following user approval, with Telegram disabled by ENV; real-bot configuration and enabled-group verification remain pending. Research date: 23 October 2026. The initial design follows below; see `tasks/todo.md` for delivery status and the explicit Worker-only runtime scope adjustment. Production rollout details are recorded in `tasks/todo.md`.
 
 ## Scope and defaults
 
