@@ -1,6 +1,6 @@
 # Telegram integration delivery checklist
 
-Deployed to production on 23 October 2026 with Telegram disabled by ENV. Design: `tasks/plan.md`. Setup and test instructions: `docs/telegram-bilac.md`.
+Deployed to production on 23 October 2026; Telegram enabled for @gtt_bilac_bot on 26 October 2026. Design: `tasks/plan.md`. Setup and test instructions: `docs/telegram-bilac.md`.
 
 ## Implemented and verified
 
@@ -29,9 +29,9 @@ Deployed to production on 23 October 2026 with Telegram disabled by ENV. Design:
 
 ## Required before real-group testing
 
-- [ ] Supply the real bot username and provision bot token/webhook secret through Worker secrets.
+- [x] Supply the real bot username and provision bot token/webhook secret through Worker secrets.
 - [x] Apply both D1 migrations and deploy matching frontend/Worker builds through the approved release flow.
-- [ ] Explicitly register the real webhook and command menu using the setup script.
+- [x] Explicitly register the real webhook and command menu using the setup script.
 - [ ] Verify real bot/group permissions, webhook delivery, and both scheduled slots in an opted-in test group.
 No push or merge was performed. The user authorised direct deployment; local commits remain on `feat/bilac-telegram`, in accordance with the separate AGENTS.md push/merge confirmation rule.
 
@@ -41,9 +41,18 @@ Telegram runtime, session enforcement, and new persistence target Worker/D1. Leg
 
 ## Production verification
 
-- Worker version: `efe48ae8-d9e4-4df4-913c-df50312f86d2`.
+- Initial disabled Worker version: `efe48ae8-d9e4-4df4-913c-df50312f86d2`.
 - Frontend bundle: `/assets/index-FuRJQvrs.js`, confirmed against the production HTML.
 - Health endpoint: HTTP 200; capabilities: `{ "enabled": false }`.
 - Disabled Telegram settings and webhook: HTTP 404 with the feature-disabled response.
 - Anonymous tournament list: HTTP 401; both migrations applied with none pending.
-- Real-bot configuration and enabled-group smoke tests remain pending; no Telegram secrets are currently provisioned.
+- Enabled-group smoke tests remain pending until the owner connects a group.
+
+## Production activation, 26 October 2026
+
+- Bot identity verified as `@gtt_bilac_bot` before provisioning.
+- Bot token and generated webhook secret supplied through process memory/stdin to Worker secrets; no credential values recorded in repository files.
+- `TELEGRAM_ENABLED=true`; Worker version `aa2a4f6f-0015-4fe8-a207-f83d0b036db6`.
+- Webhook registered at `https://gametuoitho.space/api/telegram/webhook`, with the command menu installed.
+- Telegram reports zero pending updates and no webhook error.
+- Owner must still link their account and explicitly bind their group through the verified web session.
