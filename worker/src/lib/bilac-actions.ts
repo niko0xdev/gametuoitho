@@ -12,7 +12,7 @@ export async function memberRole(env: Bindings, tournamentId: string, userId: st
     WHERE m.tournament_id=? AND m.user_id=?`).bind(tournamentId, userId).first<{ role: string }>();
   return row?.role ?? null;
 }
-export async function createBiLacMatch(env: Bindings, tournamentId: string, userId: string, playerIds: string[], operationId: string, actor?: TelegramActorBinding) {
+export async function createBiLacMatch(env: Bindings, tournamentId: string, userId: string, playerIds: string[], operationId: string, actor?: TelegramActorBinding, teams?: { teamA: string[]; teamB: string[] }) {
   if (!await memberRole(env, tournamentId, userId)) throw new Error('Bạn cần là thành viên giải đấu.');
   const existing = await env.DB.prepare('SELECT * FROM bilac_matches WHERE id=? AND tournament_id=?').bind(operationId, tournamentId).first<StoredMatch>();
   if (existing) return existing;
@@ -21,15 +21,23 @@ export async function createBiLacMatch(env: Bindings, tournamentId: string, user
   const players = (await env.DB.prepare('SELECT id FROM bilac_players WHERE tournament_id=?').bind(tournamentId).all<{ id: string }>()).results;
   const selected = players.filter(p => playerIds.includes(p.id));
   if (selected.length < 2 || selected.length !== new Set(playerIds).size || selected.length !== playerIds.length) throw new Error('Chọn ít nhất 2 người chơi hợp lệ, không trùng nhau.');
-  const history = (await env.DB.prepare('SELECT * FROM bilac_matches WHERE tournament_id=?').bind(tournamentId).all<StoredMatch>()).results;
-  const { teamA, teamB, sittingOut } = pairPlayers(selected, undefined, history.map(m => ({ timestamp: m.timestamp, team1: JSON.parse(m.team1), team2: JSON.parse(m.team2), benched: m.benched })));
+  let teamA: string[], teamB: string[], benched: string | null = null;
+  if (teams) {
+    const assigned = [...teams.teamA, ...teams.teamB];
+    if (teams.teamA.length !== 2 || teams.teamB.length !== 2 || new Set(assigned).size !== 4 || selected.length !== 4 || assigned.some(id => !playerIds.includes(id))) throw new Error('Chọn đúng 2 người mỗi đội, không trùng nhau.');
+    teamA = teams.teamA; teamB = teams.teamB;
+  } else {
+    const history = (await env.DB.prepare('SELECT * FROM bilac_matches WHERE tournament_id=?').bind(tournamentId).all<StoredMatch>()).results;
+    const paired = pairPlayers(selected, undefined, history.map(m => ({ timestamp: m.timestamp, team1: JSON.parse(m.team1), team2: JSON.parse(m.team2), benched: m.benched })));
+    teamA = paired.teamA.map(p => p.id); teamB = paired.teamB.map(p => p.id); benched = paired.sittingOut?.id ?? null;
+  }
   const result = await env.DB.prepare(`INSERT OR IGNORE INTO bilac_matches
     (id,tournament_id,timestamp,week_label,team1,team2,benched,score1,score2,status)
     SELECT ?,?,?,?,?,?,?,0,0,'PLAYING' WHERE NOT EXISTS
     (SELECT 1 FROM bilac_matches WHERE tournament_id=? AND status='PLAYING')
     AND EXISTS (SELECT 1 FROM bilac_tournament_members m JOIN users u ON u.id=m.user_id WHERE m.tournament_id=? AND m.user_id=?) AND ${telegramActorSql}
     AND NOT EXISTS (SELECT 1 FROM bilac_telegram_audit WHERE match_id=? AND tournament_id=? AND after_json='{"status":"CANCELLED"}')`)
-    .bind(operationId, tournamentId, Date.now(), currentSeason(), JSON.stringify(teamA.map(p => p.id)), JSON.stringify(teamB.map(p => p.id)), sittingOut?.id ?? null, tournamentId, tournamentId, userId, ...telegramActorParams(tournamentId, userId, actor), operationId, tournamentId).run();
+    .bind(operationId, tournamentId, Date.now(), currentSeason(), JSON.stringify(teamA), JSON.stringify(teamB), benched, tournamentId, tournamentId, userId, ...telegramActorParams(tournamentId, userId, actor), operationId, tournamentId).run();
   if (!result.meta.changes) {
     const replay = await env.DB.prepare('SELECT * FROM bilac_matches WHERE id=? AND tournament_id=?').bind(operationId, tournamentId).first<StoredMatch>();
     if (replay) return replay;

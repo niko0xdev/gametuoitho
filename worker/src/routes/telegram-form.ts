@@ -6,13 +6,14 @@ import { telegramActorSql, telegramActorParams, type TelegramActorBinding } from
 import { createBiLacMatch, memberRole } from '../lib/bilac-actions';
 import { publishMatchCard } from '../lib/telegram-commands';
 import { deliver } from '../lib/telegram-client';
+import { sha256Hex } from '../lib/password';
 
 interface FormDraft {
   id: string; tournament_id: string; chat_id: string; binding_id: string; telegram_id: string;
   user_id: string; link_id: string; payload: string; expires_at: number; consumed: number; decision: string | null;
 }
 interface FormState { draft: FormDraft; actor: TelegramActorBinding; groupName: string; tournamentName: string }
-interface FormPayload { players: Array<{ id: string; name: string }>; submittedIds?: string[] }
+interface FormPayload { players: Array<{ id: string; name: string }>; submittedIds?: string[]; mode?: 'random' | 'manual'; teamA?: string[]; teamB?: string[] }
 export const telegramFormRoute = new Hono<{ Bindings: Bindings; Variables: { form: FormState } }>();
 telegramFormRoute.use('/:id', async (c, next) => {
   c.header('Cache-Control', 'private, no-store');
@@ -35,32 +36,44 @@ telegramFormRoute.use('/:id', async (c, next) => {
 telegramFormRoute.get('/:id', async c => {
   const { draft, groupName, tournamentName } = c.get('form');
   const payload = JSON.parse(draft.payload) as FormPayload;
-  return c.json({ players: payload.players, groupName, tournamentName, expiresAt: draft.expires_at, submittedMatchId: draft.consumed ? 'tg-' + draft.id : null });
+  const selectionCacheKey = await sha256Hex(JSON.stringify([draft.user_id, draft.telegram_id, draft.link_id, draft.tournament_id, draft.chat_id, draft.binding_id]));
+  return c.json({ manualTeamsEnabled: true, selectionCacheKey, players: payload.players, groupName, tournamentName, expiresAt: draft.expires_at, submittedMatchId: draft.consumed ? 'tg-' + draft.id : null });
 });
 telegramFormRoute.post('/:id', async c => {
   const state = c.get('form'), { draft, actor } = state;
   const raw = await c.req.text();
   if (raw.length > 65536) return c.json({ error: 'Danh sách quá lớn.' }, 413);
-  let input: { playerIds?: unknown };
+  let input: { playerIds?: unknown; mode?: unknown; teamA?: unknown; teamB?: unknown };
   try { input = JSON.parse(raw); } catch { return c.json({ error: 'Dữ liệu không hợp lệ.' }, 400); }
   const ids = input?.playerIds;
   const payload = JSON.parse(draft.payload) as FormPayload;
   const allowed = new Set(payload.players.map(p => p.id));
   if (!Array.isArray(ids) || ids.length < 2 || ids.some(id => typeof id !== 'string' || !allowed.has(id)) || new Set(ids).size !== ids.length) return c.json({ error: 'Chọn ít nhất 2 người trong danh sách, không chọn trùng.' }, 400);
   const selected = [...ids].sort() as string[];
-  const sameSelection = (p: FormPayload) => JSON.stringify(p.submittedIds) === JSON.stringify(selected);
+  const mode = input.mode ?? 'random';
+  if (mode !== 'random' && mode !== 'manual') return c.json({ error: 'Chế độ tạo trận không hợp lệ.' }, 400);
+  let teams: { teamA: string[]; teamB: string[] } | undefined;
+  if (mode === 'manual') {
+    const validPair = (pair: unknown): pair is string[] => Array.isArray(pair) && pair.length === 2 && pair.every(id => typeof id === 'string' && allowed.has(id));
+    if (!validPair(input.teamA) || !validPair(input.teamB)) return c.json({ error: 'Chọn đúng 2 người mỗi đội.' }, 400);
+    const assigned = [...input.teamA, ...input.teamB];
+    if (new Set(assigned).size !== 4 || JSON.stringify([...assigned].sort()) !== JSON.stringify(selected)) return c.json({ error: 'Hai đội cần 4 người khác nhau trong danh sách đã chọn.' }, 400);
+    teams = { teamA: [...input.teamA].sort(), teamB: [...input.teamB].sort() };
+  }
+  const sameSelection = (p: FormPayload) => JSON.stringify(p.submittedIds) === JSON.stringify(selected) && (p.mode ?? 'random') === mode
+    && (mode === 'random' || (JSON.stringify(p.teamA) === JSON.stringify(teams!.teamA) && JSON.stringify(p.teamB) === JSON.stringify(teams!.teamB)));
   if (draft.consumed && !sameSelection(payload)) return c.json({ error: 'Form đã tạo trận với một danh sách khác. Dùng /random để mở lại.' }, 409);
   if (!draft.consumed) {
     const claim = await c.env.DB.prepare(`UPDATE telegram_drafts SET decision='submit',payload=? WHERE id=? AND consumed=0 AND decision IS NULL AND expires_at>?
       AND EXISTS (SELECT 1 FROM bilac_tournament_members WHERE tournament_id=? AND user_id=?) AND ${telegramActorSql}`)
-      .bind(JSON.stringify({ ...payload, submittedIds: selected }), draft.id, Date.now(), draft.tournament_id, draft.user_id, ...telegramActorParams(draft.tournament_id, draft.user_id, actor)).run();
+      .bind(JSON.stringify({ ...payload, submittedIds: selected, mode, ...teams }), draft.id, Date.now(), draft.tournament_id, draft.user_id, ...telegramActorParams(draft.tournament_id, draft.user_id, actor)).run();
     if (!claim.meta.changes) {
       const current = await c.env.DB.prepare('SELECT payload,decision FROM telegram_drafts WHERE id=?').bind(draft.id).first<{ payload: string; decision: string | null }>();
       if (!current || current.decision !== 'submit' || !sameSelection(JSON.parse(current.payload))) return c.json({ error: 'Form hoặc quyền đã thay đổi. Hãy mở lại.' }, 409);
     }
   }
   try {
-    const match = await createBiLacMatch(c.env, draft.tournament_id, draft.user_id, selected, 'tg-' + draft.id, actor);
+    const match = await createBiLacMatch(c.env, draft.tournament_id, draft.user_id, selected, 'tg-' + draft.id, actor, teams);
     await publishMatchCard(c.env, match, draft);
     await c.env.DB.prepare("UPDATE telegram_drafts SET consumed=1 WHERE id=? AND decision='submit'").bind(draft.id).run();
     c.executionCtx.waitUntil(deliver(c.env));

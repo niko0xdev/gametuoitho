@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, CheckCircle2, Loader2, Search, Shuffle, Users } from 'lucide-react';
 
 export interface TelegramMiniApp { initData: string; ready?: () => void; expand?: () => void; close?: () => void }
-interface FormData { players: Array<{ id: string; name: string }>; groupName: string; tournamentName: string; expiresAt: number; submittedMatchId: string | null }
+interface FormData { players: Array<{ id: string; name: string }>; groupName: string; tournamentName: string; expiresAt: number; submittedMatchId: string | null; selectionCacheKey?: string; manualTeamsEnabled?: boolean }
 type MiniAppWindow = Window & { Telegram?: { WebApp?: TelegramMiniApp } };
 let sdkLoading: Promise<TelegramMiniApp> | null = null;
 function loadSdk() {
@@ -26,6 +26,8 @@ export default function TelegramRandomForm({ telegramApp }: { telegramApp?: Tele
   const [data, setData] = useState<FormData | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
+  const [mode, setMode] = useState<'random' | 'manual'>('random');
+  const [teams, setTeams] = useState<{ teamA: string[]; teamB: string[] }>({ teamA: [], teamB: [] });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -35,12 +37,12 @@ export default function TelegramRandomForm({ telegramApp }: { telegramApp?: Tele
   const submitting = useRef(false);
   const legacyDraftId = new URLSearchParams(window.location.search).get('draft') ?? '';
   const draftId = useRef(legacyDraftId);
-  async function request(method: 'GET' | 'POST', playerIds?: string[], signal?: AbortSignal) {
+  async function request(method: 'GET' | 'POST', body?: { playerIds: string[]; mode: 'random' | 'manual'; teamA?: string[]; teamB?: string[] }, signal?: AbortSignal) {
     if (!app.current?.initData) throw new Error('Hãy mở form bằng nút Mở form trong Telegram.');
     const response = await fetch(`/api/telegram/form/${encodeURIComponent(draftId.current)}`, {
       method, credentials: 'omit', cache: 'no-store', signal,
       headers: { Authorization: `tma ${app.current.initData}`, ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}) },
-      ...(method === 'POST' ? { body: JSON.stringify({ playerIds }) } : {}),
+      ...(method === 'POST' ? { body: JSON.stringify(body) } : {}),
     });
     const result = await response.json().catch(() => ({ error: 'Máy chủ đang bận. Hãy thử lại sau ít phút.' }));
     if (!response.ok) throw new Error(result.error || 'Chưa thể xử lý. Hãy thử lại.');
@@ -57,7 +59,19 @@ export default function TelegramRandomForm({ telegramApp }: { telegramApp?: Tele
         draftId.current = start?.startsWith('pick_') ? start.slice(5) : legacyDraftId;
         if (!/^[a-z0-9-]{1,64}$/.test(draftId.current)) throw new Error('Dùng /random trong group rồi bấm Mở form để chọn người.');
         const result = await request('GET', undefined, controller.signal) as FormData;
-        if (active) { setData(result); setDone(Boolean(result.submittedMatchId)); }
+        if (active) {
+          setData(result); setDone(Boolean(result.submittedMatchId));
+          try {
+            if (result.selectionCacheKey) {
+              const key = 'bilac:telegram:presence:v1:' + result.selectionCacheKey;
+              const cached = JSON.parse(localStorage.getItem(key) ?? 'null');
+              if (cached && Number.isFinite(cached.expiresAt) && cached.expiresAt > Date.now() && cached.expiresAt <= Date.now() + 2 * 3600000 && Array.isArray(cached.playerIds)) {
+                const roster = new Set(result.players.map(p => p.id));
+                setSelected(new Set(cached.playerIds.filter((id: unknown): id is string => typeof id === 'string' && roster.has(id))));
+              } else if (cached) localStorage.removeItem(key);
+            }
+          } catch { /* Storage may be unavailable in the Telegram webview. */ }
+        }
       } catch (e) { if (active && !controller.signal.aborted) setError(e instanceof Error ? e.message : 'Không tải được danh sách.'); }
       finally { if (active) setLoading(false); }
     })();
@@ -66,11 +80,26 @@ export default function TelegramRandomForm({ telegramApp }: { telegramApp?: Tele
   useEffect(() => { const timer = window.setInterval(() => setClock(Date.now()), 15000); return () => window.clearInterval(timer); }, []);
   const visible = useMemo(() => data?.players.filter(p => searchKey(p.name).includes(searchKey(search))) ?? [], [data, search]);
   const expired = Boolean(data && clock >= data.expiresAt);
+  const ready = mode === 'manual' ? teams.teamA.length === 2 && teams.teamB.length === 2 : selected.size >= 2;
+  function assign(id: string, team: string) {
+    setTeams(previous => {
+      if ((team === 'teamA' || team === 'teamB') && previous[team].length >= 2) return previous;
+      return { teamA: [...previous.teamA.filter(p => p !== id), ...(team === 'teamA' ? [id] : [])], teamB: [...previous.teamB.filter(p => p !== id), ...(team === 'teamB' ? [id] : [])] };
+    });
+  }
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (submitting.current || selected.size < 2 || expired || done) return;
+    if (submitting.current || !ready || expired || done) return;
     submitting.current = true; setBusy(true); setError('');
-    try { await request('POST', [...selected]); setDone(true); }
+    try {
+      const playerIds = mode === 'manual' ? [...teams.teamA, ...teams.teamB] : [...selected];
+      await request('POST', { playerIds, mode, ...(mode === 'manual' ? teams : {}) });
+      if (data?.selectionCacheKey) {
+        try { localStorage.setItem('bilac:telegram:presence:v1:' + data.selectionCacheKey, JSON.stringify({ playerIds, expiresAt: Date.now() + 2 * 3600000 })); }
+        catch { /* Creating a match does not depend on local storage. */ }
+      }
+      setDone(true);
+    }
     catch (e) { setError(e instanceof Error ? e.message : 'Chưa chia được đội. Hãy thử lại.'); }
     finally { submitting.current = false; setBusy(false); }
   }
@@ -79,18 +108,22 @@ export default function TelegramRandomForm({ telegramApp }: { telegramApp?: Tele
   if (done) return <main className="min-h-[100dvh] flex items-center justify-center bg-stone-50 p-6"><div className="max-w-sm w-full rounded-2xl border border-green-200 bg-white p-6 text-center space-y-4"><CheckCircle2 className="w-12 h-12 text-green-600 mx-auto" /><h1 className="font-bold text-xl text-stone-900">Đã chia đội!</h1><p className="text-stone-600 text-sm">Kết quả đang được gửi về <strong>{data.groupName}</strong>. Bạn có thể dùng nút thắng/huỷ trong group.</p><button type="button" onClick={() => app.current?.close?.()} className="w-full rounded-xl bg-stone-900 text-white py-3 font-semibold">Đóng form</button></div></main>;
   return <main className="min-h-[100dvh] bg-stone-50 text-stone-900">
     <form onSubmit={submit} className="max-w-lg mx-auto">
-      <header className="px-5 pt-6 pb-4 space-y-2"><p className="text-xs font-semibold uppercase tracking-wider text-orange-700">{data.tournamentName}</p><h1 className="text-2xl font-bold flex items-center gap-2"><Users className="w-6 h-6" /> Ai đang có mặt?</h1><p className="text-sm text-stone-500">Chọn người, rồi bấm Chia đội. Kết quả gửi về {data.groupName}.</p></header>
+      <header className="px-5 pt-6 pb-4 space-y-2"><p className="text-xs font-semibold uppercase tracking-wider text-orange-700">{data.tournamentName}</p><h1 className="text-2xl font-bold flex items-center gap-2"><Users className="w-6 h-6" /> Ai đang có mặt?</h1><p className="text-sm text-stone-500">Chọn ngẫu nhiên hoặc tự xếp hai đội. Kết quả gửi về {data.groupName}.</p></header>
       <div className="px-5 space-y-4 pb-5">
+        <div className="flex gap-2" role="group" aria-label="Chế độ tạo trận">{(['random', 'manual'] as const).map(value => value === 'manual' && !data.manualTeamsEnabled ? null : <button key={value} type="button" aria-pressed={mode === value} disabled={busy || expired} onClick={() => setMode(value)} className={`flex-1 rounded-xl border px-3 py-3 text-sm font-semibold ${mode === value ? 'border-orange-400 bg-orange-50 text-orange-800' : 'border-stone-200 bg-white text-stone-600'}`}>{value === 'random' ? '🎲 Ngẫu nhiên' : '👥 Chọn tay 2 đôi'}</button>)}</div>
+        {mode === 'manual' && <div className="grid grid-cols-2 gap-2">{(['teamA', 'teamB'] as const).map((team, index) => <section key={team} aria-label={`Đội ${index ? 'B' : 'A'}`} className={`rounded-xl border p-3 text-sm ${index ? 'border-red-200 bg-red-50' : 'border-blue-200 bg-blue-50'}`}><h2 className="font-bold">Đội {index ? 'B' : 'A'} · {teams[team].length}/2</h2><p className="mt-1 break-words">{teams[team].map(id => data.players.find(p => p.id === id)?.name).join(' + ') || 'Chưa chọn người'}</p></section>)}</div>}
+
         <label className="flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2"><Search className="w-4 h-4 text-stone-400" /><input type="search" aria-label="Tìm người chơi" value={search} onChange={e => setSearch(e.target.value)} placeholder="Tìm tên người chơi…" className="min-w-0 w-full bg-transparent py-1 outline-none text-sm" disabled={busy} /></label>
-        <div className="flex items-center justify-between gap-3 text-sm"><span className="font-semibold">Đã chọn {selected.size}/{data.players.length}</span><div className="flex gap-4"><button type="button" disabled={busy || expired} onClick={() => setSelected(new Set(data.players.map(p => p.id)))} className="font-semibold text-orange-700 py-2">Chọn tất cả</button><button type="button" disabled={busy || expired} onClick={() => setSelected(new Set())} className="text-stone-500 py-2">Bỏ chọn</button></div></div>
-        <fieldset disabled={busy || expired} className="space-y-2"><legend className="sr-only">Danh sách người chơi</legend>{visible.map(p => <label key={p.id} className={`flex items-center gap-3 rounded-xl border px-4 py-3 cursor-pointer ${selected.has(p.id) ? 'border-orange-400 bg-orange-50' : 'border-stone-200 bg-white'}`}><input type="checkbox" checked={selected.has(p.id)} onChange={e => { const checked = e.currentTarget.checked; setSelected(previous => { const next = new Set(previous); if (checked) next.add(p.id); else next.delete(p.id); return next; }); }} className="w-5 h-5 accent-orange-600 shrink-0" /><span className="font-medium text-sm break-words min-w-0 flex-1">{p.name}</span>{selected.has(p.id) && <Check className="w-4 h-4 text-orange-600" />}</label>)}</fieldset>
+        {mode === 'random' && <div className="flex items-center justify-between gap-3 text-sm"><span className="font-semibold">Đã chọn {selected.size}/{data.players.length}</span><div className="flex gap-4"><button type="button" disabled={busy || expired} onClick={() => setSelected(new Set(data.players.map(p => p.id)))} className="font-semibold text-orange-700 py-2">Chọn tất cả</button><button type="button" disabled={busy || expired} onClick={() => setSelected(new Set())} className="text-stone-500 py-2">Bỏ chọn</button></div></div>}
+        {mode === 'manual' ? <fieldset disabled={busy || expired} className="space-y-2"><legend className="sr-only">Xếp người vào đội</legend>{visible.map(p => <label key={p.id} className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3"><span className="font-medium text-sm break-words min-w-0 flex-1">{p.name}</span><select aria-label={`Đội của ${p.name}`} value={teams.teamA.includes(p.id) ? 'teamA' : teams.teamB.includes(p.id) ? 'teamB' : ''} onChange={e => assign(p.id, e.target.value)} className="rounded-lg border border-stone-300 bg-white p-2 text-sm"><option value="">Không đá</option><option value="teamA" disabled={teams.teamA.length >= 2 && !teams.teamA.includes(p.id)}>Đội A</option><option value="teamB" disabled={teams.teamB.length >= 2 && !teams.teamB.includes(p.id)}>Đội B</option></select></label>)}</fieldset> : <fieldset disabled={busy || expired} className="space-y-2"><legend className="sr-only">Danh sách người chơi</legend>{visible.map(p => <label key={p.id} className={`flex items-center gap-3 rounded-xl border px-4 py-3 cursor-pointer ${selected.has(p.id) ? 'border-orange-400 bg-orange-50' : 'border-stone-200 bg-white'}`}><input type="checkbox" checked={selected.has(p.id)} onChange={e => { const checked = e.currentTarget.checked; setSelected(previous => { const next = new Set(previous); if (checked) next.add(p.id); else next.delete(p.id); return next; }); }} className="w-5 h-5 accent-orange-600 shrink-0" /><span className="font-medium text-sm break-words min-w-0 flex-1">{p.name}</span>{selected.has(p.id) && <Check className="w-4 h-4 text-orange-600" />}</label>)}</fieldset>}
         {!visible.length && <p className="py-6 text-center text-sm text-stone-500">Không tìm thấy tên này.</p>}
       </div>
       <footer className="sticky bottom-0 border-t border-stone-200 bg-white px-5 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] space-y-2">
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
         {expired && <p role="alert" className="text-sm text-red-700">Form đã hết hạn. Dùng /random để mở lại.</p>}
-        <button type="submit" disabled={busy || expired || selected.size < 2} className="w-full min-h-12 flex items-center justify-center gap-2 rounded-xl bg-orange-600 text-white font-bold disabled:bg-stone-200 disabled:text-stone-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-600">{busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Shuffle className="w-5 h-5" />}{busy ? 'Đang chia đội…' : `Chia đội · ${selected.size} người`}</button>
-        <p className="text-center text-xs text-stone-400">{selected.size < 2 ? 'Chọn ít nhất 2 người để chia đội.' : selected.size % 2 ? 'Lẻ người: một người sẽ dự bị trận này.' : 'Danh sách chỉ được gửi khi bấm Chia đội.'}</p>
+        <button type="submit" disabled={busy || expired || !ready} className="w-full min-h-12 flex items-center justify-center gap-2 rounded-xl bg-orange-600 text-white font-bold disabled:bg-stone-200 disabled:text-stone-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-600">{busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Shuffle className="w-5 h-5" />}{busy ? 'Đang tạo trận…' : mode === 'manual' ? 'Tạo trận · A gặp B' : `Chia đội · ${selected.size} người`}</button>
+        <p className="text-center text-xs text-stone-400">{mode === 'manual' ? 'Chọn đúng 2 người mỗi đội. Chỉ gửi khi bấm Tạo trận.' : selected.size < 2 ? 'Chọn ít nhất 2 người để chia đội.' : selected.size % 2 ? 'Lẻ người: một người sẽ dự bị trận này.' : 'Danh sách chỉ được gửi khi bấm Chia đội.'}</p>
+        <p className="text-center text-xs text-stone-500">Nhớ người đã chọn trong 2 giờ sau khi tạo trận.</p>
       </footer>
     </form>
   </main>;

@@ -26,8 +26,9 @@ async function fixture() {
   const waits: Promise<unknown>[] = [];
   const context = { props: {}, waitUntil(p: Promise<unknown>) { waits.push(p); }, passThroughOnException() {} };
   const get = (h = headers) => app.request('/api/telegram/form/f2s', { headers: h }, env, context);
-  const submit = (ids: string[], h = headers) => app.request('/api/telegram/form/f2s', { method: 'POST', headers: h, body: JSON.stringify({ playerIds: ids }) }, env, context);
-  return { env, sqlite, app, headers, waits, get, submit };
+  const post = (body: unknown, h = headers) => app.request('/api/telegram/form/f2s', { method: 'POST', headers: h, body: JSON.stringify(body) }, env, context);
+  const submit = (ids: string[], h = headers) => post({ playerIds: ids }, h);
+  return { env, sqlite, app, headers, waits, get, submit, post };
 }
 afterEach(() => { vi.unstubAllGlobals(); });
 describe('Telegram local-selection Mini App', () => {
@@ -46,8 +47,8 @@ describe('Telegram local-selection Mini App', () => {
     const f = await fixture();
     const response = await f.get();
     expect(response.status).toBe(200);
-    const body = await response.json() as { players: unknown[]; groupName: string };
-    expect(body.players).toHaveLength(3); expect(body.groupName).toBe('Group A');
+    const body = await response.json() as { players: unknown[]; groupName: string; manualTeamsEnabled: boolean };
+    expect(body.players).toHaveLength(3); expect(body.groupName).toBe('Group A'); expect(body.manualTeamsEnabled).toBe(true);
     expect(f.sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 0 });
     expect(f.sqlite.prepare("SELECT decision FROM telegram_drafts WHERE id='f2s'").get()).toEqual({ decision: null });
     const payload = JSON.parse((f.sqlite.prepare("SELECT payload FROM telegram_outbox WHERE id='update:100'").get() as { payload: string }).payload);
@@ -89,6 +90,40 @@ describe('Telegram local-selection Mini App', () => {
     expect(f.sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 1 });
     expect(f.sqlite.prepare("SELECT count(*) n FROM telegram_outbox WHERE id='draft:f2s'").get()).toEqual({ n: 1 });
     await Promise.allSettled(f.waits);
+  });
+  it('keeps the presence cache scope stable across drafts and changes it after relinking', async () => {
+    const f = await fixture();
+    const initial = await (await f.get()).json() as { selectionCacheKey: string };
+    expect(initial.selectionCacheKey).toMatch(/^[a-f0-9]{64}$/);
+    await processUpdate(f.env, { update_id: 101, message: { message_id: 2, from: { id: 123 }, chat: { id: -456, type: 'supergroup' }, text: '/random' } });
+    const later = await f.app.request('/api/telegram/form/f2t', { headers: f.headers }, f.env) ;
+    expect((await later.json() as { selectionCacheKey: string }).selectionCacheKey).toBe(initial.selectionCacheKey);
+    f.sqlite.exec("DELETE FROM telegram_links WHERE telegram_id='123'; INSERT INTO telegram_links (telegram_id,user_id) VALUES ('123','owner')");
+    await processUpdate(f.env, { update_id: 102, message: { message_id: 3, from: { id: 123 }, chat: { id: -456, type: 'supergroup' }, text: '/random' } });
+    const changed = await f.app.request('/api/telegram/form/f2u', { headers: f.headers }, f.env);
+    expect((await changed.json() as { selectionCacheKey: string }).selectionCacheKey).not.toBe(initial.selectionCacheKey);
+  });
+  it('preserves two manually selected pairs and rejects a different assignment on retry', async () => {
+    const f = await fixture();
+    f.sqlite.exec("INSERT INTO bilac_players (id,tournament_id,name,avatar) VALUES ('d','cup','Dũng',''); UPDATE telegram_drafts SET payload=json_set(payload,'$.players[#]',json_object('id','d','name','Dũng')) WHERE id='f2s'");
+    const body = { mode: 'manual', playerIds: ['a','b','c','d'], teamA: ['a','c'], teamB: ['b','d'] };
+    expect((await f.post(body)).status).toBe(200);
+    expect(f.sqlite.prepare("SELECT team1,team2,benched FROM bilac_matches WHERE id='tg-f2s'").get()).toEqual({ team1: '["a","c"]', team2: '["b","d"]', benched: null });
+    expect((await f.post({ ...body, teamA: ['c','a'], teamB: ['d','b'] })).status).toBe(200);
+    expect((await f.post({ ...body, teamA: ['a','b'], teamB: ['c','d'] })).status).toBe(409);
+    expect((await f.submit(body.playerIds)).status).toBe(409);
+    await Promise.allSettled(f.waits);
+  });
+  it.each([
+    { mode: 'unknown', playerIds: ['a','b'] },
+    { mode: 'manual', playerIds: ['a','b'], teamA: ['a'], teamB: ['b'] },
+    { mode: 'manual', playerIds: ['a','b','c'], teamA: ['a','b'], teamB: ['b','c'] },
+    { mode: 'manual', playerIds: ['a','b','c','unknown'], teamA: ['a','b'], teamB: ['c','unknown'] },
+    { mode: 'manual', playerIds: ['a','b'], teamA: null, teamB: [] },
+  ])('rejects invalid manual selections: %j', async body => {
+    const f = await fixture();
+    expect((await f.post(body)).status).toBe(400);
+    expect(f.sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 0 });
   });
   it('opens a native web_app button only for the original private-chat actor', async () => {
     const f = await fixture();
