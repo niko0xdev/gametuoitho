@@ -30,3 +30,12 @@ export function testDatabase() {
     INSERT INTO bilac_players (id,name,avatar,tournament_id) VALUES ('a','An','','cup'),('b','Bình','','cup'),('c','Chi','','cup');`);
   return { env, sqlite };
 }
+
+// A persisted pre-Mini-App message must remain safe and usable after deployment.
+export function seedLegacySelection(sqlite: ReturnType<typeof testDatabase>['sqlite'], id: string) {
+  const players = sqlite.prepare("SELECT id,name FROM bilac_players WHERE tournament_id='cup'").all();
+  sqlite.prepare(`INSERT INTO telegram_drafts (id,tournament_id,chat_id,telegram_id,kind,payload,expires_at,binding_id,user_id,link_id)
+    SELECT ?,i.tournament_id,i.chat_id,l.telegram_id,'random',?,?,i.binding_id,l.user_id,l.link_id
+    FROM bilac_telegram i JOIN telegram_links l ON l.user_id='owner' AND l.telegram_id='123' WHERE i.tournament_id='cup'`)
+    .run(id, JSON.stringify({ players, selected: [], page: 0 }), Date.now() + 600000);
+}

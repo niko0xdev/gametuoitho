@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import BiLacTelegramSettings from '../src/components/BiLacTelegramSettings';
 import '../src/index.css';
 
-interface Message { message_id: number; text: string; reply_markup?: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } }
+interface Message { message_id: number; text: string; entities?: Array<{ type: string }>; reply_markup?: { inline_keyboard: Array<Array<{ text: string; callback_data?: string; url?: string }>> } }
 interface State { messages: Message[]; players: Array<{ id: string; name: string }>; standings: string; matches: Array<{ id: string; status: string; score1: number; score2: number }>; jobs: Array<{ id: string; status: string }> }
 function Preview() {
   const [state, setState] = useState<State | null>(null);
@@ -43,15 +43,15 @@ function Preview() {
           {replyTo && <p className="text-xs">Đang reply tin #{replyTo}. <button type="button" className="underline" onClick={() => setReplyTo(null)}>Bỏ reply</button></p>}
         </form>
         <div ref={chatRef} className="space-y-3 max-h-[650px] overflow-auto" aria-live="polite">{state?.messages.map(m => <article key={m.message_id} className="bg-stone-50 rounded-lg border border-stone-200 p-3 space-y-2">
-          <pre className="text-sm whitespace-pre-wrap break-words font-sans">{m.text}</pre>
-          {m.reply_markup?.inline_keyboard.map((row, i) => <div className="flex flex-wrap gap-2" key={i}>{row.map(b => <button key={b.callback_data} className={btn} onClick={() => void action('/__test/command', { callback: b.callback_data, messageId: m.message_id, outsider })}>{b.text}</button>)}</div>)}
+          <pre className={`text-sm whitespace-pre-wrap break-words ${m.entities?.some(e => e.type === 'pre') ? 'font-mono' : 'font-sans'}`}>{m.text}</pre>
+          {m.reply_markup?.inline_keyboard.map((row, i) => <div className="flex flex-wrap gap-2" key={i}>{row.map(b => b.callback_data ? <button key={b.callback_data} className={btn} onClick={() => void action('/__test/command', { callback: b.callback_data, messageId: m.message_id, outsider })}>{b.text}</button> : <a key={b.url} className={btn} href={b.url?.includes('start=pick_') ? `/telegram/random?draft=${new URL(b.url).searchParams.get('start')!.slice(5)}` : b.url} target="_blank" rel="noreferrer">{b.text}</a>)}</div>)}
           <button className="underline text-xs" onClick={() => { setReplyTo(m.message_id); setText('/score 10 7'); }}>Reply tin này</button>
         </article>)}</div>
       </section>
       <section className="rounded-xl border border-stone-200 p-4 space-y-4">
         <h2 className="text-lg font-bold">Dữ liệu giải đang lưu</h2>
         <p className="text-sm">Người chơi: {state?.players.map(p => p.name).join(', ')}</p>
-        <pre className="whitespace-pre-wrap text-sm font-sans">{state?.standings}</pre>
+        <pre className="whitespace-pre-wrap text-sm font-mono overflow-x-auto">{state?.standings}</pre>
         <div className="text-sm space-y-1">{state?.matches.map(m => <p key={m.id}>{m.id}: {m.score1} – {m.score2} · {m.status}</p>)}</div>
         <h3 className="font-bold">Kích hoạt lịch để test</h3>
         <div className="flex flex-wrap gap-2">{['13:20', '21:00'].map(slot => <button className={btn} key={slot} onClick={() => void action('/__test/schedule', { slot })}>Chạy lịch {slot}</button>)}<button className={btn} onClick={() => void refresh()}>Làm mới dữ liệu</button></div>

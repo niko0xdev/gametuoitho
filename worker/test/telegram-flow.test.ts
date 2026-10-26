@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
-import { testDatabase } from './telegram-db';
+import { testDatabase, seedLegacySelection } from './telegram-db';
 import { telegramRoute } from '../src/routes/telegram';
 import { authRoute } from '../src/routes/auth';
 import { bilacRoute } from '../src/routes/bilac';
@@ -74,7 +74,7 @@ describe('Telegram integrated flows', () => {
     const { env, sqlite } = fixture();
     sqlite.exec("INSERT INTO telegram_links (telegram_id,user_id) VALUES ('123','owner'); INSERT INTO bilac_telegram (tournament_id,chat_id,chat_title,connected_by) VALUES ('cup','-456','Group','owner');");
     const message = { message_id: 1, from: { id: 123 }, chat: { id: -456, type: 'supergroup' }, text: '/random' };
-    await processUpdate(env, { update_id: 10, message });
+    seedLegacySelection(sqlite, 'a');
     const click = (id: number, data: string) => processUpdate(env, { update_id: id, callback_query: { id: String(id), from: { id: 123 }, message, data } });
     await click(11, 'go:a:0');
     expect(sqlite.prepare("SELECT decision FROM telegram_drafts WHERE id='a'").get()).toEqual({ decision: null });

@@ -43,8 +43,27 @@ export function standings(players: RankingPlayer[], matches: RankingMatch[], sea
 }
 
 export function renderStandings(name: string, season: string, rows: RankingRow[], url: string): string {
-  const lines = rows.slice(0, 20).map((p, i) => `${i + 1}. ${p.name.slice(0, 60)} | ${p.wins}T ${p.draws}H ${p.losses}B | HS ${p.diff > 0 ? '+' : ''}${p.diff}`);
-  return [`🏆 ${name.slice(0, 120)}`, season, '', ...(lines.length ? lines : ['Chưa có người tham gia tuần này.']), '', 'HS = thắng − thua', url].join('\n');
+  const top = rows.slice(0, 20);
+  if (!top.length) return [`🏆 ${name.slice(0, 120)}`, season, '', 'Chưa có người tham gia tuần này.', '', url].join('\n');
+  const widths = [2, 14, ...(['wins', 'draws', 'losses', 'diff'] as const).map(key => Math.max(key === 'diff' ? 3 : 2, ...top.map(p => String(p[key] > 0 && key === 'diff' ? '+' + p[key] : p[key]).length)))];
+  const segmenter = new Intl.Segmenter('vi', { granularity: 'grapheme' });
+  const cell = (value: string | number, width: number, right = true) => {
+    const parts = [...segmenter.segment(String(value).normalize('NFC').replace(/[\p{Cc}\p{Cf}]/gu, ''))].map(s => s.segment);
+    const size = (v: string) => /[\p{Extended_Pictographic}\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7af\uf900-\ufaff]/u.test(v) ? 2 : 1;
+    const total = parts.reduce((sum, v) => sum + size(v), 0);
+    let text = '', used = 0;
+    for (const part of parts) {
+      if (used + size(part) > width - (total > width ? 1 : 0)) break;
+      text += part; used += size(part);
+    }
+    if (total > width) { text += '…'; used++; }
+    return right ? ' '.repeat(width - used) + text : text + ' '.repeat(width - used);
+  };
+  const border = (left: string, middle: string, right: string) => left + widths.map(w => '─'.repeat(w)).join(middle) + right;
+  const line = (values: Array<string | number>) => '│' + values.map((v, i) => cell(v, widths[i], i !== 1)).join('│') + '│';
+  const table = [border('┌', '┬', '┐'), line(['#', 'Tên', 'T', 'H', 'B', 'HS']), border('├', '┼', '┤'),
+    ...top.map((p, i) => line([i + 1, p.name, p.wins, p.draws, p.losses, p.diff > 0 ? '+' + p.diff : p.diff])), border('└', '┴', '┘')];
+  return [`🏆 ${name.slice(0, 120)}`, season, '', '```', ...table, '```', '', 'T/H/B: Thắng/Hoà/Bại · HS = Thắng − Bại', rows.length > 20 ? `Hiện 20/${rows.length} người. Xem đầy đủ:` : 'Xem đầy đủ:', url].join('\n');
 }
 
 export function scoreInput(a: string, b: string): [number, number] {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { testDatabase } from './telegram-db';
+import { testDatabase, seedLegacySelection } from './telegram-db';
 import { createBiLacMatch } from '../src/lib/bilac-actions';
 import { processUpdate } from '../src/lib/telegram-commands';
 
@@ -17,17 +17,19 @@ function fixture() {
   const command = (text: string) => processUpdate(env, { update_id: update++, message: { ...message, text } });
   const click = (data: string, actor = 123, chatId = -456) => processUpdate(env, { update_id: update++, callback_query: { id: String(update), from: { id: actor }, data, message: { ...message, chat: { id: chatId, type: 'supergroup' } } } });
   const lastPayload = () => JSON.parse((sqlite.prepare('SELECT payload FROM telegram_outbox ORDER BY rowid DESC LIMIT 1').get() as { payload: string }).payload);
-  return { env, sqlite, command, click, lastPayload, api };
+  const legacyRandom = async () => { seedLegacySelection(sqlite, '2s'); update = 101; };
+  return { env, sqlite, command, click, lastPayload, api, legacyRandom };
 }
 afterEach(() => vi.unstubAllGlobals());
 describe('Telegram selection form and quick match controls', () => {
-  it('shows a compact checkbox form, selects everyone, and creates a match only on submit', async () => {
+  it('keeps existing inline checkbox messages usable without creating a match before submit', async () => {
     const f = fixture();
-    await f.command('/random');
-    const form = f.lastPayload();
+    await f.legacyRandom();
+    await f.click('all:2s:0:0');
+    const form = f.api[f.api.length - 1].body as { reply_markup: { inline_keyboard: Array<Array<{ text: string }>> } };
     expect(form.reply_markup.inline_keyboard[0]).toHaveLength(2);
     expect(form.reply_markup.inline_keyboard[0][0].text).toContain('☐');
-    await f.click('all:2s:0:1');
+    await f.click('all:2s:1:1');
     expect(f.sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 0 });
     const draft = f.sqlite.prepare("SELECT payload,revision FROM telegram_drafts WHERE id='2s'").get() as { payload: string; revision: number };
     expect(JSON.parse(draft.payload).selected).toHaveLength(3);
@@ -37,7 +39,7 @@ describe('Telegram selection form and quick match controls', () => {
   });
   it.each(['wa', 'wb'])('allows a linked member to select %s, then requires that actor to confirm', async action => {
     const f = fixture();
-    await f.command('/random'); await f.click('all:2s:0:1'); await f.click('go:2s:1');
+    await f.legacyRandom(); await f.click('all:2s:0:1'); await f.click('go:2s:1');
     await f.click(`${action}:m2s:0`, 999);
     expect(f.sqlite.prepare('SELECT status FROM bilac_matches').get()).toEqual({ status: 'PLAYING' });
     const button = f.lastPayload().reply_markup.inline_keyboard[0][0];
@@ -51,7 +53,7 @@ describe('Telegram selection form and quick match controls', () => {
   });
   it('lists the active match with /score and cancels it only after confirmation', async () => {
     const f = fixture();
-    await f.command('/random'); await f.click('all:2s:0:1'); await f.click('go:2s:1');
+    await f.legacyRandom(); await f.click('all:2s:0:1'); await f.click('go:2s:1');
     await f.command('/score');
     expect(f.lastPayload().text).toContain('Đội A');
     const cancel = f.lastPayload().reply_markup.inline_keyboard.flat().find((b: { text: string }) => b.text === '✕ Huỷ trận');
@@ -67,7 +69,7 @@ describe('Telegram selection form and quick match controls', () => {
   });
   it('rejects forwarded match controls and a stale cancellation after a web update', async () => {
     const f = fixture();
-    await f.command('/random'); await f.click('all:2s:0:1'); await f.click('go:2s:1');
+    await f.legacyRandom(); await f.click('all:2s:0:1'); await f.click('go:2s:1');
     await f.click('cx:m2s:0', 123, -789);
     expect(f.sqlite.prepare("SELECT count(*) n FROM telegram_drafts WHERE kind='cancel'").get()).toEqual({ n: 0 });
     await f.click('cx:m2s:0');
@@ -78,7 +80,7 @@ describe('Telegram selection form and quick match controls', () => {
   });
   it.each(['dismiss-first', 'confirm-first'])('serialises a simultaneous back/confirm action: %s', async ordering => {
     const f = fixture();
-    await f.command('/random'); await f.click('all:2s:0:1'); await f.click('go:2s:1'); await f.click('wa:m2s:0');
+    await f.legacyRandom(); await f.click('all:2s:0:1'); await f.click('go:2s:1'); await f.click('wa:m2s:0');
     const [confirm, dismiss] = f.lastPayload().reply_markup.inline_keyboard[0];
     const draftId = confirm.callback_data.split(':')[1];
     const original = f.env.DB.prepare.bind(f.env.DB);

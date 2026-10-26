@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { formatMonospaceBlocks } from '../src/lib/telegram-client';
 import { currentSeason, standings, renderStandings, scoreInput, scheduledSlot } from '../../shared/bilac-telegram';
 
 describe('Telegram tournament rules', () => {
@@ -25,4 +26,36 @@ describe('Telegram tournament rules', () => {
     expect(scheduledSlot('0 14 * * *')).toBe('21:00');
     expect(scheduledSlot('13 */6 * * *')).toBeNull();
   });
+  it('renders a compact aligned table with Vietnamese names and numeric columns', () => {
+    const rows = [
+      { id: 'a', name: 'Bình & <An>', wins: 12, draws: 2, losses: 1, played: 13, diff: 11 },
+      { id: 'b', name: 'Nguyễn Hoàng Phương rất dài', wins: 0, draws: 0, losses: 120, played: 120, diff: -120 },
+    ];
+    const rendered = renderStandings('Cup', 'week', rows, 'https://example.test');
+    expect(rendered).toContain('```');
+    const table = rendered.split('```')[1].trim().split('\n');
+    expect(table[0]).toMatch(/^┌/);
+    expect(table[1]).toContain('Tên');
+    expect(table[1]).toContain('HS');
+    expect(new Set(table.map(line => [...line].length)).size).toBe(1);
+    expect(rendered).toContain('Bình & <An>');
+    expect(rendered).toContain('-120');
+    expect(rendered).toContain('…');
+    expect(table[0].length).toBeLessThanOrEqual(36);
+  });
+  it('sends fenced tables as native Telegram pre entities with correct UTF-16 offsets', () => {
+    const result = formatMonospaceBlocks('🏆 Cup\n```\n│Bình & <An>│\n```\nhttps://example.test');
+    expect(result.text).not.toContain('```');
+    expect(result.entities).toEqual([{ type: 'pre', offset: '🏆 Cup\n'.length, length: '│Bình & <An>│'.length }]);
+    const entity = result.entities[0];
+    expect(result.text.slice(entity.offset, entity.offset + entity.length)).toBe('│Bình & <An>│');
+    expect(formatMonospaceBlocks('Plain **literal** text')).toEqual({ text: 'Plain **literal** text', entities: [] });
+  });
+  it('keeps an empty standings message and full-table link readable', () => {
+    const empty = renderStandings('Cup', 'week', [], 'https://example.test');
+    expect(empty).toContain('Chưa có người');
+    expect(empty).not.toContain('```');
+    expect(empty).toContain('https://example.test');
+  });
+
 });

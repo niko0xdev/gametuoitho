@@ -6,8 +6,24 @@ export class TelegramError extends Error {
     super('Telegram request rejected');
   }
 }
+export function formatMonospaceBlocks(source: string) {
+  const entities: Array<{ type: 'pre'; offset: number; length: number }> = [];
+  let text = '', cursor = 0;
+  for (const match of source.matchAll(/^```\n([\s\S]*?)\n```$/gm)) {
+    text += source.slice(cursor, match.index);
+    entities.push({ type: 'pre', offset: text.length, length: match[1].length });
+    text += match[1]; cursor = match.index! + match[0].length;
+  }
+  return { text: text + source.slice(cursor), entities };
+}
+
 export async function telegram<T>(env: Bindings, method: string, payload: object): Promise<T> {
   if (!telegramEnabled(env)) throw new Error('Telegram is not configured');
+  const message = payload as { text?: string; entities?: unknown; parse_mode?: string };
+  if (['sendMessage', 'editMessageText'].includes(method) && typeof message.text === 'string' && !message.entities && !message.parse_mode) {
+    const formatted = formatMonospaceBlocks(message.text);
+    if (formatted.entities.length) payload = { ...payload, ...formatted };
+  }
   const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
     signal: AbortSignal.timeout(10000),

@@ -1,10 +1,15 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
 import './index.css';
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+const view = window.location.pathname === '/telegram/random'
+  ? import('./components/TelegramRandomForm.tsx')
+  : import('./App.tsx');
+
+void view.then(({default: View}) => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <View />
+    </StrictMode>,
+  );
+});

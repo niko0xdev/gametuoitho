@@ -1,3 +1,4 @@
+import { telegramFormRoute } from './telegram-form';
 import { telegramEnabled } from '../lib/telegram-config';
 import { Hono } from 'hono';
 import type { Bindings } from '../db';
@@ -17,6 +18,7 @@ telegramRoute.use('*', async (c, next) => {
   if (!telegramEnabled(c.env)) return c.json({ error: 'Tính năng Telegram chưa được bật.' }, 404);
   await next();
 });
+telegramRoute.route('/form', telegramFormRoute);
 telegramRoute.post('/webhook', async c => {
   const secret = c.env.TELEGRAM_WEBHOOK_SECRET;
   if (!secret || c.req.header('X-Telegram-Bot-Api-Secret-Token') !== secret) return c.json({ error: 'Webhook không hợp lệ.' }, 401);

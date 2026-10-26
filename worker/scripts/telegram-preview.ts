@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import express from 'express';
 import { createServer } from 'vite';
 import { Hono } from 'hono';
@@ -6,7 +7,7 @@ import { authRoute } from '../src/routes/auth.ts';
 import { bilacRoute } from '../src/routes/bilac.ts';
 import { telegramRoute } from '../src/routes/telegram.ts';
 import { processUpdate, tableMessage } from '../src/lib/telegram-commands.ts';
-import { deliver } from '../src/lib/telegram-client.ts';
+import { deliver, formatMonospaceBlocks } from '../src/lib/telegram-client.ts';
 import { runTelegramSchedule } from '../src/lib/telegram-schedule.ts';
 import { sha256Hex } from '../src/lib/password.ts';
 
@@ -16,7 +17,7 @@ const { env, sqlite } = testDatabase();
 Object.assign(env, { APP_URL: `http://localhost:${port}`, TELEGRAM_ENABLED: 'true', TELEGRAM_BOT_TOKEN: 'local-fixture', TELEGRAM_WEBHOOK_SECRET: 'local-fixture', TELEGRAM_BOT_USERNAME: 'bilac_local_test_bot' });
 sqlite.prepare('UPDATE users SET password_hash=? WHERE id=?').run(await sha256Hex('LocalTest123'), 'owner');
 sqlite.exec("INSERT INTO telegram_links (telegram_id,user_id) VALUES ('123','owner'); INSERT INTO bilac_telegram (tournament_id,chat_id,chat_title,connected_by) VALUES ('cup','-456','Group thử nghiệm local','owner');");
-const messages: Array<{ message_id: number; text: string; reply_markup?: object }> = [];
+const messages: Array<{ message_id: number; text: string; entities?: Array<{ type: string }>; reply_markup?: object }> = [];
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const url = String(input);
@@ -25,12 +26,15 @@ globalThis.fetch = async (input, init) => {
   const payload = JSON.parse(String(init?.body || '{}'));
   let result: object = { status: 'administrator' };
   if (method === 'sendMessage') {
-    const message = { message_id: messages.length + 1, text: String(payload.text), reply_markup: payload.reply_markup };
+    const message = { message_id: messages.length + 1, text: String(payload.text), entities: payload.entities, reply_markup: payload.reply_markup };
     messages.push(message); result = message;
   } else if (method === 'editMessageText') {
     const message = messages.find(m => m.message_id === payload.message_id);
     if (message) { message.text = payload.text; message.reply_markup = payload.reply_markup; }
     result = message ?? {};
+  } else if (method === 'editMessageReplyMarkup') {
+    const message = messages.find(m => m.message_id === payload.message_id);
+    if (message) message.reply_markup = payload.reply_markup;
   }
   return new Response(JSON.stringify({ ok: true, result }), { headers: { 'Content-Type': 'application/json' } });
 };
@@ -50,7 +54,7 @@ app.use('/api', async (req, res) => {
 });
 let updateId = 1000;
 app.get('/__test/state', async (_req, res) => {
-  res.json({ messages, players: sqlite.prepare('SELECT id,name FROM bilac_players').all(), matches: sqlite.prepare('SELECT * FROM bilac_matches').all(), standings: await tableMessage(env, 'cup'), jobs: sqlite.prepare('SELECT id,status,error FROM telegram_outbox ORDER BY due_at DESC LIMIT 10').all() });
+  res.json({ messages, players: sqlite.prepare('SELECT id,name FROM bilac_players').all(), matches: sqlite.prepare('SELECT * FROM bilac_matches').all(), standings: formatMonospaceBlocks(await tableMessage(env, 'cup')).text, jobs: sqlite.prepare('SELECT id,status,error FROM telegram_outbox ORDER BY due_at DESC LIMIT 10').all() });
 });
 app.post('/__test/command', async (req, res) => {
   try {
@@ -65,7 +69,17 @@ app.post('/__test/schedule', async (req, res) => {
   await runTelegramSchedule(env, req.body.slot === '21:00' ? '0 14 * * *' : '20 6 * * *', Date.now());
   res.json({ success: true });
 });
+app.get('/__test/form-auth', (_req, res) => {
+  const data = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123, first_name: 'Local owner' }) });
+  const checked = [...data.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join('\n');
+  const key = createHmac('sha256', 'WebAppData').update('local-fixture').digest();
+  data.set('hash', createHmac('sha256', key).update(checked).digest('hex'));
+  res.json({ initData: data.toString() });
+});
 const vite = await createServer({ server: { middlewareMode: true, hmr: { port: port + 1 } }, appType: 'custom' });
+app.get('/telegram/random', async (_req, res) => {
+  res.type('html').send(await vite.transformIndexHtml('/telegram/random', '<!doctype html><html lang="vi"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chọn người · Local test</title></head><body><div id="root"></div><script type="module" src="/scripts/telegram-form-preview.tsx"></script></body></html>'));
+});
 app.get('/telegram-test', async (_req, res) => {
   res.type('html').send(await vite.transformIndexHtml('/telegram-test', '<!doctype html><html lang="vi"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bi Lắc · Telegram local test</title></head><body><div id="root"></div><script type="module" src="/scripts/telegram-preview-ui.tsx"></script></body></html>'));
 });

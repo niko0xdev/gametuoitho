@@ -87,8 +87,14 @@ Local simulation cannot verify the real bot's Telegram permissions, webhook deli
 
 ## Group controls
 
-`/random` opens a two-column checkbox-style selection with selected-player summary, select-all/clear controls, and an explicit submit button. Selecting players does not create a match. Telegram group messages use inline buttons rather than an embedded HTML form.
+`/random` now opens a true Mini App selection form. The group button opens the private bot chat, where Start supplies a native web_app button; no Main Mini App registration is required. The form loads the roster once, maintains checkbox/search/select-all state locally, and submits the final roster only when the person presses the submit button. It then publishes the match card back to the original group. Previously posted inline keyboards remain supported until they expire.
 
 New match cards show team rosters, the reserve, the score, and A-win/B-win/cancel controls. `/score` without arguments lists up to five active matches; `/random` also shows active matches before allowing another creation. Linked tournament members may use a shared match card, but each confirmation belongs to the person who opened it and expires after ten minutes. Shared cards expire after 24 hours.
 
 Quick wins record 7–6 or 6–7, matching the website convention, after an explicit confirmation. Exact scores remain available through the existing `/score` syntax. Cancellation requires confirmation, affects only a still-playing match at the reviewed revision, and leaves an audit entry. Back/confirm races are serialised; cancelled or finished matches cannot be changed using an old card.
+
+## Mini App authentication and standings layout
+
+The Mini App is served at `/telegram/random`. The browser sends signed Telegram initData in an Authorization header, never in a URL or localStorage. The Worker verifies Telegram's bot-specific HMAC, unique data fields, the authentication timestamp, and a 15-minute age limit. An expiring actor-bound form draft additionally fixes the application user, link generation, tournament, group, and binding generation. The client cannot choose a destination or impersonate an actor. The submit transaction freezes the chosen roster and creates one persistent match operation; retries with another roster are rejected. Rebinding, relinking, revoked membership, and expired forms fail closed. Client checkboxes make no HTTP requests.
+
+Standings are displayed as a compact fixed-width table with rank, name, wins, draws, losses, and match differential. Text is sent as native Telegram pre entities with UTF-16 offsets, keeping player names literal without HTML/Markdown interpretation. Long names are shortened by grapheme width; large numeric values retain their full width. The first 20 players are shown with a full-table link. Scheduled tables and manual `/bxh` use the same renderer.

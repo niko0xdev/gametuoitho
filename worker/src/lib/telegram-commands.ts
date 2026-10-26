@@ -71,6 +71,12 @@ async function matchText(env: Bindings, match: StoredMatch) {
   return `⚽ ${match.status === 'PLAYING' ? 'TRẬN ĐANG CHƠI' : 'TRẬN ĐÃ KẾT THÚC'}\nTrận #${match.id}\n\nĐội A: ${team(match.team1)}\nĐội B: ${team(match.team2)}${match.benched ? `\nDự bị: ${names.get(match.benched)}` : ''}\n\nTỉ số: ${match.score1} – ${match.score2}\nThắng nhanh: 7–6 / 6–7. Hoặc reply /score@${env.TELEGRAM_BOT_USERNAME} 10 7 để nhập điểm.`;
 }
 
+export async function publishMatchCard(env: Bindings, match: StoredMatch, origin: Pick<Draft, 'id' | 'tournament_id' | 'chat_id' | 'binding_id' | 'telegram_id' | 'user_id' | 'link_id'>) {
+  const integration = { tournament_id: origin.tournament_id, chat_id: origin.chat_id, binding_id: origin.binding_id, enabled: 1 };
+  await newDraft(env, 'm' + origin.id, integration, origin.telegram_id, 'match', { matchId: match.id }, { userId: origin.user_id, linkId: origin.link_id }, 24 * 3600000);
+  await enqueue(env, `draft:${origin.id}`, origin.chat_id, { text: await matchText(env, match), reply_markup: matchButtons('m' + origin.id) }, origin.tournament_id, Date.now(), origin.binding_id);
+}
+
 async function callback(env: Bindings, update: TelegramUpdate) {
   const cb = update.callback_query!;
   if (!cb.message || cb.from.is_bot || !['group', 'supergroup'].includes(cb.message.chat.type)) return;
@@ -191,6 +197,16 @@ async function message(env: Bindings, update: TelegramUpdate) {
   const [verb, target] = command.toLowerCase().split('@');
   if (!verb.startsWith('/') || (target && target !== env.TELEGRAM_BOT_USERNAME?.toLowerCase())) return;
   if (verb === '/start' && m.chat.type === 'private') {
+    if (/^pick_[a-z0-9-]+$/.test(args[0] ?? '')) {
+      const formId = args[0].slice(5);
+      const draft = await env.DB.prepare("SELECT * FROM telegram_drafts WHERE id=? AND kind='random-form'").bind(formId).first<Draft>();
+      const identity = draft ? await authorised(env, draft.tournament_id, telegramId) : null;
+      if (!draft || draft.telegram_id !== telegramId || identity?.userId !== draft.user_id || identity?.linkId !== draft.link_id || draft.expires_at < Date.now()) throw new CommandError('Form hết hạn hoặc thuộc người khác. Hãy mở /random trong group.');
+      const active = await env.DB.prepare('SELECT 1 FROM bilac_telegram WHERE tournament_id=? AND chat_id=? AND binding_id=? AND enabled=1').bind(draft.tournament_id, draft.chat_id, draft.binding_id).first();
+      if (!active) throw new CommandError('Group đã đổi liên kết. Hãy mở form mới.');
+      await send('🎲 Mở form chọn người. Tick chọn diễn ra ngay trên máy; chỉ gửi danh sách khi bấm Chia đội.', { reply_markup: { inline_keyboard: [[{ text: '☑ Mở form chọn người', web_app: { url: `${env.APP_URL}/telegram/random?draft=${formId}` } }]] } });
+      return;
+    }
     const hash = await sha256Hex(args[0] || '');
     const token = await env.DB.prepare("SELECT * FROM telegram_tokens WHERE hash=? AND purpose='account' AND expires_at>?").bind(hash, Date.now()).first<{ user_id: string; telegram_id: string | null }>();
     if (!token || (token.telegram_id && token.telegram_id !== telegramId)) throw new CommandError('Link hết hạn. Hãy tạo lại trên web.');
@@ -249,10 +265,11 @@ async function message(env: Bindings, update: TelegramUpdate) {
   if (verb === '/random') {
     const players = (await env.DB.prepare('SELECT id,name FROM bilac_players WHERE tournament_id=? ORDER BY name').bind(integration.tournament_id).all<RankingPlayer>()).results;
     if (players.length < 2) throw new CommandError('Cần ít nhất 2 người. Dùng /addplayer để thêm nhé!');
-    const selection: Selection = { players, selected: [], page: 0 };
-    await newDraft(env, id, integration, telegramId, 'random', selection, identity);
-    const payload = selectionMessage(id, 0, selection);
-    await send(payload.text, { reply_markup: payload.reply_markup }, integration);
+    const formId = 'f' + id;
+    await newDraft(env, formId, integration, telegramId, 'random-form', { players }, identity);
+    await send('🎲 CHIA ĐỘI\nMở chat riêng với bot → bấm Start → mở form popup. Chọn nhiều người rồi bấm Chia đội một lần; kết quả sẽ trả về group này.', {
+      reply_markup: { inline_keyboard: [[{ text: '☑ Mở form chọn người', url: `https://t.me/${env.TELEGRAM_BOT_USERNAME}?start=pick_${formId}` }]] },
+    }, integration);
   } else if (verb === '/addplayer') {
     const name = args.join(' ').normalize('NFC').replace(/\s+/g, ' ').trim();
     if (!name || name.length > 60 || /[\p{Cc}\p{Cf}]/u.test(name)) throw new CommandError('Tên cần từ 1 đến 60 ký tự, không chứa ký tự điều khiển.');
