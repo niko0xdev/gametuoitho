@@ -36,7 +36,7 @@ export default function TelegramRandomForm({ telegramApp }: { telegramApp?: Tele
   const legacyDraftId = new URLSearchParams(window.location.search).get('draft') ?? '';
   const draftId = useRef(legacyDraftId);
   async function request(method: 'GET' | 'POST', playerIds?: string[], signal?: AbortSignal) {
-    if (!app.current?.initData) throw new Error('Hãy mở form bằng nút trong chat riêng với bot Telegram.');
+    if (!app.current?.initData) throw new Error('Hãy mở form bằng nút Mở form trong Telegram.');
     const response = await fetch(`/api/telegram/form/${encodeURIComponent(draftId.current)}`, {
       method, credentials: 'omit', cache: 'no-store', signal,
       headers: { Authorization: `tma ${app.current.initData}`, ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}) },
