@@ -84,3 +84,11 @@ Rollback: pause scheduled posts or disconnect the group first, then disable the 
 Run `npm run lint`, `npm --prefix worker run lint`, `npm run test:fast`, `npm --prefix worker test`, `npm run test:co-tuong`, and `npm run build`. A Wrangler dry-run also checks the Worker bundle without deployment. The integration tests apply all real migration files to disposable SQLite, exercise verified login/account/group linking, reject forged headers, verify logout, add a player, recover failed keyboard edits, create and finish a match, detect stale revisions, and deduplicate scheduled posts.
 
 Local simulation cannot verify the real bot's Telegram permissions, webhook delivery, Cloudflare scheduling latency, or production secret configuration. Complete those checks in an opted-in test group after configuration.
+
+## Group controls
+
+`/random` opens a two-column checkbox-style selection with selected-player summary, select-all/clear controls, and an explicit submit button. Selecting players does not create a match. Telegram group messages use inline buttons rather than an embedded HTML form.
+
+New match cards show team rosters, the reserve, the score, and A-win/B-win/cancel controls. `/score` without arguments lists up to five active matches; `/random` also shows active matches before allowing another creation. Linked tournament members may use a shared match card, but each confirmation belongs to the person who opened it and expires after ten minutes. Shared cards expire after 24 hours.
+
+Quick wins record 7–6 or 6–7, matching the website convention, after an explicit confirmation. Exact scores remain available through the existing `/score` syntax. Cancellation requires confirmation, affects only a still-playing match at the reviewed revision, and leaves an audit entry. Back/confirm races are serialised; cancelled or finished matches cannot be changed using an old card.

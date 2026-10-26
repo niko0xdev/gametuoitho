@@ -16,6 +16,8 @@ export async function createBiLacMatch(env: Bindings, tournamentId: string, user
   if (!await memberRole(env, tournamentId, userId)) throw new Error('Bạn cần là thành viên giải đấu.');
   const existing = await env.DB.prepare('SELECT * FROM bilac_matches WHERE id=? AND tournament_id=?').bind(operationId, tournamentId).first<StoredMatch>();
   if (existing) return existing;
+  const cancelled = await env.DB.prepare("SELECT 1 FROM bilac_telegram_audit WHERE match_id=? AND tournament_id=? AND after_json=?").bind(operationId, tournamentId, '{"status":"CANCELLED"}').first();
+  if (cancelled) throw new Error('Trận này đã được huỷ. Dùng /random để tạo trận mới.');
   const players = (await env.DB.prepare('SELECT id FROM bilac_players WHERE tournament_id=?').bind(tournamentId).all<{ id: string }>()).results;
   const selected = players.filter(p => playerIds.includes(p.id));
   if (selected.length < 2 || selected.length !== new Set(playerIds).size || selected.length !== playerIds.length) throw new Error('Chọn ít nhất 2 người chơi hợp lệ, không trùng nhau.');
@@ -25,8 +27,9 @@ export async function createBiLacMatch(env: Bindings, tournamentId: string, user
     (id,tournament_id,timestamp,week_label,team1,team2,benched,score1,score2,status)
     SELECT ?,?,?,?,?,?,?,0,0,'PLAYING' WHERE NOT EXISTS
     (SELECT 1 FROM bilac_matches WHERE tournament_id=? AND status='PLAYING')
-    AND EXISTS (SELECT 1 FROM bilac_tournament_members m JOIN users u ON u.id=m.user_id WHERE m.tournament_id=? AND m.user_id=?) AND ${telegramActorSql}`)
-    .bind(operationId, tournamentId, Date.now(), currentSeason(), JSON.stringify(teamA.map(p => p.id)), JSON.stringify(teamB.map(p => p.id)), sittingOut?.id ?? null, tournamentId, tournamentId, userId, ...telegramActorParams(tournamentId, userId, actor)).run();
+    AND EXISTS (SELECT 1 FROM bilac_tournament_members m JOIN users u ON u.id=m.user_id WHERE m.tournament_id=? AND m.user_id=?) AND ${telegramActorSql}
+    AND NOT EXISTS (SELECT 1 FROM bilac_telegram_audit WHERE match_id=? AND tournament_id=? AND after_json='{"status":"CANCELLED"}')`)
+    .bind(operationId, tournamentId, Date.now(), currentSeason(), JSON.stringify(teamA.map(p => p.id)), JSON.stringify(teamB.map(p => p.id)), sittingOut?.id ?? null, tournamentId, tournamentId, userId, ...telegramActorParams(tournamentId, userId, actor), operationId, tournamentId).run();
   if (!result.meta.changes) {
     const replay = await env.DB.prepare('SELECT * FROM bilac_matches WHERE id=? AND tournament_id=?').bind(operationId, tournamentId).first<StoredMatch>();
     if (replay) return replay;
@@ -53,4 +56,20 @@ export async function saveBiLacScore(env: Bindings, tournamentId: string, userId
       .bind(after.score1, after.score2, after.status, match.id, tournamentId, match.revision, operationId, tournamentId, match.id, userId),
   ]);
   if (!await env.DB.prepare('SELECT 1 FROM bilac_telegram_audit WHERE operation_id=? AND tournament_id=? AND match_id=? AND user_id=?').bind(operationId, tournamentId, match.id, userId).first()) throw new Error('Trận đã thay đổi. Hãy nhập lại kết quả mới nhất.');
+}
+
+export async function cancelBiLacMatch(env: Bindings, tournamentId: string, userId: string, match: StoredMatch, operationId: string, actor: TelegramActorBinding) {
+  if (match.tournament_id !== tournamentId || !await memberRole(env, tournamentId, userId)) throw new Error('Bạn không có quyền huỷ trận này.');
+  const auditQuery = 'SELECT 1 FROM bilac_telegram_audit WHERE operation_id=? AND tournament_id=? AND match_id=? AND user_id=?';
+  if (await env.DB.prepare(auditQuery).bind(operationId, tournamentId, match.id, userId).first()) return;
+  await env.DB.batch([
+    env.DB.prepare(`INSERT OR IGNORE INTO bilac_telegram_audit (operation_id,tournament_id,match_id,user_id,before_json,after_json,created_at)
+      SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM bilac_matches WHERE id=? AND tournament_id=? AND revision=? AND status='PLAYING')
+      AND EXISTS (SELECT 1 FROM bilac_tournament_members WHERE tournament_id=? AND user_id=?) AND ${telegramActorSql}`)
+      .bind(operationId, tournamentId, match.id, userId, JSON.stringify(match), '{"status":"CANCELLED"}', Date.now(), match.id, tournamentId, match.revision, tournamentId, userId, ...telegramActorParams(tournamentId, userId, actor)),
+    env.DB.prepare(`DELETE FROM bilac_matches WHERE id=? AND tournament_id=? AND revision=? AND status='PLAYING'
+      AND EXISTS (SELECT 1 FROM bilac_telegram_audit WHERE operation_id=? AND tournament_id=? AND match_id=? AND user_id=?)`)
+      .bind(match.id, tournamentId, match.revision, operationId, tournamentId, match.id, userId),
+  ]);
+  if (!await env.DB.prepare(auditQuery).bind(operationId, tournamentId, match.id, userId).first()) throw new Error('Trận đã thay đổi hoặc kết thúc. Hãy mở lại danh sách trận.');
 }
