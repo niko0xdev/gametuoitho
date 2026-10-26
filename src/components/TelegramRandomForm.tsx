@@ -33,10 +33,11 @@ export default function TelegramRandomForm({ telegramApp }: { telegramApp?: Tele
   const [clock, setClock] = useState(Date.now());
   const app = useRef<TelegramMiniApp | null>(null);
   const submitting = useRef(false);
-  const draftId = new URLSearchParams(window.location.search).get('draft') ?? '';
+  const legacyDraftId = new URLSearchParams(window.location.search).get('draft') ?? '';
+  const draftId = useRef(legacyDraftId);
   async function request(method: 'GET' | 'POST', playerIds?: string[], signal?: AbortSignal) {
     if (!app.current?.initData) throw new Error('Hãy mở form bằng nút trong chat riêng với bot Telegram.');
-    const response = await fetch(`/api/telegram/form/${encodeURIComponent(draftId)}`, {
+    const response = await fetch(`/api/telegram/form/${encodeURIComponent(draftId.current)}`, {
       method, credentials: 'omit', cache: 'no-store', signal,
       headers: { Authorization: `tma ${app.current.initData}`, ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}) },
       ...(method === 'POST' ? { body: JSON.stringify({ playerIds }) } : {}),
@@ -50,16 +51,18 @@ export default function TelegramRandomForm({ telegramApp }: { telegramApp?: Tele
     let active = true;
     void (async () => {
       try {
-        if (!/^[a-z0-9-]{1,64}$/.test(draftId)) throw new Error('Form không hợp lệ. Dùng /random trong group để mở form mới.');
         app.current = telegramApp ?? await loadSdk();
         app.current.ready?.(); app.current.expand?.();
+        const start = new URLSearchParams(app.current.initData).get('start_param');
+        draftId.current = start?.startsWith('pick_') ? start.slice(5) : legacyDraftId;
+        if (!/^[a-z0-9-]{1,64}$/.test(draftId.current)) throw new Error('Dùng /random trong group rồi bấm Mở form để chọn người.');
         const result = await request('GET', undefined, controller.signal) as FormData;
         if (active) { setData(result); setDone(Boolean(result.submittedMatchId)); }
       } catch (e) { if (active && !controller.signal.aborted) setError(e instanceof Error ? e.message : 'Không tải được danh sách.'); }
       finally { if (active) setLoading(false); }
     })();
     return () => { active = false; controller.abort(); };
-  }, [draftId, telegramApp]);
+  }, [legacyDraftId, telegramApp]);
   useEffect(() => { const timer = window.setInterval(() => setClock(Date.now()), 15000); return () => window.clearInterval(timer); }, []);
   const visible = useMemo(() => data?.players.filter(p => searchKey(p.name).includes(searchKey(search))) ?? [], [data, search]);
   const expired = Boolean(data && clock >= data.expiresAt);

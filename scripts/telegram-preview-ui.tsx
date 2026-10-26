@@ -44,7 +44,7 @@ function Preview() {
         </form>
         <div ref={chatRef} className="space-y-3 max-h-[650px] overflow-auto" aria-live="polite">{state?.messages.map(m => <article key={m.message_id} className="bg-stone-50 rounded-lg border border-stone-200 p-3 space-y-2">
           <pre className={`text-sm whitespace-pre-wrap break-words ${m.entities?.some(e => e.type === 'pre') ? 'font-mono' : 'font-sans'}`}>{m.text}</pre>
-          {m.reply_markup?.inline_keyboard.map((row, i) => <div className="flex flex-wrap gap-2" key={i}>{row.map(b => b.callback_data ? <button key={b.callback_data} className={btn} onClick={() => void action('/__test/command', { callback: b.callback_data, messageId: m.message_id, outsider })}>{b.text}</button> : <a key={b.url} className={btn} href={b.url?.includes('start=pick_') ? `/telegram/random?draft=${new URL(b.url).searchParams.get('start')!.slice(5)}` : b.url} target="_blank" rel="noreferrer">{b.text}</a>)}</div>)}
+          {m.reply_markup?.inline_keyboard.map((row, i) => <div className="flex flex-wrap gap-2" key={i}>{row.map(b => b.callback_data ? <button key={b.callback_data} className={btn} onClick={() => void action('/__test/command', { callback: b.callback_data, messageId: m.message_id, outsider })}>{b.text}</button> : <a key={b.url} className={btn} href={b.url?.includes('startapp=pick_') ? `/telegram/random?draft=${new URL(b.url).searchParams.get('startapp')!.slice(5)}` : b.url} target="_blank" rel="noreferrer">{b.text}</a>)}</div>)}
           <button className="underline text-xs" onClick={() => { setReplyTo(m.message_id); setText('/score 10 7'); }}>Reply tin này</button>
         </article>)}</div>
       </section>

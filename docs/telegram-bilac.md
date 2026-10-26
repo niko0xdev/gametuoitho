@@ -87,7 +87,7 @@ Local simulation cannot verify the real bot's Telegram permissions, webhook deli
 
 ## Group controls
 
-`/random` now opens a true Mini App selection form. The group button opens the private bot chat, where Start supplies a native web_app button; no Main Mini App registration is required. The form loads the roster once, maintains checkbox/search/select-all state locally, and submits the final roster only when the person presses the submit button. It then publishes the match card back to the original group. Previously posted inline keyboards remain supported until they expire.
+`/random` now opens a true Mini App selection form. The group button opens the Main Mini App directly through `https://t.me/gtt_bilac_bot?startapp=pick_<draft-id>`. Enable the Main Mini App in BotFather (`/mybots` → select the bot → Bot Settings → Configure Mini App → Enable Mini App) and set its URL to `https://gametuoitho.space/telegram/random`. The form reads the draft ID from Telegram-signed `initData.start_param`; existing private-chat buttons remain supported. The form loads the roster once, maintains checkbox/search/select-all state locally, and submits the final roster only when the person presses the submit button. It then publishes the match card back to the original group. Previously posted inline keyboards remain supported until they expire.
 
 New match cards show team rosters, the reserve, the score, and A-win/B-win/cancel controls. `/score` without arguments lists up to five active matches; `/random` also shows active matches before allowing another creation. Linked tournament members may use a shared match card, but each confirmation belongs to the person who opened it and expires after ten minutes. Shared cards expire after 24 hours.
 

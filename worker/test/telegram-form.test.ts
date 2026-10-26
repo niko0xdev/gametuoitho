@@ -7,8 +7,9 @@ import { processUpdate } from '../src/lib/telegram-commands';
 import { verifyMiniAppData } from '../src/lib/telegram-mini-app';
 
 const botToken = 'fixture-token';
-function signed(userId = 123, age = 0, token = botToken) {
+function signed(userId = 123, age = 0, token = botToken, startParam?: string) {
   const data = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000) - age), user: JSON.stringify({ id: userId, first_name: 'Test' }), query_id: 'fixture-query' });
+  if (startParam) data.set('start_param', startParam);
   const checked = [...data.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join('\n');
   const key = createHmac('sha256', 'WebAppData').update(token).digest();
   data.set('hash', createHmac('sha256', key).update(checked).digest('hex'));
@@ -32,6 +33,9 @@ afterEach(() => { vi.unstubAllGlobals(); });
 describe('Telegram local-selection Mini App', () => {
   it('verifies Telegram HMAC, age, and unique data keys', async () => {
     expect(await verifyMiniAppData(signed(), botToken)).toBe('123');
+    const directLaunch = signed(123, 0, botToken, 'pick_f2s');
+    expect(await verifyMiniAppData(directLaunch, botToken)).toBe('123');
+    expect(await verifyMiniAppData(directLaunch.replace('pick_f2s', 'pick_other'), botToken)).toBeNull();
     expect(await verifyMiniAppData(signed().replace('Test', 'Other'), botToken)).toBeNull();
     expect(await verifyMiniAppData(signed(123, 3600), botToken)).toBeNull();
     expect(await verifyMiniAppData(signed(123, -60), botToken)).toBeNull();
@@ -47,7 +51,7 @@ describe('Telegram local-selection Mini App', () => {
     expect(f.sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 0 });
     expect(f.sqlite.prepare("SELECT decision FROM telegram_drafts WHERE id='f2s'").get()).toEqual({ decision: null });
     const payload = JSON.parse((f.sqlite.prepare("SELECT payload FROM telegram_outbox WHERE id='update:100'").get() as { payload: string }).payload);
-    expect(payload.reply_markup.inline_keyboard[0][0].url).toContain('start=pick_f2s');
+    expect(payload.reply_markup.inline_keyboard[0][0].url).toBe('https://t.me/fixture_bot?startapp=pick_f2s');
   });
   it('creates once on submit and returns the result to the original group with quick controls', async () => {
     const f = await fixture();

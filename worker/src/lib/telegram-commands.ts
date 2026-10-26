@@ -267,8 +267,8 @@ async function message(env: Bindings, update: TelegramUpdate) {
     if (players.length < 2) throw new CommandError('Cần ít nhất 2 người. Dùng /addplayer để thêm nhé!');
     const formId = 'f' + id;
     await newDraft(env, formId, integration, telegramId, 'random-form', { players }, identity);
-    await send('🎲 CHIA ĐỘI\nMở chat riêng với bot → bấm Start → mở form popup. Chọn nhiều người rồi bấm Chia đội một lần; kết quả sẽ trả về group này.', {
-      reply_markup: { inline_keyboard: [[{ text: '☑ Mở form chọn người', url: `https://t.me/${env.TELEGRAM_BOT_USERNAME}?start=pick_${formId}` }]] },
+    await send('🎲 CHIA ĐỘI\nBấm Mở form để chọn người ngay trong Telegram, rồi bấm Chia đội. Kết quả sẽ trả về group này.', {
+      reply_markup: { inline_keyboard: [[{ text: '☑ Mở form chọn người', url: `https://t.me/${env.TELEGRAM_BOT_USERNAME}?startapp=pick_${formId}` }]] },
     }, integration);
   } else if (verb === '/addplayer') {
     const name = args.join(' ').normalize('NFC').replace(/\s+/g, ' ').trim();
