@@ -19,8 +19,10 @@ async function fixture() {
   const { env, sqlite } = testDatabase();
   Object.assign(env, { TELEGRAM_ENABLED: 'true', TELEGRAM_BOT_TOKEN: botToken, TELEGRAM_WEBHOOK_SECRET: 'fixture-secret', TELEGRAM_BOT_USERNAME: 'fixture_bot' });
   sqlite.exec("INSERT INTO telegram_links (telegram_id,user_id) VALUES ('123','owner'),('999','other'); INSERT INTO bilac_telegram (tournament_id,chat_id,chat_title,connected_by) VALUES ('cup','-456','Group A','owner')");
-  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }))));
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string, init: RequestInit) => new Response(JSON.stringify({ ok: true, result: url.endsWith('/getChatMember') ? { status: 'member', user: { id: JSON.parse(String(init.body)).user_id } } : { message_id: 1 } }))));
   await processUpdate(env, { update_id: 100, message: { message_id: 1, from: { id: 123 }, chat: { id: -456, type: 'supergroup' }, text: '/random' } });
+  // Preserve coverage for private, actor-bound forms issued before group-wide randomisation.
+  sqlite.exec("UPDATE telegram_drafts SET kind='random-form' WHERE id='f2s'");
   const app = new Hono(); app.route('/api/telegram', telegramRoute);
   const headers = { Authorization: `tma ${signed()}`, 'Content-Type': 'application/json' };
   const waits: Promise<unknown>[] = [];
@@ -124,6 +126,17 @@ describe('Telegram local-selection Mini App', () => {
     const f = await fixture();
     expect((await f.post(body)).status).toBe(400);
     expect(f.sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 0 });
+  });
+  it('lets a linked non-owner member open and submit their own random form', async () => {
+    const f = await fixture();
+    f.sqlite.exec("INSERT INTO bilac_tournament_members (id,tournament_id,user_id,username,display_name,role,joined_at) VALUES ('member-other','cup','other','other','Other','member',0)");
+    const binding = f.sqlite.prepare("SELECT binding_id FROM bilac_telegram WHERE tournament_id='cup'").get() as { binding_id: string };
+    const link = f.sqlite.prepare("SELECT link_id FROM telegram_links WHERE telegram_id='999'").get() as { link_id: string };
+    await processUpdate(f.env, { update_id: 103, bindingId: binding.binding_id, linkId: link.link_id, message: { message_id: 4, from: { id: 999 }, chat: { id: -456, type: 'supergroup' }, text: '/random@fixture_bot' } });
+    const headers = { ...f.headers, Authorization: `tma ${signed(999, 0, botToken, 'pick_f2v')}` };
+    expect((await f.app.request('/api/telegram/form/f2v', { headers }, f.env)).status).toBe(200);
+    expect((await f.app.request('/api/telegram/form/f2v', { method: 'POST', headers, body: JSON.stringify({ playerIds: ['a','b'] }) }, f.env, { props: {}, waitUntil(p: Promise<unknown>) { f.waits.push(p); }, passThroughOnException() {} })).status).toBe(200);
+    await Promise.allSettled(f.waits);
   });
   it('opens a native web_app button only for the original private-chat actor', async () => {
     const f = await fixture();

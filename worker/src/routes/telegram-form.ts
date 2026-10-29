@@ -7,10 +7,11 @@ import { createBiLacMatch, memberRole } from '../lib/bilac-actions';
 import { publishMatchCard } from '../lib/telegram-commands';
 import { deliver } from '../lib/telegram-client';
 import { sha256Hex } from '../lib/password';
+import { groupRandomIdentity, TelegramGroupAccessError } from '../lib/telegram-group';
 
 interface FormDraft {
   id: string; tournament_id: string; chat_id: string; binding_id: string; telegram_id: string;
-  user_id: string; link_id: string; payload: string; expires_at: number; consumed: number; decision: string | null;
+  user_id: string; link_id: string; payload: string; expires_at: number; kind: string; consumed: number; decision: string | null;
 }
 interface FormState { draft: FormDraft; actor: TelegramActorBinding; groupName: string; tournamentName: string }
 interface FormPayload { players: Array<{ id: string; name: string }>; submittedIds?: string[]; mode?: 'random' | 'manual'; teamA?: string[]; teamB?: string[] }
@@ -23,14 +24,31 @@ telegramFormRoute.use('/:id', async (c, next) => {
   if (!telegramId) return c.json({ error: 'Hãy mở form từ nút trong chat với bot Telegram.' }, 401);
   const id = c.req.param('id');
   if (!/^[a-z0-9-]{1,64}$/.test(id)) return c.json({ error: 'Form không hợp lệ.' }, 400);
-  const draft = await c.env.DB.prepare("SELECT * FROM telegram_drafts WHERE id=? AND kind='random-form'").bind(id).first<FormDraft>();
+  let draft = await c.env.DB.prepare("SELECT * FROM telegram_drafts WHERE id=? AND kind IN ('random-form','random-group')").bind(id).first<FormDraft>();
   if (!draft || draft.expires_at < Date.now()) return c.json({ error: 'Form đã hết hạn. Dùng /random để mở form mới.' }, 410);
-  const link = await c.env.DB.prepare('SELECT user_id,link_id FROM telegram_links WHERE telegram_id=?').bind(telegramId).first<{ user_id: string; link_id: string }>();
-  if (draft.telegram_id !== telegramId || link?.user_id !== draft.user_id || link.link_id !== draft.link_id || !await memberRole(c.env, draft.tournament_id, draft.user_id)) return c.json({ error: 'Form này không thuộc tài khoản của bạn, hoặc quyền đã thay đổi.' }, 403);
+  const groupMember = draft.kind === 'random-group';
+  if (groupMember) {
+    let identity;
+    try { identity = await groupRandomIdentity(c.env, draft, telegramId); }
+    catch (error) { if (error instanceof TelegramGroupAccessError) return c.json({ error: error.message }, error.status); throw error; }
+    if (identity.userId !== draft.user_id || identity.linkId !== draft.link_id) return c.json({ error: 'Liên kết chủ giải đã thay đổi. Hãy mở /random mới.' }, 403);
+    const actor = { id: draft.binding_id, chatId: draft.chat_id, telegramId, linkId: draft.link_id, groupMember: true };
+    const personalId = 'g' + (await sha256Hex(JSON.stringify([draft.id, telegramId]))).slice(0, 40);
+    await c.env.DB.prepare(`INSERT OR IGNORE INTO telegram_drafts (id,tournament_id,chat_id,telegram_id,kind,payload,expires_at,binding_id,user_id,link_id)
+      SELECT ?,?,?,?,?,?,?,?,?,? WHERE ${telegramActorSql}`)
+      .bind(personalId, draft.tournament_id, draft.chat_id, telegramId, 'random-group-form', draft.payload, draft.expires_at, draft.binding_id, draft.user_id, draft.link_id,
+        ...telegramActorParams(draft.tournament_id, draft.user_id, actor)).run();
+    const personal = await c.env.DB.prepare("SELECT * FROM telegram_drafts WHERE id=? AND kind='random-group-form'").bind(personalId).first<FormDraft>();
+    if (!personal) return c.json({ error: 'Quyền group đã thay đổi. Hãy mở form mới.' }, 403);
+    draft = personal;
+  } else {
+    const link = await c.env.DB.prepare('SELECT user_id,link_id FROM telegram_links WHERE telegram_id=?').bind(telegramId).first<{ user_id: string; link_id: string }>();
+    if (draft.telegram_id !== telegramId || link?.user_id !== draft.user_id || link.link_id !== draft.link_id || !await memberRole(c.env, draft.tournament_id, draft.user_id)) return c.json({ error: 'Form này không thuộc tài khoản của bạn, hoặc quyền đã thay đổi.' }, 403);
+  }
   const integration = await c.env.DB.prepare(`SELECT i.chat_title,t.name FROM bilac_telegram i JOIN bilac_tournaments t ON t.id=i.tournament_id
     WHERE i.tournament_id=? AND i.chat_id=? AND i.binding_id=? AND i.enabled=1`).bind(draft.tournament_id, draft.chat_id, draft.binding_id).first<{ chat_title: string; name: string }>();
   if (!integration) return c.json({ error: 'Group đã thay đổi liên kết. Hãy mở form mới.' }, 403);
-  c.set('form', { draft, actor: { id: draft.binding_id, chatId: draft.chat_id, telegramId, linkId: draft.link_id }, groupName: integration.chat_title, tournamentName: integration.name });
+  c.set('form', { draft, actor: { id: draft.binding_id, chatId: draft.chat_id, telegramId, linkId: draft.link_id, groupMember }, groupName: integration.chat_title, tournamentName: integration.name });
   await next();
 });
 telegramFormRoute.get('/:id', async c => {
@@ -74,7 +92,7 @@ telegramFormRoute.post('/:id', async c => {
   }
   try {
     const match = await createBiLacMatch(c.env, draft.tournament_id, draft.user_id, selected, 'tg-' + draft.id, actor, teams);
-    await publishMatchCard(c.env, match, draft);
+    await publishMatchCard(c.env, match, { ...draft, groupMember: actor.groupMember });
     await c.env.DB.prepare("UPDATE telegram_drafts SET consumed=1 WHERE id=? AND decision='submit'").bind(draft.id).run();
     c.executionCtx.waitUntil(deliver(c.env));
     return c.json({ success: true, matchId: match.id, groupName: state.groupName });

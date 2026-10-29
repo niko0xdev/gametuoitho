@@ -25,6 +25,7 @@ globalThis.fetch = async (input, init) => {
   const method = url.split('/').pop();
   const payload = JSON.parse(String(init?.body || '{}'));
   let result: object = { status: 'administrator' };
+  if (method === 'getChatMember') result = { user: { id: payload.user_id }, status: payload.user_id === 123 ? 'administrator' : payload.user_id === 999 ? 'member' : 'left' };
   if (method === 'sendMessage') {
     const message = { message_id: messages.length + 1, text: String(payload.text), entities: payload.entities, reply_markup: payload.reply_markup };
     messages.push(message); result = message;
@@ -69,8 +70,9 @@ app.post('/__test/schedule', async (req, res) => {
   await runTelegramSchedule(env, req.body.slot === '21:00' ? '0 14 * * *' : '20 6 * * *', Date.now());
   res.json({ success: true });
 });
-app.get('/__test/form-auth', (_req, res) => {
-  const data = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123, first_name: 'Local owner' }) });
+app.get('/__test/form-auth', (req, res) => {
+  const actorId = req.query.actor === '999' ? 999 : 123;
+  const data = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: actorId, first_name: 'Local fixture member' }) });
   const checked = [...data.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join('\n');
   const key = createHmac('sha256', 'WebAppData').update('local-fixture').digest();
   data.set('hash', createHmac('sha256', key).update(checked).digest('hex'));

@@ -31,13 +31,20 @@ export async function createBiLacMatch(env: Bindings, tournamentId: string, user
     const paired = pairPlayers(selected, undefined, history.map(m => ({ timestamp: m.timestamp, team1: JSON.parse(m.team1), team2: JSON.parse(m.team2), benched: m.benched })));
     teamA = paired.teamA.map(p => p.id); teamB = paired.teamB.map(p => p.id); benched = paired.sittingOut?.id ?? null;
   }
-  const result = await env.DB.prepare(`INSERT OR IGNORE INTO bilac_matches
+  const insertion = env.DB.prepare(`INSERT OR IGNORE INTO bilac_matches
     (id,tournament_id,timestamp,week_label,team1,team2,benched,score1,score2,status)
     SELECT ?,?,?,?,?,?,?,0,0,'PLAYING' WHERE NOT EXISTS
     (SELECT 1 FROM bilac_matches WHERE tournament_id=? AND status='PLAYING')
     AND EXISTS (SELECT 1 FROM bilac_tournament_members m JOIN users u ON u.id=m.user_id WHERE m.tournament_id=? AND m.user_id=?) AND ${telegramActorSql}
     AND NOT EXISTS (SELECT 1 FROM bilac_telegram_audit WHERE match_id=? AND tournament_id=? AND after_json='{"status":"CANCELLED"}')`)
-    .bind(operationId, tournamentId, Date.now(), currentSeason(), JSON.stringify(teamA), JSON.stringify(teamB), benched, tournamentId, tournamentId, userId, ...telegramActorParams(tournamentId, userId, actor), operationId, tournamentId).run();
+    .bind(operationId, tournamentId, Date.now(), currentSeason(), JSON.stringify(teamA), JSON.stringify(teamB), benched, tournamentId, tournamentId, userId, ...telegramActorParams(tournamentId, userId, actor), operationId, tournamentId);
+  const result = actor?.groupMember ? (await env.DB.batch([
+    insertion,
+    env.DB.prepare(`INSERT OR IGNORE INTO bilac_telegram_audit (operation_id,tournament_id,match_id,user_id,before_json,after_json,created_at)
+      SELECT ?,?,?,?,NULL,?,? WHERE EXISTS (SELECT 1 FROM bilac_matches WHERE id=? AND tournament_id=?) AND ${telegramActorSql}`)
+      .bind('create:' + operationId, tournamentId, operationId, userId, JSON.stringify({ source: 'telegram-group', telegramId: actor.telegramId, chatId: actor.chatId, teamA, teamB, status: 'PLAYING' }), Date.now(), operationId, tournamentId,
+        ...telegramActorParams(tournamentId, userId, actor)),
+  ]))[0] : await insertion.run();
   if (!result.meta.changes) {
     const replay = await env.DB.prepare('SELECT * FROM bilac_matches WHERE id=? AND tournament_id=?').bind(operationId, tournamentId).first<StoredMatch>();
     if (replay) return replay;
