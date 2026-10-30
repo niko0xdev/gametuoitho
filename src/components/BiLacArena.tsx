@@ -1,3 +1,4 @@
+import BiLacStatsTab from './BiLacStatsTab';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -29,7 +30,8 @@ import {
   LogIn,
   Pencil,
   KeyRound,
-  TrendingUp
+  TrendingUp,
+  Activity
 } from 'lucide-react';
 import { BiLacPlayer, BiLacMatch, UserProfile } from '../types';
 import { UserSearchInput, type UserSearchResult } from './UserSearchInput';
@@ -96,7 +98,7 @@ export default function BiLacArena({
   const [aiBulkText, setAiBulkText] = useState('');
   const [isAiBulkLoading, setIsAiBulkLoading] = useState(false);
   const [aiBulkPreview, setAiBulkPreview] = useState<string[] | null>(null);
-  const [activeTab, setActiveTab] = useState<'matchmaking' | 'leaderboards' | 'history' | 'members'>('matchmaking');
+  const [activeTab, setActiveTab] = useState<'matchmaking' | 'leaderboards' | 'stats' | 'history' | 'members'>('matchmaking');
   const [leaderboardTab, setLeaderboardTab] = useState<'weekly' | 'alltime'>('weekly');
 
   // Donate States
@@ -1964,11 +1966,11 @@ export default function BiLacArena({
         </div>
 
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto" id="bilac_top_controls">
-          <div className="flex bg-stone-100 p-0.5 sm:p-1 rounded-xl border border-stone-200 text-[10px] sm:text-xs font-bold w-full sm:w-auto justify-between sm:justify-start">
+          <div className="flex max-w-full overflow-x-auto bg-stone-100 p-0.5 sm:p-1 rounded-xl border border-stone-200 text-[10px] sm:text-xs font-bold w-full sm:w-auto justify-start">
             <button
               id="tab_matchmaking"
               onClick={() => { playBeep(523, 'sine', 0.08); setActiveTab('matchmaking'); }}
-              className={`px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg cursor-pointer transition-all flex-1 sm:flex-initial flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap ${
+              className={`px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg cursor-pointer transition-all flex-none sm:flex-initial flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap ${
                 activeTab === 'matchmaking' 
                   ? 'bg-white text-stone-950 shadow-xs' 
                   : 'text-stone-500 hover:text-stone-800'
@@ -1980,7 +1982,7 @@ export default function BiLacArena({
             <button
               id="tab_leaderboards"
               onClick={() => { playBeep(523, 'sine', 0.08); setActiveTab('leaderboards'); }}
-              className={`px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg cursor-pointer transition-all flex-1 sm:flex-initial flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap ${
+              className={`px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg cursor-pointer transition-all flex-none sm:flex-initial flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap ${
                 activeTab === 'leaderboards' 
                   ? 'bg-white text-stone-950 shadow-xs' 
                   : 'text-stone-500 hover:text-stone-800'
@@ -1990,9 +1992,21 @@ export default function BiLacArena({
               <span>Xếp Hạng</span>
             </button>
             <button
+              id="tab_stats"
+              onClick={() => { playBeep(523, 'sine', 0.08); setActiveTab('stats'); }}
+              className={`px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg cursor-pointer transition-all flex-none sm:flex-initial flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap ${
+                activeTab === 'stats'
+                  ? 'bg-white text-stone-950 shadow-xs'
+                  : 'text-stone-500 hover:text-stone-800'
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+              <span>Thống kê</span>
+            </button>
+            <button
               id="tab_history"
               onClick={() => { playBeep(523, 'sine', 0.08); setActiveTab('history'); }}
-              className={`px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg cursor-pointer transition-all flex-1 sm:flex-initial flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap ${
+              className={`px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg cursor-pointer transition-all flex-none sm:flex-initial flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap ${
                 activeTab === 'history' 
                   ? 'bg-white text-stone-950 shadow-xs' 
                   : 'text-stone-500 hover:text-stone-800'
@@ -2004,7 +2018,7 @@ export default function BiLacArena({
             <button
               id="tab_members"
               onClick={() => { playBeep(523, 'sine', 0.08); setActiveTab('members'); }}
-              className={`px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg cursor-pointer transition-all flex-1 sm:flex-initial flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap ${
+              className={`px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg cursor-pointer transition-all flex-none sm:flex-initial flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap ${
                 activeTab === 'members'
                   ? 'bg-white text-stone-950 shadow-xs'
                   : 'text-stone-500 hover:text-stone-800'
@@ -2084,6 +2098,8 @@ export default function BiLacArena({
       </div>
 
       {/* 1. MATCHMAKING & ACTIVE SCOREBOARD TAB */}
+      {activeTab === 'stats' && <BiLacStatsTab players={players} matches={matches} />}
+
       {activeTab === 'matchmaking' && (
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8" id="bilac_tab_matchmaking_content">
           
