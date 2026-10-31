@@ -4,9 +4,9 @@ import { sha256Hex } from './password';
 import { groupRandomIdentity, TelegramGroupAccessError } from './telegram-group';
 import { currentSeason, standings, renderStandings, scoreInput, type RankingPlayer } from '../../../shared/bilac-telegram';
 import { createBiLacMatch, memberRole, saveBiLacScore, cancelBiLacMatch, type StoredMatch } from './bilac-actions';
-import { deliver, enqueue, telegram, TelegramError } from './telegram-client';
+import { deliver, enqueue, outboxStatement, telegram, TelegramError } from './telegram-client';
 
-interface Actor { id: number; is_bot?: boolean }
+interface Actor { id: number; is_bot?: boolean; username?: string }
 interface Message { message_id: number; text?: string; chat: { id: number; type: string; title?: string }; from?: Actor; sender_chat?: object; reply_to_message?: { text?: string }; migrate_to_chat_id?: number }
 export interface TelegramUpdate { bindingId?: string | null; linkId?: string | null; update_id: number; message?: Message; callback_query?: { id: string; from: Actor; data?: string; message?: Message }; my_chat_member?: { chat: Message['chat']; new_chat_member: { status: string } } }
 interface Integration { tournament_id: string; chat_id: string; enabled: number; binding_id: string }
@@ -32,10 +32,13 @@ async function authorised(env: Bindings, tournamentId: string, telegramId: strin
   if (!identity?.linkId) throw new CommandError('Hãy liên kết tài khoản trên web và tham gia giải trước nhé!');
   return identity;
 }
-async function newDraft(env: Bindings, id: string, integration: Integration, telegramId: string, kind: string, payload: unknown, identity: { userId: string; linkId: string; groupMember?: boolean }, ttlMs = 10 * 60000) {
-  await env.DB.prepare(`INSERT OR IGNORE INTO telegram_drafts (id,tournament_id,chat_id,telegram_id,kind,payload,expires_at,binding_id,user_id,link_id)
+function draftStatement(env: Bindings, id: string, integration: Integration, telegramId: string, kind: string, payload: unknown, identity: { userId: string; linkId: string; groupMember?: boolean }, ttlMs = 10 * 60000) {
+  return env.DB.prepare(`INSERT OR IGNORE INTO telegram_drafts (id,tournament_id,chat_id,telegram_id,kind,payload,expires_at,binding_id,user_id,link_id)
     SELECT ?,?,?,?,?,?,?,?,?,? WHERE ${telegramActorSql}`).bind(id, integration.tournament_id, integration.chat_id, telegramId, kind, JSON.stringify(payload), Date.now() + ttlMs, integration.binding_id, identity.userId, identity.linkId,
-      ...telegramActorParams(integration.tournament_id, identity.userId, { id: integration.binding_id, chatId: integration.chat_id, telegramId, linkId: identity.linkId, groupMember: identity.groupMember })).run();
+      ...telegramActorParams(integration.tournament_id, identity.userId, { id: integration.binding_id, chatId: integration.chat_id, telegramId, linkId: identity.linkId, groupMember: identity.groupMember }));
+}
+async function newDraft(...args: Parameters<typeof draftStatement>) {
+  await draftStatement(...args).run();
 }
 interface Button { text: string; callback_data: string; style?: 'primary' | 'success' | 'danger' }
 function selectionMessage(id: string, revision: number, data: Selection) {
@@ -59,8 +62,8 @@ function matchButtons(id: string) {
     [{ text: '✕ Huỷ trận', callback_data: `cx:${id}:0` }],
   ] as Button[][] };
 }
-async function matchText(env: Bindings, match: StoredMatch) {
-  const players = (await env.DB.prepare('SELECT id,name FROM bilac_players WHERE tournament_id=?').bind(match.tournament_id).all<RankingPlayer>()).results;
+async function matchText(env: Bindings, match: StoredMatch, roster?: RankingPlayer[]) {
+  const players = roster ?? (await env.DB.prepare('SELECT id,name FROM bilac_players WHERE tournament_id=?').bind(match.tournament_id).all<RankingPlayer>()).results;
   const names = new Map(players.map(p => [p.id, p.name]));
   const team = (json: string) => {
     const ids = JSON.parse(json) as string[];
@@ -85,28 +88,42 @@ async function callback(env: Bindings, update: TelegramUpdate, replies: string[]
   if (!cb.message || cb.from.is_bot || !['group', 'supergroup'].includes(cb.message.chat.type)) return;
   const [action, id, revisionRaw, value, selected] = (cb.data ?? '').split(':');
   if (!['sel', 'page', 'all', 'go', 'save', 'finish', 'add', 'wa', 'wb', 'cx', 'cancel', 'dismiss'].includes(action)) return;
-  const draft = await env.DB.prepare('SELECT * FROM telegram_drafts WHERE id=?').bind(id).first<Draft>();
+  const draft = await env.DB.prepare(`SELECT d.*,i.binding_id AS active_binding,
+    CASE WHEN u.id IS NOT NULL THEN l.user_id END AS actor_user_id,l.link_id AS actor_link_id
+    FROM telegram_drafts d LEFT JOIN bilac_telegram i ON i.tournament_id=d.tournament_id AND i.chat_id=d.chat_id AND i.binding_id=d.binding_id AND i.enabled=1
+    LEFT JOIN telegram_links l ON l.telegram_id=?
+    LEFT JOIN bilac_tournament_members m ON m.tournament_id=d.tournament_id AND m.user_id=l.user_id
+    LEFT JOIN users u ON u.id=m.user_id WHERE d.id=?`)
+    .bind(String(cb.from.id), id).first<Draft & { active_binding: string | null; actor_user_id: string | null; actor_link_id: string | null }>();
   if (!draft || draft.chat_id !== String(cb.message.chat.id) || (draft.kind !== 'match' && draft.telegram_id !== String(cb.from.id)) || draft.expires_at < Date.now()) throw new CommandError('Nút này hết hạn hoặc dành cho người khác. Hãy chạy lệnh lại.');
-  const integration = await env.DB.prepare('SELECT * FROM bilac_telegram WHERE tournament_id=? AND chat_id=? AND binding_id=? AND enabled=1').bind(draft.tournament_id, draft.chat_id, draft.binding_id).first<Integration>();
-  if (!integration || (update.bindingId !== undefined && update.bindingId !== draft.binding_id)) throw new CommandError('Group đã ngắt kết nối hoặc đổi phiên liên kết.');
-  const identity = await authorised(env, draft.tournament_id, String(cb.from.id));
+  if (!draft.active_binding || (update.bindingId !== undefined && update.bindingId !== draft.binding_id)) throw new CommandError('Group đã ngắt kết nối hoặc đổi phiên liên kết.');
+  if (!draft.actor_user_id || !draft.actor_link_id) throw new CommandError('Hãy liên kết tài khoản trên web và tham gia giải trước nhé!');
+  const integration: Integration = { tournament_id: draft.tournament_id, chat_id: draft.chat_id, binding_id: draft.binding_id, enabled: 1 };
+  const identity = { userId: draft.actor_user_id, linkId: draft.actor_link_id };
   if ((draft.kind !== 'match' && (identity.userId !== draft.user_id || identity.linkId !== draft.link_id)) || (update.linkId !== undefined && identity.linkId !== update.linkId)) throw new CommandError('Liên kết tài khoản đã thay đổi. Hãy chạy lệnh mới.');
   const userId = identity.userId;
   const actor = { id: draft.binding_id, chatId: draft.chat_id, telegramId: String(cb.from.id), linkId: identity.linkId };
   if (draft.consumed) return;
   if (draft.kind === 'match' && ['wa', 'wb', 'cx'].includes(action)) {
     const matchId = JSON.parse(draft.payload).matchId as string;
-    const match = await env.DB.prepare("SELECT * FROM bilac_matches WHERE id=? AND tournament_id=? AND status='PLAYING'").bind(matchId, draft.tournament_id).first<StoredMatch>();
+    const match = await env.DB.prepare(`SELECT m.*,(SELECT json_group_array(json_object('id',p.id,'name',p.name))
+      FROM bilac_players p WHERE p.tournament_id=m.tournament_id) AS roster FROM bilac_matches m
+      WHERE m.id=? AND m.tournament_id=? AND m.status='PLAYING'`).bind(matchId, draft.tournament_id).first<StoredMatch & { roster: string }>();
     if (!match) throw new CommandError('Trận đã kết thúc hoặc được huỷ. Dùng /score để xem trận đang chơi.');
     const confirmation = 'q' + update.update_id.toString(36);
     const cancelling = action === 'cx';
     const scores = action === 'wa' ? [7, 6] : [6, 7];
-    await newDraft(env, confirmation, integration, String(cb.from.id), cancelling ? 'cancel' : 'score', { match, scores, sourceMessageId: cb.message.message_id }, identity);
     const preview = cancelling ? 'Huỷ trận này? Trận sẽ không được tính vào BXH.' : `Ghi nhận ${action === 'wa' ? 'đội A thắng 7–6' : 'đội B thắng 6–7'} và kết thúc trận?`;
-    await queueReply(replies, env, `quick:${confirmation}`, draft.chat_id, {
-      text: `${await matchText(env, match)}\n\n${preview}`,
-      reply_markup: { inline_keyboard: [[{ text: cancelling ? 'Xác nhận huỷ trận' : 'Xác nhận kết quả', callback_data: `${cancelling ? 'cancel' : 'finish'}:${confirmation}:0`, style: cancelling ? 'danger' : 'success' }, { text: 'Quay lại', callback_data: `dismiss:${confirmation}:0` }]] },
-    }, draft.tournament_id, Date.now(), draft.binding_id);
+    const replyId = `quick:${confirmation}`;
+    const { roster, ...storedMatch } = match;
+    await env.DB.batch([
+      draftStatement(env, confirmation, integration, String(cb.from.id), cancelling ? 'cancel' : 'score', { match: storedMatch, scores, sourceMessageId: cb.message.message_id }, identity),
+      outboxStatement(env, replyId, draft.chat_id, {
+        text: `${await matchText(env, match, JSON.parse(roster))}\n\n${preview}`,
+        reply_markup: { inline_keyboard: [[{ text: cancelling ? 'Xác nhận huỷ trận' : 'Xác nhận kết quả', callback_data: `${cancelling ? 'cancel' : 'finish'}:${confirmation}:0`, style: cancelling ? 'danger' : 'success' }, { text: 'Quay lại', callback_data: `dismiss:${confirmation}:0` }]] },
+      }, draft.tournament_id, Date.now(), draft.binding_id),
+    ]);
+    replies.push(replyId);
     return;
   }
   if (action === 'dismiss' && ['score', 'cancel'].includes(draft.kind)) {
@@ -300,13 +317,13 @@ export async function processUpdate(env: Bindings, update: TelegramUpdate) {
   if (!telegramEnabled(env)) return;
   const chat = update.message?.chat ?? update.callback_query?.message?.chat ?? update.my_chat_member?.chat;
   const bootstrap = /^\/(start|connect)(@\w+)?(\s|$)/i.test(update.message?.text ?? '');
-  if (chat && chat.type !== 'private' && !bootstrap && update.bindingId !== undefined) {
+  if (!update.callback_query && chat && chat.type !== 'private' && !bootstrap && update.bindingId !== undefined) {
     const active = await env.DB.prepare('SELECT binding_id FROM bilac_telegram WHERE chat_id=? AND enabled=1').bind(String(chat.id)).first<{ binding_id: string }>();
     if (!update.bindingId || active?.binding_id !== update.bindingId) return;
   }
   const write = Boolean(update.callback_query) || /^\/(random|score|addplayer|connect)(@\w+)?(\s|$)/i.test(update.message?.text ?? '');
   const groupRandom = !update.callback_query && ['group', 'supergroup'].includes(update.message?.chat.type ?? '') && /^\/random(@\w+)?(\s|$)/i.test(update.message?.text ?? '');
-  if (write && !groupRandom && update.linkId !== undefined) {
+  if (!update.callback_query && write && !groupRandom && update.linkId !== undefined) {
     const telegramId = update.callback_query?.from.id ?? update.message?.from?.id;
     const active = await env.DB.prepare('SELECT link_id FROM telegram_links WHERE telegram_id=?').bind(String(telegramId)).first<{ link_id: string }>();
     if (!update.linkId || active?.link_id !== update.linkId) return;
@@ -329,19 +346,19 @@ export async function processUpdate(env: Bindings, update: TelegramUpdate) {
   return replies;
 }
 
-export async function recoverUpdates(env: Bindings) {
+export async function recoverUpdates(env: Bindings, updateId?: number) {
   if (!telegramEnabled(env)) return;
   const now = Date.now();
-  const pending = await env.DB.prepare("SELECT id,payload FROM telegram_updates WHERE status='pending' AND lease_until<? AND attempts<5 ORDER BY id LIMIT 20")
-    .bind(now).all<{ id: number; payload: string }>();
+  const pending = updateId === undefined ? await env.DB.prepare("SELECT id,payload FROM telegram_updates WHERE status='pending' AND lease_until<? AND attempts<5 ORDER BY id LIMIT 20")
+    .bind(now).all<{ id: number; payload: string }>() : { results: [{ id: updateId }] };
   for (const row of pending.results) {
-    const claim = await env.DB.prepare("UPDATE telegram_updates SET lease_until=?,attempts=attempts+1 WHERE id=? AND status='pending' AND lease_until<?")
-      .bind(now + 60000, row.id, now).run();
-    if (!claim.meta.changes) continue;
+    const claim = await env.DB.prepare("UPDATE telegram_updates SET lease_until=?,attempts=attempts+1 WHERE id=? AND status='pending' AND lease_until<? AND attempts<5 RETURNING payload")
+      .bind(now + 60000, row.id, now).first<{ payload: string }>();
+    if (!claim) continue;
     try {
       const started = Date.now();
-      const replies = await processUpdate(env, JSON.parse(row.payload));
-      console.info('Telegram update timing', { elapsedMs: Date.now() - started });
+      const replies = await processUpdate(env, JSON.parse(claim.payload));
+      console.info('Telegram update timing', { updateId: row.id, elapsedMs: Date.now() - started });
       await env.DB.prepare("UPDATE telegram_updates SET status='done',payload='{}' WHERE id=?").bind(row.id).run();
       if (replies?.length) await deliver(env, Date.now(), replies);
     } catch {

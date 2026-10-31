@@ -30,11 +30,14 @@ telegramRoute.post('/webhook', async c => {
   if (update.message && !update.message.migrate_to_chat_id && !/^\/(start|connect|help|random|score|bxh|addplayer)(@\w+)?(\s|$)/i.test(update.message.text ?? '')) return c.json({ ok: true });
   const chat = update.message?.chat ?? update.callback_query?.message?.chat ?? update.my_chat_member?.chat;
   const actor = update.callback_query?.from ?? update.message?.from;
-  const binding = chat ? await c.env.DB.prepare('SELECT binding_id FROM bilac_telegram WHERE chat_id=? AND enabled=1').bind(String(chat.id)).first<{ binding_id: string }>() : null;
-  const link = actor ? await c.env.DB.prepare('SELECT link_id FROM telegram_links WHERE telegram_id=?').bind(String(actor.id)).first<{ link_id: string }>() : null;
+  const authority = await c.env.DB.prepare(`SELECT
+    (SELECT binding_id FROM bilac_telegram WHERE chat_id=? AND enabled=1) AS bindingId,
+    (SELECT link_id FROM telegram_links WHERE telegram_id=?) AS linkId,
+    (SELECT user_id FROM telegram_links WHERE telegram_id=?) AS userId`)
+    .bind(chat ? String(chat.id) : null, actor ? String(actor.id) : null, actor ? String(actor.id) : null).first<{ bindingId: string | null; linkId: string | null; userId: string | null }>();
   const clean = {
-    bindingId: binding?.binding_id ?? null,
-    linkId: link?.link_id ?? null,
+    bindingId: authority?.bindingId ?? null,
+    linkId: authority?.linkId ?? null,
     update_id: update.update_id,
     ...(update.message ? { message: {
       message_id: update.message.message_id,
@@ -52,8 +55,20 @@ telegramRoute.post('/webhook', async c => {
     } } : {}),
     ...(update.my_chat_member ? { my_chat_member: { chat: { id: update.my_chat_member.chat?.id, type: update.my_chat_member.chat?.type }, new_chat_member: { status: update.my_chat_member.new_chat_member?.status } } } : {}),
   };
-  await c.env.DB.prepare('INSERT OR IGNORE INTO telegram_updates (id,payload,created_at) VALUES (?,?,?)').bind(update.update_id, JSON.stringify(clean), Date.now()).run();
-  c.executionCtx.waitUntil(recoverUpdates(c.env).then(() => deliver(c.env)));
+  const accepted = await c.env.DB.prepare('INSERT OR IGNORE INTO telegram_updates (id,payload,created_at) VALUES (?,?,?)').bind(update.update_id, JSON.stringify(clean), Date.now()).run();
+  if (accepted.meta.changes && update.callback_query) {
+    const [action, draftId] = (update.callback_query.data ?? '').split(':');
+    console.info('Telegram callback received', {
+      updateId: update.update_id,
+      telegramId: String(update.callback_query.from.id),
+      telegramUsername: update.callback_query.from.username?.slice(0, 64) ?? null,
+      userId: authority?.userId ?? null,
+      chatId: chat ? String(chat.id) : null,
+      action: /^[a-z]{1,16}$/.test(action) ? action : 'unknown',
+      draftId: /^[a-z0-9-]{1,64}$/.test(draftId ?? '') ? draftId : null,
+    });
+  }
+  c.executionCtx.waitUntil(recoverUpdates(c.env, update.update_id));
   return c.json({ ok: true });
 });
 
