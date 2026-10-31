@@ -17,6 +17,7 @@ interface FormState { draft: FormDraft; actor: TelegramActorBinding; groupName: 
 interface FormPayload { players: Array<{ id: string; name: string }>; submittedIds?: string[]; mode?: 'random' | 'manual'; teamA?: string[]; teamB?: string[] }
 export const telegramFormRoute = new Hono<{ Bindings: Bindings; Variables: { form: FormState } }>();
 telegramFormRoute.use('/:id', async (c, next) => {
+  const started = Date.now();
   c.header('Cache-Control', 'private, no-store');
   if (!sameOrigin(c)) return c.json({ error: 'Nguồn yêu cầu không hợp lệ.' }, 403);
   const auth = c.req.header('Authorization') ?? '';
@@ -50,6 +51,7 @@ telegramFormRoute.use('/:id', async (c, next) => {
   if (!integration) return c.json({ error: 'Group đã thay đổi liên kết. Hãy mở form mới.' }, 403);
   c.set('form', { draft, actor: { id: draft.binding_id, chatId: draft.chat_id, telegramId, linkId: draft.link_id, groupMember }, groupName: integration.chat_title, tournamentName: integration.name });
   await next();
+  console.info('Telegram form timing', { method: c.req.method, elapsedMs: Date.now() - started, status: c.res.status });
 });
 telegramFormRoute.get('/:id', async c => {
   const { draft, groupName, tournamentName } = c.get('form');
@@ -94,7 +96,7 @@ telegramFormRoute.post('/:id', async c => {
     const match = await createBiLacMatch(c.env, draft.tournament_id, draft.user_id, selected, 'tg-' + draft.id, actor, teams);
     await publishMatchCard(c.env, match, { ...draft, groupMember: actor.groupMember });
     await c.env.DB.prepare("UPDATE telegram_drafts SET consumed=1 WHERE id=? AND decision='submit'").bind(draft.id).run();
-    c.executionCtx.waitUntil(deliver(c.env));
+    c.executionCtx.waitUntil(deliver(c.env, Date.now(), [`draft:${draft.id}`]));
     return c.json({ success: true, matchId: match.id, groupName: state.groupName });
   } catch (error) {
     const exists = await c.env.DB.prepare('SELECT 1 FROM bilac_matches WHERE id=?').bind('tg-' + draft.id).first();
