@@ -69,7 +69,7 @@ async function matchText(env: Bindings, match: StoredMatch, roster?: RankingPlay
     const ids = JSON.parse(json) as string[];
     return ids.slice(0, 12).map(id => (names.get(id) ?? '?').slice(0, 40)).join(', ') + (ids.length > 12 ? `, +${ids.length - 12} người` : '');
   };
-  return `⚽ ${match.status === 'PLAYING' ? 'TRẬN ĐANG CHƠI' : 'TRẬN ĐÃ KẾT THÚC'}\nTrận #${match.id}\n\nĐội A: ${team(match.team1)}\nĐội B: ${team(match.team2)}${match.benched ? `\nDự bị: ${names.get(match.benched)}` : ''}\n\nTỉ số: ${match.score1} – ${match.score2}\nThắng nhanh: 7–6 / 6–7. Hoặc reply /score@${env.TELEGRAM_BOT_USERNAME} 10 7 để nhập điểm.`;
+  return `⚽ ${match.status === 'PLAYING' ? 'TRẬN ĐANG CHƠI' : 'TRẬN ĐÃ KẾT THÚC'}\nTrận #${match.id}\n\nĐội A: ${team(match.team1)}\nĐội B: ${team(match.team2)}${match.benched ? `\nDự bị: ${names.get(match.benched)}` : ''}${match.result_multiplier === 10 ? '\nChế độ ×10: chốt một lần, tính 10 trận cùng kết quả.' : ''}\n\nTỉ số: ${match.score1} – ${match.score2}\nThắng nhanh: 7–6 / 6–7. Hoặc reply /score@${env.TELEGRAM_BOT_USERNAME} 10 7 để nhập điểm.`;
 }
 
 export async function publishMatchCard(env: Bindings, match: StoredMatch, origin: Pick<Draft, 'id' | 'tournament_id' | 'chat_id' | 'binding_id' | 'telegram_id' | 'user_id' | 'link_id'> & { groupMember?: boolean }) {
@@ -120,7 +120,7 @@ async function callback(env: Bindings, update: TelegramUpdate, replies: string[]
       draftStatement(env, confirmation, integration, String(cb.from.id), cancelling ? 'cancel' : 'score', { match: storedMatch, scores, sourceMessageId: cb.message.message_id }, identity),
       outboxStatement(env, replyId, draft.chat_id, {
         text: `${await matchText(env, match, JSON.parse(roster))}\n\n${preview}`,
-        reply_markup: { inline_keyboard: [[{ text: cancelling ? 'Xác nhận huỷ trận' : 'Xác nhận kết quả', callback_data: `${cancelling ? 'cancel' : 'finish'}:${confirmation}:0`, style: cancelling ? 'danger' : 'success' }, { text: 'Quay lại', callback_data: `dismiss:${confirmation}:0` }]] },
+        reply_markup: { inline_keyboard: [[{ text: cancelling ? 'Xác nhận huỷ trận' : match.result_multiplier === 10 ? 'Xác nhận kết quả ×10' : 'Xác nhận kết quả', callback_data: `${cancelling ? 'cancel' : 'finish'}:${confirmation}:0`, style: cancelling ? 'danger' : 'success' }, { text: 'Quay lại', callback_data: `dismiss:${confirmation}:0` }]] },
       }, draft.tournament_id, Date.now(), draft.binding_id),
     ]);
     replies.push(replyId);
@@ -175,7 +175,7 @@ async function callback(env: Bindings, update: TelegramUpdate, replies: string[]
   } else if ((action === 'save' || action === 'finish') && draft.kind === 'score') {
     const match = data.match as StoredMatch;
     await saveBiLacScore(env, draft.tournament_id, userId, match, scoreInput(String(data.scores[0]), String(data.scores[1])), action === 'finish', `tg-${id}`, actor);
-    text = `✅ Trận #${match.id}: A ${data.scores[0]} – ${data.scores[1]} B\n${action === 'finish' || match.status === 'FINISHED' ? 'Đã kết thúc trận.' : 'Đã lưu điểm, trận vẫn đang chơi.'}`;
+    text = `✅ Trận #${match.id}: A ${data.scores[0]} – ${data.scores[1]} B\n${action === 'finish' || match.status === 'FINISHED' ? match.result_multiplier === 10 ? 'Đã kết thúc: tính đủ 10 trận cùng kết quả (×10).' : 'Đã kết thúc trận.' : 'Đã lưu điểm, trận vẫn đang chơi.'}`;
   } else if (action === 'cancel' && draft.kind === 'cancel') {
     const match = data.match as StoredMatch;
     await cancelBiLacMatch(env, draft.tournament_id, userId, match, `tg-${id}`, actor);
@@ -305,9 +305,10 @@ async function message(env: Bindings, update: TelegramUpdate, replies: string[])
     const scores = scoreInput(args[0], args[1]);
     const match = await env.DB.prepare('SELECT * FROM bilac_matches WHERE id=? AND tournament_id=?').bind(matchId, integration.tournament_id).first<StoredMatch>();
     if (!match) throw new CommandError('Không tìm thấy trận trong giải này.');
+    if (match.source_match_id) throw new CommandError(`Hãy sửa trận gốc #${match.source_match_id} để cập nhật cả 10 kết quả.`);
     await newDraft(env, id, integration, telegramId, 'score', { match, scores }, identity);
-    await send(`Trận #${match.id}\nA ${scores[0]} – ${scores[1]} B\n${match.status === 'FINISHED' ? 'Sửa kết quả đã kết thúc (chỉ chủ giải).' : 'Chọn lưu điểm hoặc kết thúc trận.'}`, {
-      reply_markup: { inline_keyboard: [[{ text: 'Lưu điểm', callback_data: `save:${id}:0` }, { text: 'Kết thúc trận', callback_data: `finish:${id}:0` }]] },
+    await send(`Trận #${match.id}\nA ${scores[0]} – ${scores[1]} B\n${match.result_multiplier === 10 ? 'Chế độ ×10: tính tổng cộng 10 trận cùng kết quả.\n' : ''}${match.status === 'FINISHED' ? 'Sửa kết quả đã kết thúc (chỉ chủ giải).' : 'Chọn lưu điểm hoặc kết thúc trận.'}`, {
+      reply_markup: { inline_keyboard: [[{ text: 'Lưu điểm', callback_data: `save:${id}:0` }, { text: match.result_multiplier === 10 ? 'Kết thúc trận ×10' : 'Kết thúc trận', callback_data: `finish:${id}:0` }]] },
     }, integration);
   }
 }

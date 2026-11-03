@@ -398,6 +398,7 @@ bilacRoute.post('/matches/:id/update', checkAccess, async (c: any) => {
   const m = rows[0];
   if (!m) return c.json({ error: 'Không tìm thấy trận đấu!' }, 404);
   if ((m as any).tournamentId !== tournamentId) return c.json({ error: 'Bạn không có quyền chỉnh sửa trận đấu của giải đấu này!' }, 403);
+  if (m.sourceMatchId) return c.json({ error: `Hãy sửa trận gốc #${m.sourceMatchId} để cập nhật cả 10 kết quả.` }, 409);
   if (m.status === 'FINISHED' && await memberRole(c.env, tournamentId, c.get('userId')) !== 'owner') return c.json({ error: 'Chỉ chủ giải được sửa kết quả đã kết thúc.' }, 403);
   if ([score1, score2].some(v => v !== undefined && (!Number.isInteger(v) || v < 0 || v > 999)) || (status !== undefined && !['PLAYING', 'FINISHED'].includes(status))) return c.json({ error: 'Điểm hoặc trạng thái không hợp lệ.' }, 400);
   if (expectedRevision !== undefined && expectedRevision !== m.revision) return c.json({ error: 'Trận đã thay đổi. Hãy tải lại trước khi cập nhật.' }, 409);
@@ -442,6 +443,7 @@ bilacRoute.delete('/matches/:id', checkAccess, async (c: any) => {
   const m = rows[0];
   if (!m) return c.json({ error: 'Không tìm thấy trận đấu!' }, 404);
   if ((m as any).tournamentId !== tournamentId) return c.json({ error: 'Bạn không có quyền xóa trận đấu của giải đấu này!' }, 403);
+  if (m.sourceMatchId) return c.json({ error: `Hãy xoá trận gốc #${m.sourceMatchId} để xoá cả 10 kết quả.` }, 409);
   // Members may cancel a live match; history remains owner-only.
   if ((m as any).status === 'FINISHED') {
     const uid = c.req.header('x-user-id');

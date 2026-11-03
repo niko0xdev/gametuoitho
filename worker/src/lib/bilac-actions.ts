@@ -5,6 +5,7 @@ import { currentSeason } from '../../../shared/bilac-telegram';
 
 export interface StoredMatch {
   id: string; tournament_id: string; timestamp: number; week_label: string; team1: string; team2: string;
+  result_multiplier?: number; source_match_id?: string | null;
   benched: string | null; score1: number; score2: number; status: string; revision: number;
 }
 export async function memberRole(env: Bindings, tournamentId: string, userId: string): Promise<string | null> {
@@ -12,10 +13,14 @@ export async function memberRole(env: Bindings, tournamentId: string, userId: st
     WHERE m.tournament_id=? AND m.user_id=?`).bind(tournamentId, userId).first<{ role: string }>();
   return row?.role ?? null;
 }
-export async function createBiLacMatch(env: Bindings, tournamentId: string, userId: string, playerIds: string[], operationId: string, actor?: TelegramActorBinding, teams?: { teamA: string[]; teamB: string[] }) {
+export async function createBiLacMatch(env: Bindings, tournamentId: string, userId: string, playerIds: string[], operationId: string, actor?: TelegramActorBinding, teams?: { teamA: string[]; teamB: string[] }, resultMultiplier = 1) {
+  if (resultMultiplier !== 1 && resultMultiplier !== 10) throw new Error('Chọn chế độ thường hoặc ×10.');
   if (!await memberRole(env, tournamentId, userId)) throw new Error('Bạn cần là thành viên giải đấu.');
   const existing = await env.DB.prepare('SELECT * FROM bilac_matches WHERE id=? AND tournament_id=?').bind(operationId, tournamentId).first<StoredMatch>();
-  if (existing) return existing;
+  if (existing) {
+    if ((existing.result_multiplier ?? 1) !== resultMultiplier) throw new Error('Trận đã được tạo với chế độ khác.');
+    return existing;
+  }
   const cancelled = await env.DB.prepare("SELECT 1 FROM bilac_telegram_audit WHERE match_id=? AND tournament_id=? AND after_json=?").bind(operationId, tournamentId, '{"status":"CANCELLED"}').first();
   if (cancelled) throw new Error('Trận này đã được huỷ. Dùng /random để tạo trận mới.');
   const players = (await env.DB.prepare('SELECT id FROM bilac_players WHERE tournament_id=?').bind(tournamentId).all<{ id: string }>()).results;
@@ -32,17 +37,17 @@ export async function createBiLacMatch(env: Bindings, tournamentId: string, user
     teamA = paired.teamA.map(p => p.id); teamB = paired.teamB.map(p => p.id); benched = paired.sittingOut?.id ?? null;
   }
   const insertion = env.DB.prepare(`INSERT OR IGNORE INTO bilac_matches
-    (id,tournament_id,timestamp,week_label,team1,team2,benched,score1,score2,status)
-    SELECT ?,?,?,?,?,?,?,0,0,'PLAYING' WHERE NOT EXISTS
+    (id,tournament_id,timestamp,week_label,team1,team2,benched,result_multiplier,score1,score2,status)
+    SELECT ?,?,?,?,?,?,?,?,0,0,'PLAYING' WHERE NOT EXISTS
     (SELECT 1 FROM bilac_matches WHERE tournament_id=? AND status='PLAYING')
     AND EXISTS (SELECT 1 FROM bilac_tournament_members m JOIN users u ON u.id=m.user_id WHERE m.tournament_id=? AND m.user_id=?) AND ${telegramActorSql}
     AND NOT EXISTS (SELECT 1 FROM bilac_telegram_audit WHERE match_id=? AND tournament_id=? AND after_json='{"status":"CANCELLED"}')`)
-    .bind(operationId, tournamentId, Date.now(), currentSeason(), JSON.stringify(teamA), JSON.stringify(teamB), benched, tournamentId, tournamentId, userId, ...telegramActorParams(tournamentId, userId, actor), operationId, tournamentId);
+    .bind(operationId, tournamentId, Date.now(), currentSeason(), JSON.stringify(teamA), JSON.stringify(teamB), benched, resultMultiplier, tournamentId, tournamentId, userId, ...telegramActorParams(tournamentId, userId, actor), operationId, tournamentId);
   const result = actor?.groupMember ? (await env.DB.batch([
     insertion,
     env.DB.prepare(`INSERT OR IGNORE INTO bilac_telegram_audit (operation_id,tournament_id,match_id,user_id,before_json,after_json,created_at)
       SELECT ?,?,?,?,NULL,?,? WHERE EXISTS (SELECT 1 FROM bilac_matches WHERE id=? AND tournament_id=?) AND ${telegramActorSql}`)
-      .bind('create:' + operationId, tournamentId, operationId, userId, JSON.stringify({ source: 'telegram-group', telegramId: actor.telegramId, chatId: actor.chatId, teamA, teamB, status: 'PLAYING' }), Date.now(), operationId, tournamentId,
+      .bind('create:' + operationId, tournamentId, operationId, userId, JSON.stringify({ source: 'telegram-group', telegramId: actor.telegramId, chatId: actor.chatId, teamA, teamB, resultMultiplier, status: 'PLAYING' }), Date.now(), operationId, tournamentId,
         ...telegramActorParams(tournamentId, userId, actor)),
   ]))[0] : await insertion.run();
   if (!result.meta.changes) {
@@ -57,6 +62,7 @@ export async function saveBiLacScore(env: Bindings, tournamentId: string, userId
   const role = await memberRole(env, tournamentId, userId);
   if (!role || (match.status === 'FINISHED' && role !== 'owner')) throw new Error('Bạn không có quyền cập nhật kết quả này.');
   if (match.tournament_id !== tournamentId) throw new Error('Bạn không có quyền cập nhật trận của giải khác.');
+  if (match.source_match_id) throw new Error(`Bạn hãy cập nhật trận gốc #${match.source_match_id} để sửa cả 10 kết quả.`);
   const audit = await env.DB.prepare('SELECT 1 FROM bilac_telegram_audit WHERE operation_id=? AND tournament_id=? AND match_id=? AND user_id=?').bind(operationId, tournamentId, match.id, userId).first();
   if (audit) return;
   const after = { score1: scores[0], score2: scores[1], status: finish || match.status === 'FINISHED' ? 'FINISHED' : 'PLAYING' };
@@ -75,6 +81,7 @@ export async function saveBiLacScore(env: Bindings, tournamentId: string, userId
 
 export async function cancelBiLacMatch(env: Bindings, tournamentId: string, userId: string, match: StoredMatch, operationId: string, actor: TelegramActorBinding) {
   if (match.tournament_id !== tournamentId || !await memberRole(env, tournamentId, userId)) throw new Error('Bạn không có quyền huỷ trận này.');
+  if (match.source_match_id) throw new Error(`Bạn hãy cập nhật trận gốc #${match.source_match_id} để sửa cả 10 kết quả.`);
   const auditQuery = 'SELECT 1 FROM bilac_telegram_audit WHERE operation_id=? AND tournament_id=? AND match_id=? AND user_id=?';
   if (await env.DB.prepare(auditQuery).bind(operationId, tournamentId, match.id, userId).first()) return;
   await env.DB.batch([
