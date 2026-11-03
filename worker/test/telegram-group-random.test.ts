@@ -26,15 +26,17 @@ async function fixture() {
   const command = (id = 777, updateId = 100) => processUpdate(env, { update_id: updateId, bindingId: binding.binding_id, linkId: null, message: { message_id: 1, from: { id }, chat: { id: -456, type: 'supergroup' }, text: '/random@fixture_bot' } });
   const app = new Hono(); app.route('/api/telegram', telegramRoute);
   const waits: Promise<unknown>[] = [];
-  const request = (id: number, method = 'GET', draft = 'f2s', resultMultiplier = 1) => app.request('/api/telegram/form/' + draft, { method, headers: { Authorization: 'tma ' + signed(id), 'Content-Type': 'application/json' }, ...(method === 'POST' ? { body: JSON.stringify({ playerIds: ['a','b'], resultMultiplier }) } : {}) }, env, { props: {}, waitUntil(p: Promise<unknown>) { waits.push(p); }, passThroughOnException() {} });
+  const request = (id: number, method = 'GET', draft = 'f2s', resultMultiplier = 1, mode = 'random') => app.request('/api/telegram/form/' + draft, { method, headers: { Authorization: 'tma ' + signed(id), 'Content-Type': 'application/json' }, ...(method === 'POST' ? { body: JSON.stringify({ playerIds: mode === 'timeout' ? ['a','b','c','d','e'] : ['a','b'], resultMultiplier, mode }) } : {}) }, env, { props: {}, waitUntil(p: Promise<unknown>) { waits.push(p); }, passThroughOnException() {} });
   return { env, sqlite, members, fetch, command, request, waits, app };
 }
 afterEach(() => vi.unstubAllGlobals());
 describe('Group member randomisation without web accounts', () => {
-  it.each([1, 10])('accepts an unlinked group member with multiplier %s through the stamped webhook path', async resultMultiplier => {
-    const f = await fixture(); await f.command();
+  it.each([[1, 'random'], [10, 'random'], [1, 'timeout'], [10, 'timeout']] as const)('accepts an unlinked group member with multiplier %s and mode %s through the stamped webhook path', async (resultMultiplier, mode) => {
+    const f = await fixture();
+    if (mode === 'timeout') f.sqlite.exec("INSERT INTO bilac_players (id,name,avatar,tournament_id) VALUES ('d','Dung','','cup'),('e','Em','','cup')");
+    await f.command();
     expect((await f.request(777)).status).toBe(200);
-    expect((await f.request(777, 'POST', 'f2s', resultMultiplier)).status).toBe(200);
+    expect((await f.request(777, 'POST', 'f2s', resultMultiplier, mode)).status).toBe(200);
     expect(f.sqlite.prepare('SELECT count(*) n FROM telegram_links').get()).toEqual({ n: 1 });
     expect(f.sqlite.prepare('SELECT count(*) n FROM users').get()).toEqual({ n: 2 });
     expect(f.sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 1 });

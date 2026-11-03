@@ -18,7 +18,7 @@ const serializeMatch = (m: any) => {
   const parse = (v: any) => {
     try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
   };
-  return { ...m, team1: parse(m.team1), team2: parse(m.team2) };
+  return { ...m, team1: parse(m.team1), team2: parse(m.team2), sittingOut: parse(m.sittingOut) };
 };
 
 function getBiLacWeeklyInterval(date: Date) {
@@ -230,6 +230,8 @@ bilacRoute.get('/tournaments/by-slug/:slug', async (c) => {
       score1: m.score1,
       score2: m.score2,
       status: m.status,
+      matchMode: m.matchMode,
+      sittingOut: m.sittingOut,
     }));
 
   // Check isMember if x-user-id is present and the worker tracks members.
@@ -379,12 +381,14 @@ bilacRoute.get('/matches', checkAccess, async (c: any) => {
 });
 
 bilacRoute.post('/matches', checkAccess, async (c: any) => {
-  const { playerIds, resultMultiplier = 1 } = await c.req.json();
+  const { playerIds, resultMultiplier = 1, matchMode = 'normal' } = await c.req.json();
+  if (matchMode !== 'normal' && matchMode !== 'timeout') return c.json({ error: 'Chế độ trận đấu không hợp lệ.' }, 400);
+  if (matchMode === 'timeout' && Array.isArray(playerIds) && playerIds.length < 4) return c.json({ error: 'Chọn ít nhất 4 người cho chế độ Hết giờ.' }, 400);
   if (resultMultiplier !== 1 && resultMultiplier !== 10) return c.json({ error: 'Chọn chế độ thường hoặc ×10.' }, 400);
   if (!Array.isArray(playerIds) || !playerIds.every(id => typeof id === 'string')) return c.json({ error: 'Danh sách người chơi không hợp lệ.' }, 400);
   try {
-    const match = await createBiLacMatch(c.env, c.get('tournamentId'), c.get('userId'), playerIds, 'match-' + crypto.randomUUID(), undefined, undefined, resultMultiplier);
-    return c.json(serializeMatch({ ...match, weekLabel: match.week_label, tournamentId: match.tournament_id, resultMultiplier: match.result_multiplier ?? 1, sourceMatchId: match.source_match_id ?? null }));
+    const match = await createBiLacMatch(c.env, c.get('tournamentId'), c.get('userId'), playerIds, 'match-' + crypto.randomUUID(), undefined, undefined, resultMultiplier, matchMode);
+    return c.json(serializeMatch({ ...match, weekLabel: match.week_label, tournamentId: match.tournament_id, resultMultiplier: match.result_multiplier ?? 1, sourceMatchId: match.source_match_id ?? null, matchMode: match.match_mode ?? 'normal', sittingOut: match.sitting_out ?? '[]' }));
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Không thể chia đội.' }, 409);
   }
@@ -421,6 +425,7 @@ bilacRoute.post('/matches/:id/update', checkAccess, async (c: any) => {
     if ((m as any).status !== 'PLAYING') return c.json({ error: 'Chỉ có thể đổi đội khi trận đang diễn ra!' }, 400);
     const parse = (v: any) => { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
     const nextBenched = benched === undefined ? (m as any).benched ?? null : benched;
+    if (m.matchMode === 'timeout' && (team1.length !== 2 || team2.length !== 2 || nextBenched !== null)) return c.json({ error: 'Chế độ Hết giờ cần đúng 2 người mỗi đội.' }, 400);
     const oldBenched = typeof (m as any).benched === 'string' ? [(m as any).benched] : [];
     const oldSorted = [...parse((m as any).team1), ...parse((m as any).team2), ...oldBenched].sort();
     const newSorted = [...team1, ...team2, ...(nextBenched ? [nextBenched] : [])].sort();

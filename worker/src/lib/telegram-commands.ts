@@ -69,7 +69,9 @@ async function matchText(env: Bindings, match: StoredMatch, roster?: RankingPlay
     const ids = JSON.parse(json) as string[];
     return ids.slice(0, 12).map(id => (names.get(id) ?? '?').slice(0, 40)).join(', ') + (ids.length > 12 ? `, +${ids.length - 12} người` : '');
   };
-  return `⚽ ${match.status === 'PLAYING' ? 'TRẬN ĐANG CHƠI' : 'TRẬN ĐÃ KẾT THÚC'}\nTrận #${match.id}\n\nĐội A: ${team(match.team1)}\nĐội B: ${team(match.team2)}${match.benched ? `\nDự bị: ${names.get(match.benched)}` : ''}${match.result_multiplier === 10 ? '\nChế độ ×10: chốt một lần, tính 10 trận cùng kết quả.' : ''}\n\nTỉ số: ${match.score1} – ${match.score2}\nThắng nhanh: 7–6 / 6–7. Hoặc reply /score@${env.TELEGRAM_BOT_USERNAME} 10 7 để nhập điểm.`;
+  const outside = JSON.parse(match.sitting_out ?? '[]') as string[];
+  const outsideNames = outside.slice(0, 12).map(id => (names.get(id) ?? '?').slice(0, 40)).join(', ') + (outside.length > 12 ? `, +${outside.length - 12} người` : '');
+  return `⚽ ${match.status === 'PLAYING' ? 'TRẬN ĐANG CHƠI' : 'TRẬN ĐÃ KẾT THÚC'}\nTrận #${match.id}${match.match_mode === 'timeout' ? '\nChế độ Hết giờ · 2v2' : ''}\n\nĐội A: ${team(match.team1)}\nĐội B: ${team(match.team2)}${match.benched ? `\nDự bị: ${names.get(match.benched)}` : ''}${outside.length ? `\nNgồi ngoài (${outside.length}): ${outsideNames}` : ''}${match.result_multiplier === 10 ? '\nChế độ ×10: chốt một lần, tính 10 trận cùng kết quả.' : ''}\n\nTỉ số: ${match.score1} – ${match.score2}\nThắng nhanh: 7–6 / 6–7. Hoặc reply /score@${env.TELEGRAM_BOT_USERNAME} 10 7 để nhập điểm.`;
 }
 
 export async function publishMatchCard(env: Bindings, match: StoredMatch, origin: Pick<Draft, 'id' | 'tournament_id' | 'chat_id' | 'binding_id' | 'telegram_id' | 'user_id' | 'link_id'> & { groupMember?: boolean }) {

@@ -88,6 +88,8 @@ export interface BiLacPlayer {
 }
 
 export interface BiLacMatch {
+  matchMode?: 'normal' | 'timeout';
+  sittingOut?: string[];
   resultMultiplier?: 1 | 10;
   sourceMatchId?: string | null;
   revision?: number;

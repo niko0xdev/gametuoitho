@@ -100,6 +100,25 @@ describe('Telegram local-selection Mini App', () => {
     expect(f.sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 0 });
     await Promise.allSettled(f.waits);
   });
+  it('randomises exactly four in timeout mode, preserves all selected people, and locks its retry mode', async () => {
+    const f = await fixture();
+    expect((await f.post({ playerIds: ['a', 'b', 'c'], mode: 'timeout' })).status).toBe(400);
+    f.sqlite.exec("INSERT INTO bilac_players (id,name,avatar,tournament_id) VALUES ('d','Dung','','cup'),('e','Em','','cup')");
+    await processUpdate(f.env, { update_id: 110, message: { message_id: 1, from: { id: 123 }, chat: { id: -456, type: 'supergroup' }, text: '/random' } });
+    f.sqlite.exec("UPDATE telegram_drafts SET payload=(SELECT payload FROM telegram_drafts WHERE id='f32') WHERE id='f2s'");
+    expect(await (await f.get()).json()).toMatchObject({ timeoutModeEnabled: true });
+    const body = { playerIds: ['a', 'b', 'c', 'd', 'e'], mode: 'timeout', resultMultiplier: 10 };
+    expect((await f.post(body)).status).toBe(200);
+    expect((await f.post(body)).status).toBe(200);
+    expect((await f.post({ ...body, mode: 'random' })).status).toBe(409);
+    const match = f.sqlite.prepare('SELECT * FROM bilac_matches').get() as { match_mode: string; team1: string; team2: string; sitting_out: string };
+    expect(match.match_mode).toBe('timeout');
+    expect(JSON.parse(match.team1)).toHaveLength(2); expect(JSON.parse(match.team2)).toHaveLength(2); expect(JSON.parse(match.sitting_out)).toHaveLength(1);
+    const card = f.sqlite.prepare("SELECT payload FROM telegram_outbox WHERE id='draft:f2s'").get() as { payload: string };
+    expect(JSON.parse(card.payload).text).toContain('Hết giờ');
+    expect(JSON.parse(card.payload).text).toContain('Ngồi ngoài');
+    await Promise.allSettled(f.waits);
+  });
   it.each([0, 2, 100, '10', null])('rejects an invalid multiplier: %s', async resultMultiplier => {
     const f = await fixture();
     expect((await f.post({ playerIds: ['a', 'b'], resultMultiplier })).status).toBe(400);

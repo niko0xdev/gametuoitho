@@ -89,3 +89,16 @@ export function pairPlayers<P extends Player>(
 
   return { teamA, teamB, sittingOut };
 }
+
+export function pairFourPlayers<P extends Player>(
+  players: readonly P[], rng: Rng = defaultRng, history: readonly PairingHistory[] = []
+): { teamA: P[]; teamB: P[]; sittingOut: P[] } {
+  if (players.length < 4) throw new Error('Chọn ít nhất 4 người cho chế độ Hết giờ.');
+  const shuffled = [...players];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  const paired = pairPlayers(shuffled.slice(0, 4), rng, history);
+  return { teamA: paired.teamA, teamB: paired.teamB, sittingOut: shuffled.slice(4) };
+}

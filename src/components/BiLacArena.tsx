@@ -76,6 +76,7 @@ export default function BiLacArena({
   const [players, setPlayers] = useState<BiLacPlayer[]>([]);
   const [matches, setMatches] = useState<BiLacMatch[]>([]);
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([]);
+  const [matchMode, setMatchMode] = useState<'normal' | 'timeout'>('normal');
   const [resultMultiplier, setResultMultiplier] = useState<1 | 10>(1);
   const [creatingMatch, setCreatingMatch] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
@@ -120,7 +121,7 @@ export default function BiLacArena({
   if (matchScopeRef.current.userId !== loggedInUserId || matchScopeRef.current.tournamentId !== (currentTournament?.id ?? null)) {
     matchScopeRef.current = { userId: loggedInUserId, tournamentId: currentTournament?.id ?? null };
   }
-  useEffect(() => { setCreatingMatch(false); setResultMultiplier(1); }, [loggedInUserId, currentTournament?.id]);
+  useEffect(() => { setCreatingMatch(false); setResultMultiplier(1); setMatchMode('normal'); }, [loggedInUserId, currentTournament?.id]);
   const portalRequestGateRef = useRef(createLatestRequestGate());
   const dataRequestGateRef = useRef(createLatestRequestGate());
   const membersRequestGateRef = useRef(createLatestRequestGate());
@@ -462,9 +463,7 @@ export default function BiLacArena({
       viewOnlyScopeRef.current = scope;
     }
     const headers: Record<string, string> = {};
-    // Prefer the live prop (re-triggers on login); fall back to cached id so
-    // the very first render (profile still loading) still sends the header.
-    const uid = loggedInUserId || localStorage.getItem('auth_userId');
+    const uid = loggedInUserId;
     if (uid) headers['x-user-id'] = uid;
     const q = code ? `?code=${encodeURIComponent(code)}` : '';
     fetch(`/api/bilac/tournaments/by-slug/${slug}${q}`, { headers, cache: 'no-store' })
@@ -878,7 +877,7 @@ export default function BiLacArena({
     const hasMatches = matches.some(m =>
       (m.team1 && m.team1.includes(id)) ||
       (m.team2 && m.team2.includes(id)) ||
-      m.benched === id
+      m.benched === id || m.sittingOut?.includes(id)
     );
 
     if (hasMatches) {
@@ -1067,8 +1066,8 @@ export default function BiLacArena({
     const scope = matchScopeRef.current;
     if (creatingMatch) return;
     setError(null);
-    if (selectedPlayerIds.length < 2) {
-      setError('Vui lòng chọn ít nhất 2 người chơi để tiến hành chia đội đấu trí!');
+    if (selectedPlayerIds.length < (matchMode === 'timeout' ? 4 : 2)) {
+      setError(matchMode === 'timeout' ? 'Chọn ít nhất 4 người cho chế độ Hết giờ.' : 'Vui lòng chọn ít nhất 2 người chơi để tiến hành chia đội đấu trí!');
       playBeep(180, 'sawtooth', 0.2);
       return;
     }
@@ -1078,7 +1077,7 @@ export default function BiLacArena({
       const res = await bilacFetch('/api/bilac/matches', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerIds: selectedPlayerIds, resultMultiplier })
+        body: JSON.stringify({ playerIds: selectedPlayerIds, resultMultiplier, matchMode })
       });
       const data = await res.json();
       if (scope !== matchScopeRef.current) return;
@@ -2136,6 +2135,7 @@ export default function BiLacArena({
             {ongoingMatch ? (
               <>
               <div className="bg-stone-900 text-stone-100 p-6 sm:p-8 rounded-2xl border-4 border-orange-500 shadow-2xl relative overflow-hidden" id="ongoing_match_panel">
+                {ongoingMatch.matchMode === 'timeout' && <p className="mb-4 text-sm font-bold text-orange-200">Hết giờ · Hai đội 2 người</p>}
                 {ongoingMatch.resultMultiplier === 10 && <p className="mb-4 rounded-lg border border-orange-500/50 bg-orange-500/15 px-3 py-2 text-sm font-bold text-orange-200">Chế độ ×10 · Chốt một lần, tính đủ 10 trận cùng kết quả.</p>}
                 {/* Decorative retro stripes */}
                 <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-500" />
@@ -2227,6 +2227,12 @@ export default function BiLacArena({
                   </div>
                 )}
 
+                {!!ongoingMatch.sittingOut?.length && <section className="mt-6 rounded-xl border border-stone-700 bg-stone-800/50 p-3" aria-label="Người ngồi ngoài">
+                  <h3 className="text-xs font-bold text-stone-300">NGỒI NGOÀI ({ongoingMatch.sittingOut.length})</h3>
+                  <p className="mt-1 text-xs text-stone-400">Không tính trận hoặc điểm ở trận này.</p>
+                  <div className="mt-3 flex flex-wrap gap-2">{ongoingMatch.sittingOut.map(id => <span key={id} className="rounded-lg bg-stone-700 px-3 py-2 text-sm text-stone-200">{players.find(p => p.id === id)?.name ?? 'Vô danh'}</span>)}</div>
+                </section>}
+
                 {/* Score Controls / End Match */}
                 <div className="mt-8 pt-6 border-t border-stone-800 flex flex-wrap items-center justify-between gap-4">
                   <button
@@ -2315,6 +2321,12 @@ export default function BiLacArena({
                 </div>
 
                 <fieldset disabled={creatingMatch} className="rounded-xl border border-stone-200 bg-stone-50 p-4 mb-5">
+                  <legend className="px-1 text-sm font-bold text-stone-800">Chế độ trận đấu</legend>
+                  <div className="grid grid-cols-2 gap-2">{(['normal', 'timeout'] as const).map(value => <label key={value} className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer ${matchMode === value ? 'border-orange-400 bg-orange-50 text-orange-800' : 'border-stone-200 bg-white text-stone-600'}`}><input type="radio" name="webMatchMode" value={value} checked={matchMode === value} onChange={() => setMatchMode(value)} className="h-4 w-4 accent-orange-600" /><span className="font-semibold text-sm">{value === 'normal' ? 'Chia toàn bộ' : 'Hết giờ · 2v2'}</span></label>)}</div>
+                  <p className="mt-3 text-xs text-stone-500 leading-relaxed">{matchMode === 'timeout' ? 'Chọn ít nhất 4 người có mặt. Random đúng 4 người đấu 2v2; những người còn lại ngồi ngoài và không tính kết quả trận này.' : 'Chia tất cả người được chọn vào hai đội; nếu lẻ, một người dự bị.'}</p>
+                </fieldset>
+
+                <fieldset disabled={creatingMatch} className="rounded-xl border border-stone-200 bg-stone-50 p-4 mb-5">
                   <legend className="px-1 text-sm font-bold text-stone-800">Cách tính kết quả</legend>
                   <div className="grid grid-cols-2 gap-2">{([1, 10] as const).map(value => <label key={value} className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer ${resultMultiplier === value ? 'border-orange-400 bg-orange-50 text-orange-800' : 'border-stone-200 bg-white text-stone-600'}`}><input type="radio" name="webResultMultiplier" value={value} checked={resultMultiplier === value} onChange={() => setResultMultiplier(value)} className="h-4 w-4 accent-orange-600" /><span className="font-semibold text-sm">{value === 1 ? 'Thường · 1 trận' : '×10 · 10 trận'}</span></label>)}</div>
                   <p className="mt-3 text-xs text-stone-500 leading-relaxed">{resultMultiplier === 10 ? 'Chơi 1 trận. Khi chốt kết quả, lưu tổng cộng 10 trận cùng đội và tỉ số. BXH tính đủ 10 trận.' : 'Chơi 1 trận và tính 1 kết quả như bình thường.'}</p>
@@ -2359,10 +2371,12 @@ export default function BiLacArena({
                     <span>Đã chọn: {selectedPlayerIds.length} người chơi</span>
                   </div>
                   <ul className="list-disc pl-4 space-y-1 text-[11px] text-stone-500">
+                    {matchMode === 'timeout' ? <li>Random 4 người từ {selectedPlayerIds.length} người đã chọn; {Math.max(0, selectedPlayerIds.length - 4)} người ngồi ngoài. Cần ít nhất 4 người để tạo trận.</li> : <>
                     <li>Nếu số người lẻ (ví dụ 7), hệ thống chọn ngẫu nhiên 1 người dự bị. Người dự bị ván trước sẽ được vào sân nếu vẫn được chọn, không phải nghỉ 2 ván liên tiếp.</li>
                     <li>
                       <strong>Cơ chế chia đội:</strong> Xáo trộn ngẫu nhiên, không cân bằng trình độ. Từ 3 người, cách chia đội và dự bị sẽ không trùng hoàn toàn trận gần nhất của cùng nhóm, kể cả đổi màu đội. Hai người vẫn đấu 1v1.
                     </li>
+                    </>}
                   </ul>
                 </div>
 
@@ -2370,11 +2384,11 @@ export default function BiLacArena({
                 <button
                   id="btn_launch_matchmaking"
                   onClick={handleStartMatchmaking}
-                  disabled={creatingMatch || selectedPlayerIds.length < 2}
+                  disabled={creatingMatch || selectedPlayerIds.length < (matchMode === 'timeout' ? 4 : 2)}
                   className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white py-3.5 px-6 rounded-xl text-xs sm:text-sm font-bold uppercase tracking-wider cursor-pointer shadow-md hover:shadow-lg hover:scale-[1.01] transform active:scale-95 transition-all flex items-center justify-center gap-2"
                 >
                   <Shuffle className="w-4 h-4 animate-spin-slow" />
-                  {creatingMatch ? 'Đang tạo trận…' : resultMultiplier === 10 ? 'Bắt đầu ghép đội · ×10' : 'Bắt đầu ghép đội & Đấu trí'}
+                  {creatingMatch ? 'Đang tạo trận…' : `${matchMode === 'timeout' ? 'Hết giờ · Random 4 người' : 'Bắt đầu ghép đội & Đấu trí'}${resultMultiplier === 10 ? ' · ×10' : ''}`}
                 </button>
               </div>
             )}
@@ -2746,6 +2760,8 @@ export default function BiLacArena({
                     </span>
                   </div>
 
+                  {m.matchMode === 'timeout' && <p className="mb-2 text-xs font-bold text-orange-700">Hết giờ · 2v2</p>}
+                  {!!m.sittingOut?.length && <p className="mb-3 text-xs text-stone-500">Ngồi ngoài ({m.sittingOut.length}): {m.sittingOut.map(id => players.find(p => p.id === id)?.name ?? 'Vô danh').join(', ')}</p>}
                   {(m.resultMultiplier === 10 || m.sourceMatchId) && <p className="mb-3 text-xs font-semibold text-orange-700">{m.sourceMatchId ? 'Bản sao ×10 · Sửa/xoá cả nhóm tại trận gốc.' : 'Trận gốc ×10 · Gồm 10 kết quả trong BXH.'}</p>}
                   <div className="grid grid-cols-8 items-center gap-2">
                     {/* Team 1 */}
@@ -3856,6 +3872,8 @@ function ViewOnlyTournamentView({ data }: { data: any }) {
                     )}
                     <span className="ml-auto font-mono font-bold text-stone-800">{m.score1}–{m.score2}</span>
                   </div>
+                  {m.matchMode === 'timeout' && <p className="mt-1 text-xs font-semibold text-orange-700">Hết giờ · 2v2</p>}
+                  {!!m.sittingOut?.length && <p className="mt-1 text-xs text-stone-500">Ngồi ngoài: {teamLabel(m.sittingOut)}</p>}
                   {date && <p className="text-[10px] text-stone-400 mt-1">{date}</p>}
                 </li>
               );

@@ -14,7 +14,7 @@ interface FormDraft {
   user_id: string; link_id: string; payload: string; expires_at: number; kind: string; consumed: number; decision: string | null;
 }
 interface FormState { draft: FormDraft; actor: TelegramActorBinding; groupName: string; tournamentName: string }
-interface FormPayload { players: Array<{ id: string; name: string }>; submittedIds?: string[]; mode?: 'random' | 'manual'; resultMultiplier?: number; teamA?: string[]; teamB?: string[] }
+interface FormPayload { players: Array<{ id: string; name: string }>; submittedIds?: string[]; mode?: 'random' | 'manual' | 'timeout'; resultMultiplier?: number; teamA?: string[]; teamB?: string[] }
 export const telegramFormRoute = new Hono<{ Bindings: Bindings; Variables: { form: FormState } }>();
 telegramFormRoute.use('/:id', async (c, next) => {
   const started = Date.now();
@@ -57,7 +57,7 @@ telegramFormRoute.get('/:id', async c => {
   const { draft, groupName, tournamentName } = c.get('form');
   const payload = JSON.parse(draft.payload) as FormPayload;
   const selectionCacheKey = await sha256Hex(JSON.stringify([draft.user_id, draft.telegram_id, draft.link_id, draft.tournament_id, draft.chat_id, draft.binding_id]));
-  return c.json({ manualTeamsEnabled: true, resultMultipliers: [1, 10], resultMultiplier: payload.resultMultiplier ?? 1, selectionCacheKey, players: payload.players, groupName, tournamentName, expiresAt: draft.expires_at, submittedMatchId: draft.consumed ? 'tg-' + draft.id : null });
+  return c.json({ manualTeamsEnabled: true, timeoutModeEnabled: true, resultMultipliers: [1, 10], resultMultiplier: payload.resultMultiplier ?? 1, selectionCacheKey, players: payload.players, groupName, tournamentName, expiresAt: draft.expires_at, submittedMatchId: draft.consumed ? 'tg-' + draft.id : null });
 });
 telegramFormRoute.post('/:id', async c => {
   const state = c.get('form'), { draft, actor } = state;
@@ -71,7 +71,8 @@ telegramFormRoute.post('/:id', async c => {
   if (!Array.isArray(ids) || ids.length < 2 || ids.some(id => typeof id !== 'string' || !allowed.has(id)) || new Set(ids).size !== ids.length) return c.json({ error: 'Chọn ít nhất 2 người trong danh sách, không chọn trùng.' }, 400);
   const selected = [...ids].sort() as string[];
   const mode = input.mode ?? 'random';
-  if (mode !== 'random' && mode !== 'manual') return c.json({ error: 'Chế độ tạo trận không hợp lệ.' }, 400);
+  if (mode !== 'random' && mode !== 'manual' && mode !== 'timeout') return c.json({ error: 'Chế độ tạo trận không hợp lệ.' }, 400);
+  if (mode === 'timeout' && selected.length < 4) return c.json({ error: 'Chọn ít nhất 4 người cho chế độ Hết giờ.' }, 400);
   const resultMultiplier = input.resultMultiplier === undefined ? 1 : input.resultMultiplier;
   if (resultMultiplier !== 1 && resultMultiplier !== 10) return c.json({ error: 'Chọn chế độ thường hoặc ×10.' }, 400);
   let teams: { teamA: string[]; teamB: string[] } | undefined;
@@ -83,7 +84,7 @@ telegramFormRoute.post('/:id', async c => {
     teams = { teamA: [...input.teamA].sort(), teamB: [...input.teamB].sort() };
   }
   const sameSelection = (p: FormPayload) => JSON.stringify(p.submittedIds) === JSON.stringify(selected) && (p.mode ?? 'random') === mode && (p.resultMultiplier ?? 1) === resultMultiplier
-    && (mode === 'random' || (JSON.stringify(p.teamA) === JSON.stringify(teams!.teamA) && JSON.stringify(p.teamB) === JSON.stringify(teams!.teamB)));
+    && (mode !== 'manual' || (JSON.stringify(p.teamA) === JSON.stringify(teams!.teamA) && JSON.stringify(p.teamB) === JSON.stringify(teams!.teamB)));
   if (draft.consumed && !sameSelection(payload)) return c.json({ error: 'Form đã tạo trận với một danh sách khác. Dùng /random để mở lại.' }, 409);
   if (!draft.consumed) {
     const claim = await c.env.DB.prepare(`UPDATE telegram_drafts SET decision='submit',payload=? WHERE id=? AND consumed=0 AND decision IS NULL AND expires_at>?
@@ -95,7 +96,7 @@ telegramFormRoute.post('/:id', async c => {
     }
   }
   try {
-    const match = await createBiLacMatch(c.env, draft.tournament_id, draft.user_id, selected, 'tg-' + draft.id, actor, teams, resultMultiplier);
+    const match = await createBiLacMatch(c.env, draft.tournament_id, draft.user_id, selected, 'tg-' + draft.id, actor, teams, resultMultiplier, mode === 'timeout' ? 'timeout' : 'normal');
     await publishMatchCard(c.env, match, { ...draft, groupMember: actor.groupMember });
     await c.env.DB.prepare("UPDATE telegram_drafts SET consumed=1 WHERE id=? AND decision='submit'").bind(draft.id).run();
     c.executionCtx.waitUntil(deliver(c.env, Date.now(), [`draft:${draft.id}`]));
