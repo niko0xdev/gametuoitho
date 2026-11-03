@@ -264,7 +264,7 @@ async function message(env: Bindings, update: TelegramUpdate, replies: string[])
   const integration = await env.DB.prepare('SELECT * FROM bilac_telegram WHERE chat_id=? AND enabled=1 AND (?=1 OR binding_id=?)').bind(chatId, update.bindingId === undefined ? 1 : 0, update.bindingId ?? null).first<Integration>();
   if (!integration) { if (verb === '/help') await send('Group chưa kết nối. Chủ giải mở phần Telegram trên web để bắt đầu.'); return; }
   if (verb === '/help') {
-    await send(`/bxh@${env.TELEGRAM_BOT_USERNAME}: BXH tuần\n/random@${env.TELEGRAM_BOT_USERNAME}: chọn người và chia đội\n/addplayer@${env.TELEGRAM_BOT_USERNAME} Tên: thêm người\n/score@${env.TELEGRAM_BOT_USERNAME}: xem trận và nút thắng/huỷ\n/score@${env.TELEGRAM_BOT_USERNAME} mã-trận 10 7: nhập điểm (hoặc reply tin trận)\nLịch BXH: 13:20 và 21:00 giờ Việt Nam.`, {}, integration);
+    await send(`/bxh@${env.TELEGRAM_BOT_USERNAME}: BXH tuần\n/random@${env.TELEGRAM_BOT_USERNAME}: chọn người và chia đội\n/addplayer@${env.TELEGRAM_BOT_USERNAME} Tên: thêm người\n/score@${env.TELEGRAM_BOT_USERNAME}: xem trận và nút thắng/huỷ\n/score@${env.TELEGRAM_BOT_USERNAME} mã-trận 10 7: nhập điểm (hoặc reply tin trận)\nLịch BXH: 13:20 và 21:00, thứ Hai đến thứ Sáu, giờ Việt Nam.`, {}, integration);
     return;
   }
   if (verb === '/bxh') { await send(await tableMessage(env, integration.tournament_id), {}, integration); return; }

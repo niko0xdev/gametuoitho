@@ -7,9 +7,11 @@ import { enqueue, deliver } from './telegram-client';
 export async function runTelegramSchedule(env: Bindings, cron: string, scheduledTime: number) {
   if (!telegramEnabled(env)) return;
   const slot = scheduledSlot(cron);
-  if (slot) {
+  const localDate = new Date(scheduledTime + 7 * 3600000);
+  const weekday = localDate.getUTCDay();
+  if (slot && weekday >= 1 && weekday <= 5) {
     const date = new Date(scheduledTime);
-    const localDay = new Date(scheduledTime + 7 * 3600000).toISOString().slice(0, 10);
+    const localDay = localDate.toISOString().slice(0, 10);
     const groups = await env.DB.prepare('SELECT tournament_id,chat_id,binding_id FROM bilac_telegram WHERE enabled=1 AND auto_post=1').all<{ tournament_id: string; chat_id: string; binding_id: string }>();
     for (const group of groups.results) {
       try {

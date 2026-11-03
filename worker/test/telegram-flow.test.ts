@@ -104,12 +104,25 @@ describe('Telegram integrated flows', () => {
     const { env, sqlite } = fixture();
     sqlite.exec("INSERT INTO bilac_telegram (tournament_id,chat_id,chat_title,connected_by) VALUES ('cup','-456','Group','owner');");
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }))));
-    const time = Date.now();
+    const time = Date.parse('2026-11-02T06:20:00Z');
     await runTelegramSchedule(env, '20 6 * * *', time);
     await runTelegramSchedule(env, '20 6 * * *', time);
     await runTelegramSchedule(env, '0 14 * * *', time);
     await runTelegramSchedule(env, '13 */6 * * *', time);
     expect(sqlite.prepare("SELECT count(*) n FROM telegram_outbox WHERE id LIKE 'standings:%'").get()).toEqual({ n: 2 });
+  });
+  it.each([
+    ['Friday evening', '2026-11-06T14:00:00Z', 2],
+    ['Saturday in Viet Nam', '2026-11-06T17:00:00Z', 0],
+    ['Sunday evening', '2026-11-08T14:00:00Z', 0],
+    ['Monday in Viet Nam', '2026-11-08T17:00:00Z', 2],
+  ])('only schedules weekday standings: %s', async (_label, timestamp, expected) => {
+    const { env, sqlite } = fixture();
+    sqlite.exec("INSERT INTO bilac_telegram (tournament_id,chat_id,chat_title,connected_by) VALUES ('cup','-456','Group','owner');");
+    for (const cron of ['20 6 * * *', '0 14 * * *']) {
+      await runTelegramSchedule(env, cron, Date.parse(timestamp));
+    }
+    expect(sqlite.prepare("SELECT count(*) n FROM telegram_outbox WHERE id LIKE 'standings:%'").get()).toEqual({ n: expected });
   });
   it('verifies webhook secrets before accepting updates and suppresses replays', async () => {
     const { app, env, sqlite } = fixture();
