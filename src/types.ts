@@ -88,6 +88,9 @@ export interface BiLacPlayer {
 }
 
 export interface BiLacMatch {
+  resultMultiplier?: 1 | 10;
+  sourceMatchId?: string | null;
+  revision?: number;
   id: string;
   timestamp: number;
   weekLabel: string;

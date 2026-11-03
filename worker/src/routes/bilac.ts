@@ -1,6 +1,6 @@
 // worker/src/routes/bilac.ts
 import { Hono } from 'hono';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, or } from 'drizzle-orm';
 import type { Bindings } from '../db';
 import { createDb } from '../db';
 import {
@@ -379,11 +379,12 @@ bilacRoute.get('/matches', checkAccess, async (c: any) => {
 });
 
 bilacRoute.post('/matches', checkAccess, async (c: any) => {
-  const { playerIds } = await c.req.json();
+  const { playerIds, resultMultiplier = 1 } = await c.req.json();
+  if (resultMultiplier !== 1 && resultMultiplier !== 10) return c.json({ error: 'Chọn chế độ thường hoặc ×10.' }, 400);
   if (!Array.isArray(playerIds) || !playerIds.every(id => typeof id === 'string')) return c.json({ error: 'Danh sách người chơi không hợp lệ.' }, 400);
   try {
-    const match = await createBiLacMatch(c.env, c.get('tournamentId'), c.get('userId'), playerIds, 'match-' + crypto.randomUUID());
-    return c.json(serializeMatch({ ...match, weekLabel: match.week_label, tournamentId: match.tournament_id }));
+    const match = await createBiLacMatch(c.env, c.get('tournamentId'), c.get('userId'), playerIds, 'match-' + crypto.randomUUID(), undefined, undefined, resultMultiplier);
+    return c.json(serializeMatch({ ...match, weekLabel: match.week_label, tournamentId: match.tournament_id, resultMultiplier: match.result_multiplier ?? 1, sourceMatchId: match.source_match_id ?? null }));
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Không thể chia đội.' }, 409);
   }
@@ -432,7 +433,10 @@ bilacRoute.post('/matches/:id/update', checkAccess, async (c: any) => {
   }
   const result = await db.update(bilacMatchesTable).set({ ...patch, revision: m.revision + 1 }).where(and(eq(bilacMatchesTable.id, matchId), eq(bilacMatchesTable.revision, m.revision))).run();
   if (!result.meta.changes) return c.json({ error: 'Trận đã thay đổi. Hãy tải lại trước khi cập nhật.' }, 409);
-  return c.json(serializeMatch({ ...m, ...patch, revision: m.revision + 1 }));
+  const seriesMatches = m.resultMultiplier === 10 && (m.status === 'FINISHED' || patch.status === 'FINISHED')
+    ? (await db.select().from(bilacMatchesTable).where(and(eq(bilacMatchesTable.tournamentId, tournamentId), or(eq(bilacMatchesTable.id, matchId), eq(bilacMatchesTable.sourceMatchId, matchId)))).all()).map(serializeMatch)
+    : undefined;
+  return c.json({ ...serializeMatch({ ...m, ...patch, revision: m.revision + 1 }), ...(seriesMatches ? { seriesMatches } : {}) });
 });
 
 bilacRoute.delete('/matches/:id', checkAccess, async (c: any) => {
