@@ -1,0 +1,68 @@
+import { Hono } from 'hono';
+import type { Bindings } from '../src/db';
+import { bilacRoute } from '../src/routes/bilac';
+import { issueSession } from '../src/lib/session';
+import { URL } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import Database from 'better-sqlite3';
+import { testDatabase } from './telegram-db';
+import { createBiLacMatch, saveBiLacScore, type StoredMatch } from '../src/lib/bilac-actions';
+import { currentSeason, standings } from '../../shared/bilac-telegram';
+
+const factors = [2, 3, 5, 8, 13];
+describe('Desperate star result multipliers', () => {
+  it.each(factors)('records exactly %s results, synchronises corrections, and cleans up the series', async factor => {
+    const { env, sqlite } = testDatabase();
+    const match = await createBiLacMatch(env, 'cup', 'owner', ['a', 'b'], 'star', undefined, undefined, factor);
+    expect(sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 1 });
+    expect(match.result_factor).toBe(factor);
+    await saveBiLacScore(env, 'cup', 'owner', match, [7, 6], true, 'finish');
+    await saveBiLacScore(env, 'cup', 'owner', match, [7, 6], true, 'finish');
+    const matches = sqlite.prepare('SELECT * FROM bilac_matches').all() as StoredMatch[];
+    expect(matches).toHaveLength(factor);
+    expect(matches.filter(m => m.source_match_id === 'star')).toHaveLength(factor - 1);
+    expect(matches.every(m => m.score1 === 7 && m.score2 === 6 && m.status === 'FINISHED')).toBe(true);
+    const rows = standings([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], matches.map(m => ({ ...m, team1: JSON.parse(m.team1), team2: JSON.parse(m.team2), weekLabel: m.week_label })), currentSeason());
+    expect(rows.map(row => row.played)).toEqual([factor, factor]);
+    sqlite.exec("UPDATE bilac_matches SET score1=6,score2=7,revision=revision+1 WHERE id='star'");
+    expect(sqlite.prepare('SELECT count(*) n FROM bilac_matches WHERE score1=6 AND score2=7').get()).toEqual({ n: factor });
+    sqlite.exec("UPDATE bilac_matches SET status='PLAYING' WHERE id='star'");
+    expect(sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 1 });
+    sqlite.exec("UPDATE bilac_matches SET status='FINISHED' WHERE id='star'");
+    expect(sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: factor });
+    sqlite.exec("DELETE FROM bilac_matches WHERE id='star'");
+    expect(sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 0 });
+  });
+  it('normalises nullable legacy ×10 rows on web reads and result confirmations', async () => {
+    const { env, sqlite } = testDatabase();
+    sqlite.prepare("INSERT INTO bilac_matches (id,tournament_id,timestamp,week_label,team1,team2,score1,score2,status,result_multiplier) VALUES ('legacy-open','cup',?,?, '[\"a\"]','[\"b\"]',0,0,'PLAYING',10)").run(Date.now(), currentSeason());
+    const app = new Hono<{ Bindings: Bindings }>();
+    app.post('/fixture-session', async c => { await issueSession(c, 'owner'); return c.json({ ok: true }); });
+    app.route('/api/bilac', bilacRoute);
+    const session = await app.request('/fixture-session', { method: 'POST' }, env);
+    const headers = { Cookie: session.headers.get('set-cookie')!.split(';')[0], 'x-user-id': 'owner', 'x-tournament-id': 'cup', 'x-tournament-code': 'private', 'Content-Type': 'application/json' };
+    const read = await app.request('/api/bilac/matches', { headers }, env);
+    const rows = await read.json() as Array<{ resultMultiplier: number; legacyResultMultiplier?: number; revision: number }>;
+    expect(rows).toHaveLength(1); expect(rows[0].resultMultiplier).toBe(10); expect(rows[0].legacyResultMultiplier).toBeUndefined(); expect(rows[0].revision).toBe(0);
+    const finish = await app.request('/api/bilac/matches/legacy-open/update', { method: 'POST', headers, body: '{"score1":7,"score2":6,"status":"FINISHED","expectedRevision":0}' }, env);
+    expect(finish.status).toBe(200);
+    expect(await finish.json()).toMatchObject({ resultMultiplier: 10, seriesMatches: expect.any(Array) });
+    expect(sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 10 });
+  });
+  it('migrates existing ×10 records without changing their IDs, results, or count', () => {
+    const sqlite = new Database(':memory:');
+    const migrations = readdirSync(new URL('../migrations/', import.meta.url)).filter(name => name.endsWith('.sql')).sort();
+    for (const name of migrations.filter(name => name < '0012')) sqlite.exec(readFileSync(new URL('../migrations/' + name, import.meta.url), 'utf8'));
+    sqlite.exec("INSERT INTO bilac_matches (id,tournament_id,timestamp,week_label,team1,team2,score1,score2,status,result_multiplier) VALUES ('legacy','cup',1,'week','[\"a\"]','[\"b\"]',0,0,'PLAYING',10); UPDATE bilac_matches SET score1=7,score2=6,status='FINISHED' WHERE id='legacy'");
+    const before = sqlite.prepare('SELECT id,score1,score2,status,revision FROM bilac_matches ORDER BY id').all();
+    for (const name of migrations.filter(name => name >= '0012')) sqlite.exec(readFileSync(new URL('../migrations/' + name, import.meta.url), 'utf8'));
+    expect(sqlite.prepare('SELECT id,score1,score2,status,revision FROM bilac_matches ORDER BY id').all()).toEqual(before);
+    expect(sqlite.prepare("SELECT COALESCE(result_factor,result_multiplier) AS result_factor FROM bilac_matches WHERE id='legacy'").get()).toEqual({ result_factor: 10 });
+    sqlite.exec("UPDATE bilac_matches SET score1=6,score2=7 WHERE id='legacy'");
+    expect(sqlite.prepare('SELECT count(*) n FROM bilac_matches WHERE score1=6 AND score2=7').get()).toEqual({ n: 10 });
+    sqlite.exec("INSERT INTO bilac_matches (id,tournament_id,timestamp,week_label,team1,team2,score1,score2,status,result_multiplier) VALUES ('old-worker','cup',2,'week','[\"a\"]','[\"b\"]',0,0,'PLAYING',10); UPDATE bilac_matches SET score1=7,score2=6,status='FINISHED' WHERE id='old-worker'");
+    expect(sqlite.prepare("SELECT count(*) n FROM bilac_matches WHERE id='old-worker' OR source_match_id='old-worker'").get()).toEqual({ n: 10 });
+    sqlite.close();
+  });
+});

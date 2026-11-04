@@ -1,3 +1,4 @@
+import { currentSeason } from '../../shared/bilac-telegram.ts';
 import type { Request, Response } from 'express';
 import { db } from '../db.ts';
 import { requireLoggedIn } from './_middleware.ts';
@@ -338,7 +339,7 @@ function getBiLacWeeklyInterval(date: Date) {
     return `${dayStr}/${monthStr}/${yearStr}`;
   };
 
-  const label = `Tuần từ ${formatDate(start)} đến ${formatDate(end)}`;
+  const label = currentSeason(date);
   return { start, end, label };
 }
 

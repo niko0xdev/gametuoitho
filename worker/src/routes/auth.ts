@@ -8,6 +8,7 @@ import {
   sha256Hex, validatePassword, generateOtp,
   OTP_TTL_MS, OTP_RESEND_MIN_MS, OTP_MAX_ATTEMPTS,
 } from '../lib/password';
+import { issueSession, revokeSession, sameOrigin } from '../lib/session';
 import { sendOtpEmail } from '../lib/email';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 
@@ -15,6 +16,11 @@ import { jwtVerify, createRemoteJWKSet } from 'jose';
 const GOOGLE_JWKS = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
 
 export const authRoute = new Hono<{ Bindings: Bindings }>();
+authRoute.post('/logout', async c => {
+  if (!sameOrigin(c)) return c.json({ error: 'Nguồn yêu cầu không hợp lệ.' }, 403);
+  await revokeSession(c);
+  return c.json({ success: true });
+});
 
 // Per-IP rate limit on sensitive auth endpoints (anti-spam). Returns a 429
 // Response when over the limit, null otherwise. Absent binding (local dev) => allow.
@@ -158,6 +164,7 @@ authRoute.post('/verify-email', async (c) => {
   await db.update(usersTable).set({
     emailVerified: 1, otp: null, otpExpires: null, otpAttempts: 0,
   } as any).where(eq(usersTable.id, user.id));
+  await issueSession(c, user.id);
   return c.json({ success: true, user: userPublic({ ...user, emailVerified: 1 }) });
 });
 
@@ -179,6 +186,8 @@ authRoute.post('/resend-otp', async (c) => {
 });
 
 authRoute.post('/login', async (c) => {
+  const limited = await ipRateLimit(c, 'login');
+  if (limited) return limited;
   const { username, password } = await c.req.json();
   if (!username || !password) {
     return c.json({ error: 'Vui lòng điền đầy đủ email/tên đăng nhập và mật khẩu!' }, 400);
@@ -198,6 +207,7 @@ authRoute.post('/login', async (c) => {
   if (!user.emailVerified) {
     return c.json({ error: 'Tài khoản chưa xác thực email. Vui lòng kiểm tra hộp thư của bạn.' }, 403);
   }
+  await issueSession(c, user.id);
   return c.json({ success: true, user: userPublic(user) });
 });
 
@@ -265,6 +275,7 @@ authRoute.post('/google-sso', async (c) => {
     user = { id: userId, username: tempUsername, email, displayName, avatar, role: 'user' } as typeof user;
   }
 
+  await issueSession(c, user.id);
   return c.json({ success: true, user: userPublic(user) });
 });
 

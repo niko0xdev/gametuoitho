@@ -47,6 +47,8 @@ simple = { limit = 10, period = 60 }
 # Production values — `wrangler deploy` ships these. Local `wrangler dev`
 # overrides them via worker/.dev.vars (copy from worker/.dev.vars.example).
 [vars]
+# Production opt-in; bot credentials are supplied through Worker secrets.
+TELEGRAM_ENABLED = "true"
 CORS_ORIGIN = "https://gametuoitho.space"
 APP_URL = "https://gametuoitho.space"
 # AI provider config (non-secret). OPENAI_API_KEY stays a secret (set via
@@ -66,4 +68,4 @@ OTP_DAILY_CAP = "80"
 
 # Prune unverified accounts (>24h) every 6h — anti D1 bloat from signup spam.
 [triggers]
-crons = ["13 */6 * * *"]
+crons = ["13 */6 * * *", "20 6 * * *", "0 14 * * *", "*/5 * * * *"]
