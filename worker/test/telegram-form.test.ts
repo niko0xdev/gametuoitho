@@ -67,22 +67,22 @@ describe('Telegram local-selection Mini App', () => {
     expect(JSON.parse(queued.payload).reply_markup.inline_keyboard.flat().map((b: { text: string }) => b.text)).toContain('🔵 A thắng');
     await Promise.allSettled(f.waits);
   });
-  it.each(['wa', 'wb'])('creates one ×10 match and confirms ten results with %s', async action => {
+  it.each(['wa', 'wb'].flatMap(action => [2, 3, 5, 8, 10, 13].map(factor => [action, factor] as const)))('creates one star match with %s and multiplier %s', async (action, factor) => {
     const f = await fixture();
-    expect((await f.post({ playerIds: ['a', 'b'], resultMultiplier: 10 })).status).toBe(200);
-    expect((await f.post({ playerIds: ['b', 'a'], resultMultiplier: 10 })).status).toBe(200);
+    expect((await f.post({ playerIds: ['a', 'b'], resultMultiplier: factor })).status).toBe(200);
+    expect((await f.post({ playerIds: ['b', 'a'], resultMultiplier: factor })).status).toBe(200);
     expect((await f.post({ playerIds: ['a', 'b'], resultMultiplier: 1 })).status).toBe(409);
     expect(f.sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 1 });
-    expect(f.sqlite.prepare('SELECT result_multiplier FROM bilac_matches').get()).toEqual({ result_multiplier: 10 });
+    expect(f.sqlite.prepare('SELECT result_factor FROM bilac_matches').get()).toEqual({ result_factor: factor });
     const card = f.sqlite.prepare("SELECT payload FROM telegram_outbox WHERE id='draft:f2s'").get() as { payload: string };
-    expect(JSON.parse(card.payload).text).toContain('×10');
+    expect(JSON.parse(card.payload).text).toContain(`Ngôi sao tuyệt vọng ×${factor}`);
     const message = { message_id: 1, chat: { id: -456, type: 'supergroup' } };
     await processUpdate(f.env, { update_id: 200, callback_query: { id: 'quick', from: { id: 123 }, message, data: `${action}:mf2s:0` } });
     const confirmation = f.sqlite.prepare("SELECT payload FROM telegram_outbox WHERE id LIKE 'quick:%'").get() as { payload: string };
-    expect(JSON.parse(confirmation.payload).text).toContain('10 trận');
+    expect(JSON.parse(confirmation.payload).text).toContain(`${factor} trận`);
     const finish = JSON.parse(confirmation.payload).reply_markup.inline_keyboard[0][0].callback_data;
     for (const update_id of [201, 202]) await processUpdate(f.env, { update_id, callback_query: { id: 'finish', from: { id: 123 }, message, data: finish } });
-    expect(f.sqlite.prepare("SELECT count(*) n FROM bilac_matches WHERE status='FINISHED' AND score1=? AND score2=?").get(action === 'wa' ? 7 : 6, action === 'wa' ? 6 : 7)).toEqual({ n: 10 });
+    expect(f.sqlite.prepare("SELECT count(*) n FROM bilac_matches WHERE status='FINISHED' AND score1=? AND score2=?").get(action === 'wa' ? 7 : 6, action === 'wa' ? 6 : 7)).toEqual({ n: factor });
     await Promise.allSettled(f.waits);
   });
   it('supports manual ×10 teams and cancels without creating copies', async () => {
@@ -119,7 +119,7 @@ describe('Telegram local-selection Mini App', () => {
     expect(JSON.parse(card.payload).text).toContain('Ngồi ngoài');
     await Promise.allSettled(f.waits);
   });
-  it.each([0, 2, 100, '10', null])('rejects an invalid multiplier: %s', async resultMultiplier => {
+  it.each([0, 4, 6, 12, 100, '2', null])('rejects an invalid multiplier: %s', async resultMultiplier => {
     const f = await fixture();
     expect((await f.post({ playerIds: ['a', 'b'], resultMultiplier })).status).toBe(400);
     expect(f.sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 0 });

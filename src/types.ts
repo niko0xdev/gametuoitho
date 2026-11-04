@@ -90,7 +90,7 @@ export interface BiLacPlayer {
 export interface BiLacMatch {
   matchMode?: 'normal' | 'timeout';
   sittingOut?: string[];
-  resultMultiplier?: 1 | 10;
+  resultMultiplier?: 1 | 2 | 3 | 5 | 8 | 10 | 13;
   sourceMatchId?: string | null;
   revision?: number;
   id: string;

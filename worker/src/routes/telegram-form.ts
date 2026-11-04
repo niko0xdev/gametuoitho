@@ -1,3 +1,4 @@
+import { isResultMultiplier, resultMultipliers, storedResultMultiplier } from '../../../shared/bilac-multipliers';
 import { Hono } from 'hono';
 import type { Bindings } from '../db';
 import { verifyMiniAppData } from '../lib/telegram-mini-app';
@@ -57,7 +58,7 @@ telegramFormRoute.get('/:id', async c => {
   const { draft, groupName, tournamentName } = c.get('form');
   const payload = JSON.parse(draft.payload) as FormPayload;
   const selectionCacheKey = await sha256Hex(JSON.stringify([draft.user_id, draft.telegram_id, draft.link_id, draft.tournament_id, draft.chat_id, draft.binding_id]));
-  return c.json({ manualTeamsEnabled: true, timeoutModeEnabled: true, resultMultipliers: [1, 10], resultMultiplier: payload.resultMultiplier ?? 1, selectionCacheKey, players: payload.players, groupName, tournamentName, expiresAt: draft.expires_at, submittedMatchId: draft.consumed ? 'tg-' + draft.id : null });
+  return c.json({ manualTeamsEnabled: true, timeoutModeEnabled: true, resultMultipliers, resultMultiplier: payload.resultMultiplier ?? 1, selectionCacheKey, players: payload.players, groupName, tournamentName, expiresAt: draft.expires_at, submittedMatchId: draft.consumed ? 'tg-' + draft.id : null });
 });
 telegramFormRoute.post('/:id', async c => {
   const state = c.get('form'), { draft, actor } = state;
@@ -74,7 +75,7 @@ telegramFormRoute.post('/:id', async c => {
   if (mode !== 'random' && mode !== 'manual' && mode !== 'timeout') return c.json({ error: 'Chế độ tạo trận không hợp lệ.' }, 400);
   if (mode === 'timeout' && selected.length < 4) return c.json({ error: 'Chọn ít nhất 4 người cho chế độ Hết giờ.' }, 400);
   const resultMultiplier = input.resultMultiplier === undefined ? 1 : input.resultMultiplier;
-  if (resultMultiplier !== 1 && resultMultiplier !== 10) return c.json({ error: 'Chọn chế độ thường hoặc ×10.' }, 400);
+  if (!isResultMultiplier(resultMultiplier)) return c.json({ error: 'Hệ số kết quả không hợp lệ.' }, 400);
   let teams: { teamA: string[]; teamB: string[] } | undefined;
   if (mode === 'manual') {
     const validPair = (pair: unknown): pair is string[] => Array.isArray(pair) && pair.length === 2 && pair.every(id => typeof id === 'string' && allowed.has(id));
@@ -100,7 +101,7 @@ telegramFormRoute.post('/:id', async c => {
     await publishMatchCard(c.env, match, { ...draft, groupMember: actor.groupMember });
     await c.env.DB.prepare("UPDATE telegram_drafts SET consumed=1 WHERE id=? AND decision='submit'").bind(draft.id).run();
     c.executionCtx.waitUntil(deliver(c.env, Date.now(), [`draft:${draft.id}`]));
-    return c.json({ success: true, matchId: match.id, resultMultiplier: match.result_multiplier ?? 1, groupName: state.groupName });
+    return c.json({ success: true, matchId: match.id, resultMultiplier: storedResultMultiplier(match), groupName: state.groupName });
   } catch (error) {
     const exists = await c.env.DB.prepare('SELECT 1 FROM bilac_matches WHERE id=?').bind('tg-' + draft.id).first();
     if (!exists && !draft.consumed) await c.env.DB.prepare("UPDATE telegram_drafts SET decision=NULL,payload=? WHERE id=? AND decision='submit' AND consumed=0").bind(JSON.stringify(payload), draft.id).run();

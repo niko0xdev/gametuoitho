@@ -75,14 +75,14 @@ describe('Ten-result matches', () => {
     expect((await app.request('/api/bilac/matches/series', { method: 'DELETE', headers }, env)).status).toBe(200);
     expect(sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: 0 });
   });
-  it.each([1, 10])('creates and finishes a web match with multiplier %s', async resultMultiplier => {
+  it.each([1, 2, 3, 5, 8, 10, 13])('creates and finishes a web match with multiplier %s', async resultMultiplier => {
     const { env, sqlite } = testDatabase();
     const app = new Hono<{ Bindings: Bindings }>();
     app.post('/fixture-session', async c => { await issueSession(c, 'owner'); return c.json({ ok: true }); });
     app.route('/api/bilac', bilacRoute);
     const session = await app.request('/fixture-session', { method: 'POST' }, env);
     const headers = { Cookie: session.headers.get('set-cookie')!.split(';')[0], 'x-user-id': 'owner', 'x-tournament-id': 'cup', 'x-tournament-code': 'private', 'Content-Type': 'application/json' };
-    for (const invalid of [0, 2, 100, '10', null]) {
+    for (const invalid of [0, 4, 6, 12, 100, '2', null]) {
       expect((await app.request('/api/bilac/matches', { method: 'POST', headers, body: JSON.stringify({ playerIds: ['a', 'b'], resultMultiplier: invalid }) }, env)).status).toBe(400);
     }
     const response = await app.request('/api/bilac/matches', { method: 'POST', headers, body: JSON.stringify({ playerIds: ['a', 'b'], resultMultiplier }) }, env);
@@ -93,9 +93,9 @@ describe('Ten-result matches', () => {
     const finish = await app.request(`/api/bilac/matches/${match.id}/update`, { method: 'POST', headers, body: JSON.stringify({ score1: 7, score2: 6, status: 'FINISHED', expectedRevision: match.revision }) }, env);
     expect(finish.status).toBe(200);
     const result = await finish.json() as { seriesMatches?: Array<{ id: string; score1: number; score2: number; sourceMatchId: string | null }> };
-    if (resultMultiplier === 10) {
-      expect(result.seriesMatches).toHaveLength(10);
-      expect(result.seriesMatches!.filter(m => m.sourceMatchId === match.id)).toHaveLength(9);
+    if (resultMultiplier > 1) {
+      expect(result.seriesMatches).toHaveLength(resultMultiplier);
+      expect(result.seriesMatches!.filter(m => m.sourceMatchId === match.id)).toHaveLength(resultMultiplier - 1);
       expect(result.seriesMatches!.every(m => m.score1 === 7 && m.score2 === 6)).toBe(true);
     }
     expect(sqlite.prepare('SELECT count(*) n FROM bilac_matches').get()).toEqual({ n: resultMultiplier });

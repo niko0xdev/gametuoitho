@@ -1,3 +1,4 @@
+import { isResultMultiplier, storedResultMultiplier } from '../../../shared/bilac-multipliers';
 // worker/src/routes/bilac.ts
 import { Hono } from 'hono';
 import { and, eq, or } from 'drizzle-orm';
@@ -18,7 +19,8 @@ const serializeMatch = (m: any) => {
   const parse = (v: any) => {
     try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
   };
-  return { ...m, team1: parse(m.team1), team2: parse(m.team2), sittingOut: parse(m.sittingOut) };
+  const { legacyResultMultiplier, ...match } = m;
+  return { ...match, resultMultiplier: m.resultMultiplier ?? legacyResultMultiplier ?? 1, team1: parse(m.team1), team2: parse(m.team2), sittingOut: parse(m.sittingOut) };
 };
 
 function getBiLacWeeklyInterval(date: Date) {
@@ -230,6 +232,8 @@ bilacRoute.get('/tournaments/by-slug/:slug', async (c) => {
       score1: m.score1,
       score2: m.score2,
       status: m.status,
+      resultMultiplier: m.resultMultiplier,
+      sourceMatchId: m.sourceMatchId,
       matchMode: m.matchMode,
       sittingOut: m.sittingOut,
     }));
@@ -384,11 +388,11 @@ bilacRoute.post('/matches', checkAccess, async (c: any) => {
   const { playerIds, resultMultiplier = 1, matchMode = 'normal' } = await c.req.json();
   if (matchMode !== 'normal' && matchMode !== 'timeout') return c.json({ error: 'Chế độ trận đấu không hợp lệ.' }, 400);
   if (matchMode === 'timeout' && Array.isArray(playerIds) && playerIds.length < 4) return c.json({ error: 'Chọn ít nhất 4 người cho chế độ Hết giờ.' }, 400);
-  if (resultMultiplier !== 1 && resultMultiplier !== 10) return c.json({ error: 'Chọn chế độ thường hoặc ×10.' }, 400);
+  if (!isResultMultiplier(resultMultiplier)) return c.json({ error: 'Hệ số kết quả không hợp lệ.' }, 400);
   if (!Array.isArray(playerIds) || !playerIds.every(id => typeof id === 'string')) return c.json({ error: 'Danh sách người chơi không hợp lệ.' }, 400);
   try {
     const match = await createBiLacMatch(c.env, c.get('tournamentId'), c.get('userId'), playerIds, 'match-' + crypto.randomUUID(), undefined, undefined, resultMultiplier, matchMode);
-    return c.json(serializeMatch({ ...match, weekLabel: match.week_label, tournamentId: match.tournament_id, resultMultiplier: match.result_multiplier ?? 1, sourceMatchId: match.source_match_id ?? null, matchMode: match.match_mode ?? 'normal', sittingOut: match.sitting_out ?? '[]' }));
+    return c.json(serializeMatch({ ...match, weekLabel: match.week_label, tournamentId: match.tournament_id, resultMultiplier: storedResultMultiplier(match), sourceMatchId: match.source_match_id ?? null, matchMode: match.match_mode ?? 'normal', sittingOut: match.sitting_out ?? '[]' }));
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Không thể chia đội.' }, 409);
   }
@@ -403,7 +407,7 @@ bilacRoute.post('/matches/:id/update', checkAccess, async (c: any) => {
   const m = rows[0];
   if (!m) return c.json({ error: 'Không tìm thấy trận đấu!' }, 404);
   if ((m as any).tournamentId !== tournamentId) return c.json({ error: 'Bạn không có quyền chỉnh sửa trận đấu của giải đấu này!' }, 403);
-  if (m.sourceMatchId) return c.json({ error: `Hãy sửa trận gốc #${m.sourceMatchId} để cập nhật cả 10 kết quả.` }, 409);
+  if (m.sourceMatchId) return c.json({ error: `Hãy sửa trận gốc #${m.sourceMatchId} để cập nhật cả nhóm kết quả.` }, 409);
   if (m.status === 'FINISHED' && await memberRole(c.env, tournamentId, c.get('userId')) !== 'owner') return c.json({ error: 'Chỉ chủ giải được sửa kết quả đã kết thúc.' }, 403);
   if ([score1, score2].some(v => v !== undefined && (!Number.isInteger(v) || v < 0 || v > 999)) || (status !== undefined && !['PLAYING', 'FINISHED'].includes(status))) return c.json({ error: 'Điểm hoặc trạng thái không hợp lệ.' }, 400);
   if (expectedRevision !== undefined && expectedRevision !== m.revision) return c.json({ error: 'Trận đã thay đổi. Hãy tải lại trước khi cập nhật.' }, 409);
@@ -438,7 +442,7 @@ bilacRoute.post('/matches/:id/update', checkAccess, async (c: any) => {
   }
   const result = await db.update(bilacMatchesTable).set({ ...patch, revision: m.revision + 1 }).where(and(eq(bilacMatchesTable.id, matchId), eq(bilacMatchesTable.revision, m.revision))).run();
   if (!result.meta.changes) return c.json({ error: 'Trận đã thay đổi. Hãy tải lại trước khi cập nhật.' }, 409);
-  const seriesMatches = m.resultMultiplier === 10 && (m.status === 'FINISHED' || patch.status === 'FINISHED')
+  const seriesMatches = (m.resultMultiplier ?? m.legacyResultMultiplier) > 1 && (m.status === 'FINISHED' || patch.status === 'FINISHED')
     ? (await db.select().from(bilacMatchesTable).where(and(eq(bilacMatchesTable.tournamentId, tournamentId), or(eq(bilacMatchesTable.id, matchId), eq(bilacMatchesTable.sourceMatchId, matchId)))).all()).map(serializeMatch)
     : undefined;
   return c.json({ ...serializeMatch({ ...m, ...patch, revision: m.revision + 1 }), ...(seriesMatches ? { seriesMatches } : {}) });
@@ -452,7 +456,7 @@ bilacRoute.delete('/matches/:id', checkAccess, async (c: any) => {
   const m = rows[0];
   if (!m) return c.json({ error: 'Không tìm thấy trận đấu!' }, 404);
   if ((m as any).tournamentId !== tournamentId) return c.json({ error: 'Bạn không có quyền xóa trận đấu của giải đấu này!' }, 403);
-  if (m.sourceMatchId) return c.json({ error: `Hãy xoá trận gốc #${m.sourceMatchId} để xoá cả 10 kết quả.` }, 409);
+  if (m.sourceMatchId) return c.json({ error: `Hãy xoá trận gốc #${m.sourceMatchId} để xoá cả nhóm kết quả.` }, 409);
   // Members may cancel a live match; history remains owner-only.
   if ((m as any).status === 'FINISHED') {
     const uid = c.req.header('x-user-id');

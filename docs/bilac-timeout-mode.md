@@ -2,7 +2,7 @@
 
 ## Approved scope
 
-Offer the Vietnamese-labelled `Hết giờ` selection mode in the production web application and Telegram Mini App. Require at least four selected players, choose exactly four uniformly at random, split them into two teams of two, and retain everyone else as sitting out. They receive no match, win, loss, or points from that result. Ordinary and ×10 result counting remain independent options. Existing manual teams and full-roster randomisation retain their behaviour.
+Offer the Vietnamese-labelled `Hết giờ` selection mode in the production web application and Telegram Mini App. Require at least four selected players, choose exactly four uniformly at random, split them into two teams of two, and retain everyone else as sitting out. They receive no match, win, loss, or points from that result. Ordinary and configured result multipliers remain independent options. Existing manual teams and full-roster randomisation retain their behaviour.
 
 ## Contract and persistence
 

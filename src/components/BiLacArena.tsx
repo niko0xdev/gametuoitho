@@ -1,3 +1,5 @@
+import BiLacResultMode from './BiLacResultMode';
+import type { ResultMultiplier } from '../../shared/bilac-multipliers';
 import BiLacTelegramSettings from './BiLacTelegramSettings';
 import { currentSeason, standings } from '../../shared/bilac-telegram';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -77,7 +79,7 @@ export default function BiLacArena({
   const [matches, setMatches] = useState<BiLacMatch[]>([]);
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([]);
   const [matchMode, setMatchMode] = useState<'normal' | 'timeout'>('normal');
-  const [resultMultiplier, setResultMultiplier] = useState<1 | 10>(1);
+  const [resultMultiplier, setResultMultiplier] = useState<ResultMultiplier>(1);
   const [creatingMatch, setCreatingMatch] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -1088,7 +1090,7 @@ export default function BiLacArena({
         setMatches(prev => scope === matchScopeRef.current ? [data, ...prev] : prev);
         setResultMultiplier(1);
         playBeep(880, 'triangle', 0.3);
-        setSuccessMsg(data.resultMultiplier === 10 ? 'Đã tạo trận ×10. Khi chốt sẽ tính tổng cộng 10 kết quả.' : 'Chia đội thành công! Bắt đầu ghi điểm trận đấu.');
+        setSuccessMsg(data.resultMultiplier > 1 ? `Ngôi sao tuyệt vọng ×${data.resultMultiplier}: khi chốt sẽ tính ${data.resultMultiplier} kết quả.` : 'Chia đội thành công! Bắt đầu ghi điểm trận đấu.');
         setTimeout(() => setSuccessMsg(null), 3000);
 
         // Read out the teams in Vietnamese
@@ -1175,7 +1177,7 @@ export default function BiLacArena({
         if (!applyMatchResult(updated, scope)) return;
         playBeep(1046, 'sine', 0.4);
         // Đọc tỷ số từ payload server vừa xác nhận (updated) thay vì closure `match` cũ.
-        setSuccessMsg(updated.resultMultiplier === 10 ? `Đã tính đủ 10 trận cùng tỉ số ${updated.score1} – ${updated.score2} vào BXH (×10).` : `Trận đấu đã kết thúc & tỷ số ${updated.score1} - ${updated.score2} đã được cộng vào bảng xếp hạng!`);
+        setSuccessMsg((updated.resultMultiplier ?? 1) > 1 ? `Ngôi sao tuyệt vọng: đã tính đủ ${updated.resultMultiplier} trận cùng tỉ số ${updated.score1} – ${updated.score2} vào BXH (×${updated.resultMultiplier}).` : `Trận đấu đã kết thúc & tỷ số ${updated.score1} - ${updated.score2} đã được cộng vào bảng xếp hạng!`);
         setTimeout(() => setSuccessMsg(null), 4000);
 
         // Announce result in Vietnamese — đọc tỷ số từ payload server xác nhận (updated).
@@ -1218,7 +1220,7 @@ export default function BiLacArena({
         if (!applyMatchResult(updated, scope)) return;
         setError(null);  // Clear banner "kết quả hoà" cũ khi user vừa chọn đội thắng.
         playBeep(1046, 'sine', 0.4);
-        setSuccessMsg(updated.resultMultiplier === 10 ? `Đã tính đủ 10 trận: ${winnerLabel} thắng 7 – 6 (×10).` : `Trận đấu đã kết thúc nhanh! Phần thắng thuộc về ${winnerLabel} với tỷ số 7 - 6.`);
+        setSuccessMsg((updated.resultMultiplier ?? 1) > 1 ? `Ngôi sao tuyệt vọng: đã tính đủ ${updated.resultMultiplier} trận, ${winnerLabel} thắng 7 – 6 (×${updated.resultMultiplier}).` : `Trận đấu đã kết thúc nhanh! Phần thắng thuộc về ${winnerLabel} với tỷ số 7 - 6.`);
         setTimeout(() => setSuccessMsg(null), 4000);
 
         // Announce quick finish result in Vietnamese
@@ -2136,7 +2138,7 @@ export default function BiLacArena({
               <>
               <div className="bg-stone-900 text-stone-100 p-6 sm:p-8 rounded-2xl border-4 border-orange-500 shadow-2xl relative overflow-hidden" id="ongoing_match_panel">
                 {ongoingMatch.matchMode === 'timeout' && <p className="mb-4 text-sm font-bold text-orange-200">Hết giờ · Hai đội 2 người</p>}
-                {ongoingMatch.resultMultiplier === 10 && <p className="mb-4 rounded-lg border border-orange-500/50 bg-orange-500/15 px-3 py-2 text-sm font-bold text-orange-200">Chế độ ×10 · Chốt một lần, tính đủ 10 trận cùng kết quả.</p>}
+                {(ongoingMatch.resultMultiplier ?? 1) > 1 && <p className="mb-4 rounded-lg border border-orange-500/50 bg-orange-500/15 px-3 py-2 text-sm font-bold text-orange-200">Ngôi sao tuyệt vọng ×{ongoingMatch.resultMultiplier} · Chốt một lần, tính đủ {ongoingMatch.resultMultiplier} trận cùng kết quả.</p>}
                 {/* Decorative retro stripes */}
                 <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-500" />
                 
@@ -2174,7 +2176,7 @@ export default function BiLacArena({
                           : 'w-full mb-4 py-4 px-6 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl text-sm sm:text-base font-extrabold transition-all cursor-pointer text-center block shadow-xl hover:shadow-2xl hover:scale-105'
                       }
                     >
-                      {pendingConfirmTeam === 1 ? `⚠️ Xác nhận Xanh thắng${ongoingMatch.resultMultiplier === 10 ? ' · ×10' : ''}` : '🏆 Xanh Thắng (7-6)'}
+                      {pendingConfirmTeam === 1 ? `⚠️ Xác nhận Xanh thắng${(ongoingMatch.resultMultiplier ?? 1) > 1 ? ` · ×${ongoingMatch.resultMultiplier}` : ''}` : '🏆 Xanh Thắng (7-6)'}
                     </button>
                     <h3 className="text-xs sm:text-sm font-bold text-blue-400 uppercase tracking-wide mb-1">Đội Xanh</h3>
                     {/* Players in Team 1 */}
@@ -2200,7 +2202,7 @@ export default function BiLacArena({
                           : 'w-full mb-4 py-4 px-6 bg-red-600 hover:bg-red-500 text-white rounded-2xl text-sm sm:text-base font-extrabold transition-all cursor-pointer text-center block shadow-xl hover:shadow-2xl hover:scale-105'
                       }
                     >
-                      {pendingConfirmTeam === 2 ? `⚠️ Xác nhận Đỏ thắng${ongoingMatch.resultMultiplier === 10 ? ' · ×10' : ''}` : '🏆 Đỏ Thắng (7-6)'}
+                      {pendingConfirmTeam === 2 ? `⚠️ Xác nhận Đỏ thắng${(ongoingMatch.resultMultiplier ?? 1) > 1 ? ` · ×${ongoingMatch.resultMultiplier}` : ''}` : '🏆 Đỏ Thắng (7-6)'}
                     </button>
                     <h3 className="text-xs sm:text-sm font-bold text-red-400 uppercase tracking-wide mb-1">Đội Đỏ</h3>
                     {/* Players in Team 2 */}
@@ -2326,11 +2328,7 @@ export default function BiLacArena({
                   <p className="mt-3 text-xs text-stone-500 leading-relaxed">{matchMode === 'timeout' ? 'Chọn ít nhất 4 người có mặt. Random đúng 4 người đấu 2v2; những người còn lại ngồi ngoài và không tính kết quả trận này.' : 'Chia tất cả người được chọn vào hai đội; nếu lẻ, một người dự bị.'}</p>
                 </fieldset>
 
-                <fieldset disabled={creatingMatch} className="rounded-xl border border-stone-200 bg-stone-50 p-4 mb-5">
-                  <legend className="px-1 text-sm font-bold text-stone-800">Cách tính kết quả</legend>
-                  <div className="grid grid-cols-2 gap-2">{([1, 10] as const).map(value => <label key={value} className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer ${resultMultiplier === value ? 'border-orange-400 bg-orange-50 text-orange-800' : 'border-stone-200 bg-white text-stone-600'}`}><input type="radio" name="webResultMultiplier" value={value} checked={resultMultiplier === value} onChange={() => setResultMultiplier(value)} className="h-4 w-4 accent-orange-600" /><span className="font-semibold text-sm">{value === 1 ? 'Thường · 1 trận' : '×10 · 10 trận'}</span></label>)}</div>
-                  <p className="mt-3 text-xs text-stone-500 leading-relaxed">{resultMultiplier === 10 ? 'Chơi 1 trận. Khi chốt kết quả, lưu tổng cộng 10 trận cùng đội và tỉ số. BXH tính đủ 10 trận.' : 'Chơi 1 trận và tính 1 kết quả như bình thường.'}</p>
-                </fieldset>
+                <BiLacResultMode value={resultMultiplier} onChange={setResultMultiplier} disabled={creatingMatch} />
 
                 {/* Interactive Player Grid for Match Selection */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 my-6" id="matchmaker_player_selection_grid">
@@ -2388,7 +2386,7 @@ export default function BiLacArena({
                   className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white py-3.5 px-6 rounded-xl text-xs sm:text-sm font-bold uppercase tracking-wider cursor-pointer shadow-md hover:shadow-lg hover:scale-[1.01] transform active:scale-95 transition-all flex items-center justify-center gap-2"
                 >
                   <Shuffle className="w-4 h-4 animate-spin-slow" />
-                  {creatingMatch ? 'Đang tạo trận…' : `${matchMode === 'timeout' ? 'Hết giờ · Random 4 người' : 'Bắt đầu ghép đội & Đấu trí'}${resultMultiplier === 10 ? ' · ×10' : ''}`}
+                  {creatingMatch ? 'Đang tạo trận…' : `${matchMode === 'timeout' ? 'Hết giờ · Random 4 người' : 'Bắt đầu ghép đội & Đấu trí'}${resultMultiplier > 1 ? ` · ×${resultMultiplier}` : ''}`}
                 </button>
               </div>
             )}
@@ -2762,7 +2760,7 @@ export default function BiLacArena({
 
                   {m.matchMode === 'timeout' && <p className="mb-2 text-xs font-bold text-orange-700">Hết giờ · 2v2</p>}
                   {!!m.sittingOut?.length && <p className="mb-3 text-xs text-stone-500">Ngồi ngoài ({m.sittingOut.length}): {m.sittingOut.map(id => players.find(p => p.id === id)?.name ?? 'Vô danh').join(', ')}</p>}
-                  {(m.resultMultiplier === 10 || m.sourceMatchId) && <p className="mb-3 text-xs font-semibold text-orange-700">{m.sourceMatchId ? 'Bản sao ×10 · Sửa/xoá cả nhóm tại trận gốc.' : 'Trận gốc ×10 · Gồm 10 kết quả trong BXH.'}</p>}
+                  {((m.resultMultiplier ?? 1) > 1 || m.sourceMatchId) && <p className="mb-3 text-xs font-semibold text-orange-700">{m.sourceMatchId ? 'Ngôi sao tuyệt vọng · Bản sao, sửa/xoá cả nhóm tại trận gốc.' : `Ngôi sao tuyệt vọng ×${m.resultMultiplier} · Trận gốc, tính ${m.resultMultiplier} kết quả trong BXH.`}</p>}
                   <div className="grid grid-cols-8 items-center gap-2">
                     {/* Team 1 */}
                     <div className={`col-span-3 text-right rounded-xl p-2 -m-2 ${winner === 1 ? 'bg-blue-50' : ''}`}>
@@ -2808,7 +2806,7 @@ export default function BiLacArena({
                       <button
                         onClick={async () => {
                           const scope = matchScopeRef.current;
-                          if (!window.confirm(m.resultMultiplier === 10 ? 'Xoá cả 10 kết quả của trận ×10 này? Bảng xếp hạng sẽ được tính lại.' : 'Xoá kết quả trận đấu này? Bảng xếp hạng sẽ được tính lại.')) return;
+                          if (!window.confirm((m.resultMultiplier ?? 1) > 1 ? `Xoá cả ${m.resultMultiplier} kết quả Ngôi sao tuyệt vọng ×${m.resultMultiplier} này? Bảng xếp hạng sẽ được tính lại.` : 'Xoá kết quả trận đấu này? Bảng xếp hạng sẽ được tính lại.')) return;
                           try {
                             const res = await bilacFetch(`/api/bilac/matches/${m.id}`, { method: 'DELETE' });
                             if (scope !== matchScopeRef.current) return;
@@ -3872,6 +3870,7 @@ function ViewOnlyTournamentView({ data }: { data: any }) {
                     )}
                     <span className="ml-auto font-mono font-bold text-stone-800">{m.score1}–{m.score2}</span>
                   </div>
+                  {(m.resultMultiplier > 1 || m.sourceMatchId) && <p className="mt-1 text-xs font-semibold text-orange-700">{m.sourceMatchId ? 'Ngôi sao tuyệt vọng · Bản sao' : `Ngôi sao tuyệt vọng ×${m.resultMultiplier}`}</p>}
                   {m.matchMode === 'timeout' && <p className="mt-1 text-xs font-semibold text-orange-700">Hết giờ · 2v2</p>}
                   {!!m.sittingOut?.length && <p className="mt-1 text-xs text-stone-500">Ngồi ngoài: {teamLabel(m.sittingOut)}</p>}
                   {date && <p className="text-[10px] text-stone-400 mt-1">{date}</p>}

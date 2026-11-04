@@ -27,7 +27,7 @@ describe('Timeout mode', () => {
     for (const count of [0, 1, 2, 3]) expect(() => pairFourPlayers(players(count))).toThrow('4');
     expect(pairFourPlayers(players(8), () => 0.5)).toEqual(pairFourPlayers(players(8), () => 0.5));
   });
-  it.each([1, 10])('persists everyone sitting out and scores only the playing four with multiplier %s', async multiplier => {
+  it.each([1, 2, 3, 5, 8, 10, 13])('persists everyone sitting out and scores only the playing four with multiplier %s', async multiplier => {
     const { env, sqlite } = testDatabase();
     sqlite.exec("INSERT INTO bilac_players (id,name,avatar,tournament_id) VALUES ('d','Dung','','cup'),('e','Em','','cup'),('f','Phuc','','cup')");
     const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
